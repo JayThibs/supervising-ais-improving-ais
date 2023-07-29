@@ -12,10 +12,10 @@ We imagine a future where AIs self-augment by continuously seeking out more and 
 
 We want to find methods of ensuring such 'automated science' processes remain safe and controllable, even after many rounds of self-directed data collection and training. In particular, we consider problems such as:
 
-    Preventing self-training from amplifying undesirable behaviors
-    Preventing semantic drift in concept representations during self-training
-    Ensuring cross-modality actions (such as a generated image for a text-to-image model, or robot movement for a text-and-image-to-actuator-motion model) remain grounded in their natural language descriptions after self-training in a non-lingual modality
-    Preventing value drift during multiple, iterated steps of self-retraining
+* Preventing self-training from amplifying undesirable behaviors
+* Preventing semantic drift in concept representations during self-training
+* Ensuring cross-modality actions (such as a generated image for a text-to-image model, or robot movement for a text-and-image-to-actuator-motion model) remain grounded in their natural language descriptions after self-training in a non-lingual modality
+* Preventing value drift during multiple, iterated steps of self-retraining
 
 # Projects for the Agenda
 
