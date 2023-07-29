@@ -28,11 +28,13 @@ In the channel, Quintin shared a quick overview of the two projects we mentioned
 This agenda has two projects as its current focuses.
 
 Project 1: Unsupervised behavioral evaluation
+
 This project focuses on scalable ways to compare the behavioral tendencies of different LMs (or different ways of prompting the same LM), without necessarily knowing what you're looking for beforehand. The project's current approach is to query the two LMs to generate a wide variety of responses, then use a combination of unsupervised clustering and supervisor models to compare the response patterns of the two LMs, and automatically highlight any differences that seems surprising or relevant from an alignment perspective.
 
 The ultimate goal of this project is to greatly accelerate the part of LM alignment research where we evaluate how a given finetuning / alignment approach impacts an LM's behaviors, so that LM alignment researchers can more quickly experiment with different finetuning approaches.
 
 Project 2: Benchmarks for stable reflectivity
+
 This project focuses on building probing datasets to evaluate a model's competence at various sub-tasks associated with reflectivity / metacognition / values stability. Currently, these sub-tasks include:
 - Tracking one’s own values versus the values of others
 - Differentiating one’s current values versus one’s future values
