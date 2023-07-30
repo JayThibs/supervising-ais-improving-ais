@@ -5,7 +5,7 @@ help:
 # Install exact Python and CUDA versions. Installs rasterio since conda is needed for installation on windows.
 conda:
 	conda env update --prune -f environment.yml
-	echo "RUN THE FOLLOWING COMMAND: conda activate floodwater_mapper"
+	echo "RUN THE FOLLOWING COMMAND: conda activate supervising-ais"
 
 # (Removed for now since Poetry doesn't work well on Windows) Compile and install exact python packages
 poetry:

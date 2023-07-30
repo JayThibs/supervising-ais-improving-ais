@@ -24,5 +24,5 @@ from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
 from scipy.cluster.hierarchy import dendrogram, linkage, to_tree
 
-# Set up OpenAI API key
+# Set up OpenAI API key from .env file
 openai.api_key = os.environ["OPENAI_API_KEY"]
