@@ -26,3 +26,8 @@ from scipy.cluster.hierarchy import dendrogram, linkage, to_tree
 
 # Set up OpenAI API key from .env file
 openai.api_key = os.environ["OPENAI_API_KEY"]
+
+# Download Anthropic evals dataset if not already downloaded
+if not os.path.exists("data/evals"):
+    # git clone the evals repo into the data folder
+    os.system("git clone https://github.com/anthropics/evals.git data/anthropic_evals")
