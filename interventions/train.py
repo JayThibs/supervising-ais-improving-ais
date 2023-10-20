@@ -84,7 +84,7 @@ if dataset_label in ['open_assistant']:
 else:
     model = AutoModelForSequenceClassification.from_pretrained(args.model_name).to(args.device)
 
-data_path = "data/" + dataset_label
+data_path = "../data/" + dataset_label
 make_binary = str.lower(args.make_binary) == "true"
 
 
