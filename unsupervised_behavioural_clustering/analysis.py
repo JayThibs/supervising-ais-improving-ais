@@ -17,3 +17,8 @@ def cluster_report(clustering, statements):
         cluster_texts = [statements[j] for j in cluster_indices(i, clustering)]
         rows.append([i, len(cluster_texts), cluster_themes(cluster_texts)])
     return AsciiTable(rows).table
+
+
+def compare_results(results1, results2):
+    comparison = {}  # Implement your comparison logic
+    return comparison
