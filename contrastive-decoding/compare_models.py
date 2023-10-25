@@ -7,7 +7,7 @@ import os
 from model_comparison_helpers import CausalLMSubtract
 import numpy as np
 import shutil
-
+import tqdm
  
 parser = argparse.ArgumentParser(description='Model training script for linear basin connectivity experiments.')
 
@@ -112,13 +112,17 @@ else:
 
 transformers.utils.logging.set_verbosity_error()
 model = CausalLMSubtract.from_pretrained(
-    args.model_1_path, 
-    model_2=args.model_2_path, 
-    model_1_weight=args.model_1_weight, 
-    model_2_weight=args.model_2_weight,
+    args.model_name,
+    comparison_lm=args.model_name, 
+    starting_model_weight=args.model_1_weight, 
+    comparison_model_weight=args.model_2_weight,
     limit_to_starting_model_top_p=args.limit_to_starting_model_top_p,
     similarity_gating_intensity=args.similarity_gating_intensity,
 ).to(args.device)
+
+model.comparison_lm = model_2
+
+
 
 tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_family)
 if 'gpt2' in str.lower(str(type(tokenizer))):
@@ -139,7 +143,7 @@ input_ids = tokenizer.batch_encode_plus(prompt, padding=True, truncation=True, r
 # greedy search (sampling=False): 
 sampling = str.lower(args.sampling) == 'true'
 generations = []
-for ids in input_ids:
+for ids in tqdm.tqdm(input_ids):
     ids = ids[ids != tokenizer.pad_token_id]
     ids = torch.unsqueeze(ids, 0)
     generation = model.generate(ids, do_sample=sampling, max_new_tokens=args.generation_length, top_k=None, top_p=args.top_p, num_return_sequences=args.generations_per_prefix).tolist()
