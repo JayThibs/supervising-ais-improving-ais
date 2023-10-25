@@ -13,10 +13,10 @@ from get_data import *
 parser = argparse.ArgumentParser(description='Model training script for linear basin connectivity experiments.')
 
 
-parser.add_argument('--model_name', type=str, default='bert-base-uncased',
+parser.add_argument('--model_name', type=str, default='gpt2',
                     help='Huggingface pretrained language model name.')
 
-parser.add_argument('--dataset', type=str, default='mnli',
+parser.add_argument('--dataset', type=str, default='open_assistant',
                     help='Huggingface dataset name to train the model on. Can also be a path to a saved dataset.')
 
 parser.add_argument('--load_saved_data', type=str, default='true',

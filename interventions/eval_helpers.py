@@ -21,11 +21,12 @@ def eval_model(model, data, labels, batch_size = 128, pad_token_id = 0):
             loss = outputs.loss
             logits = outputs.logits
 
-            n_preds += torch.sum(attention_mask).item() if len(logits.size()) == 3 else len(batch_labels)
+            batch_preds = torch.sum(attention_mask).item()
+            n_preds += batch_preds
 
             predictions = torch.argmax(logits, dim=len(logits.size()) - 1)
             n_correct = torch.sum(predictions == batch_labels).item()
-            total_loss += loss.item() * len(batch_labels)
+            total_loss += loss.item() * batch_preds
             total_n_correct += n_correct
     model = model.train()
     return total_loss / n_preds, total_n_correct / n_preds

@@ -70,7 +70,7 @@ def train_new_model(model,
             batch_data = train_data[batch_start: batch_end]
             batch_labels = train_labels[batch_start: batch_end]
             attention_mask = batch_data != pad_token_id
-            batch_n_preds = torch.sum(attention_mask).item() if training_generator else len(batch_labels)
+            batch_n_preds = torch.sum(attention_mask).item()
             epoch_n_preds += batch_n_preds
 
             #print(pad_token_id, attention_mask, batch_data)
