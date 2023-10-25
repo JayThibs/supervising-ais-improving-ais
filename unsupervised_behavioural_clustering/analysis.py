@@ -1,13 +1,16 @@
+from typing import Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 from terminaltables import AsciiTable
 
 
-def plot_clusters(reduced_embeddings, cluster_labels):
+def plot_clusters(embeddings: np.ndarray, cluster_labels: np.ndarray) -> None:
+    """Generate a scatter plot visualize clusters."""
     ...
 
 
-def print_cluster_stats(cluster_id, labels, rows):
+def cluster_summary(texts: List[str], clusters: np.ndarray) -> Tuple[int, int]:
+    """Summarize high-level cluster statistics."""
     ...
 
 

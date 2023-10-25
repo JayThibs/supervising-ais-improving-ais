@@ -1,5 +1,3 @@
-# data.py
-
 from typing import List, Tuple
 import logging
 import glob
