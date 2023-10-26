@@ -22,13 +22,6 @@ class EvaluatorPipeline:
         )
         self.all_texts = self.data_prep.load_evaluation_data(self.args.file_paths)
 
-    def load_short_texts(self, all_texts, max_length=150):
-        return [t[1] for t in all_texts if len(t[1]) < max_length]
-
-    def create_text_subset(self, texts, n_points=5000, seed=42):
-        rng = np.random.default_rng(seed=seed)
-        return rng.permutation(texts)[:n_points]
-
     def save_results(self, results, file_name):
         pickle.dump(results, open(file_name, "wb"))
 

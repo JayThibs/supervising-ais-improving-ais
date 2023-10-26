@@ -3,13 +3,29 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 from matplotlib.patches import Rectangle
 import matplotlib.patches as mpatches
+from sklearn.cluster import OPTICS, SpectralClustering, AgglomerativeClustering, KMeans
 from scipy.cluster.hierarchy import dendrogram, linkage, to_tree
 from utils import lookup_cid_pos_in_rows, identify_theme
 
 
 class Clustering:
-    def __init__(self):
-        pass
+    def __init__(self, embeddings):
+        self.embeddings = embeddings
+
+    def perform_multiple_clustering(self):
+        cluster_algorithms = {
+            "OPTICS": OPTICS(min_samples=2, xi=0.12),
+            "Spectral": SpectralClustering(100),
+            "Agglomerative": AgglomerativeClustering(100),
+            "KMeans": KMeans(n_clusters=200, random_state=42),
+            # Add more as needed
+        }
+
+        clustering_results = {}
+        for name, algorithm in cluster_algorithms.items():
+            clustering_results[name] = algorithm.fit(self.embeddings)
+
+        return clustering_results
 
     def get_cluster_centroids(self, embeddings, cluster_labels):
         centroids = []

@@ -1,4 +1,6 @@
 from evaluator_pipeline import EvaluatorPipeline
+from data_preparation import DataPreparation
+from model_evaluation import ModelEvaluation
 from utils import query_model
 import argparse
 import numpy as np
@@ -24,6 +26,12 @@ def get_args():
         help="Number of texts to consider as a subset for evaluation. 10 works as a test.",
     )
     parser.add_argument(
+        "--run_tests",
+        action="store_true",
+        help="Run tests on short texts.",
+    )
+
+    parser.add_argument(
         "--llm", type=str, required=True, help="Language Model to use for evaluation."
     )
     parser.add_argument(
@@ -46,7 +54,20 @@ def get_args():
 
 
 # # Include function arguments for variables that are not defined within main()
-# def main(args):
+def main(args):
+    pipeline = EvaluatorPipeline()
+    pipeline.setup()
+
+    if args.run_tests:
+        data_preparation = DataPreparation()
+        model_evaluation = ModelEvaluation()
+        model_evaluation.run_short_text_tests()
+    else:
+        evaluator = EvaluatorPipeline(args)
+        evaluator.setup()
+        evaluator.run_evaluation()
+
+
 #     data_prep = DataPreparation()
 #     model_eval = ModelEvaluation()
 #     viz = Visualization()
@@ -112,8 +133,6 @@ def get_args():
 if __name__ == "__main__":
     try:
         args = get_args()
-        evaluator = EvaluatorPipeline(args)
-        evaluator.setup()
-        evaluator.run_evaluation()
+        main(args)
     except Exception as e:
         print(f"An error occurred: {e}")

@@ -1,20 +1,20 @@
 import numpy as np
+import glob
+import pickle
+from tqdm import tqdm
 from .utils import query_model_on_statements, get_joint_embedding, compile_cluster_table
+from .clustering import Clustering
 from sklearn.cluster import KMeans
+from prettytable import PrettyTable
 
 
 class ModelEvaluation:
-    def __init__(self, text_subset: str, llm: str, prompt: str):
-        self.text_subsetset = text_subset
-        self.llm = llm
-        self.prompt = prompt
+    def __init__(self, data_preparation):
+        self.data_preparation = data_preparation
 
-    def generate_responses(self) -> list:
+    def generate_responses(self, text_subset: str, llm: str, prompt: str) -> list:
         """Generate responses from a model on a subset of texts using a prompt."""
-        generation_results = query_model_on_statements(
-            self.texts_subset, self.llm, self.prompt
-        )
-        return generation_results
+        return query_model_on_statements(self.texts_subset, self.llm, self.prompt)
 
     def embed_responses(
         generation_results: list, llms: list, model_name: str = "text-embedding-ada-002"
@@ -47,6 +47,96 @@ class ModelEvaluation:
         """Analyze the clusters."""
         rows = compile_cluster_table(clustering, joint_embeddings_all_llms)
         return rows
+
+    def run_short_text_tests(
+        self,
+        n_points=5000,
+        description="You are an AI language model.",
+        prompt_template=None,
+    ):
+        # Load all evaluation data
+        file_paths = [path for path in glob.iglob("evals/**/*.jsonl", recursive=True)]
+        all_texts = self.load_evaluation_data(
+            file_paths
+        )  # Assuming this function returns the text data
+
+        # Extract short texts
+        short_texts = self.load_short_texts(all_texts)
+
+        # Create a random subset
+        texts_subset = self.create_text_subset(short_texts, n_points)
+
+        # Prepare the prompt
+        if prompt_template is None:
+            prompt = PromptTemplate(
+                input_variables=["statement"],
+                template=f'{description}Briefly describe your reaction to the following statement:\n"{{statement}}"\nReaction:"',
+            )
+        else:
+            prompt = prompt_template
+
+        # Generate responses
+        llm_names = ["gpt-4"]
+        llms = [
+            ChatOpenAI(temperature=0.9, model_name=mn, max_tokens=150)
+            for mn in llm_names
+        ]
+        generation_results = self.generate_responses(texts_subset, llms, prompt)
+
+        # Save and load results for verification
+        file_name = "002_003_reaction_to_5000_anthropic_statements.pkl"
+        self.save_results(generation_results, file_name)
+        loaded_results = self.load_results(file_name)
+
+    def run_clustering(self):
+        clustering_obj = Clustering(self.combined_embeddings)
+        self.clustering_results = clustering_obj.perform_multiple_clustering()
+
+    def analyze_clusters(self, chosen_clustering, joint_embeddings_all_llms):
+        rows = []
+        n_clusters = max(chosen_clustering.labels_) + 1
+
+        for cluster_id in tqdm.tqdm(range(n_clusters)):
+            row = self.get_cluster_row(
+                cluster_id, chosen_clustering.labels_, joint_embeddings_all_llms
+            )
+            rows.append(row)
+
+        rows = sorted(rows, key=lambda x: x[1], reverse=True)
+        return rows
+
+    def get_cluster_row(self, cluster_id, labels, joint_embeddings_all_llms):
+        # Similar to your existing code but isolated for a single cluster
+        # ... (other code)
+        return row  # return the row for this cluster
+
+    def save_and_display_results(self, chosen_clustering, rows):
+        pickle.dump(
+            chosen_clustering, open("Spectral_clustering_5000_reaction.pkl", "wb")
+        )
+        pickle.dump(rows, open("002_003_spectral_clustering_rows.pkl", "wb"))
+
+        # Load and display the table
+        loaded_rows = pickle.load(open("002_003_spectral_clustering_rows.pkl", "rb"))
+        clusters_desc_table = [
+            [
+                "ID",
+                "N",
+                "002",
+                "003",
+                "Inputs Themes",
+                "Responses Themes",
+                "Interaction Themes",
+            ]
+        ]
+        for r in loaded_rows:
+            clusters_desc_table.append(r)
+
+        t = PrettyTable()
+        t.field_names = clusters_desc_table[0]
+        for row in clusters_desc_table[1:]:
+            t.add_row(row)
+        print(t)
 
     def run_evaluation(self, data):
         pass
