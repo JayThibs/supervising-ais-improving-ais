@@ -1,11 +1,14 @@
 import numpy as np
 import glob
 import pickle
+import random
+import time
 from tqdm import tqdm
 from .utils import query_model_on_statements, get_joint_embedding, compile_cluster_table
 from .clustering import Clustering
 from sklearn.cluster import KMeans
 from prettytable import PrettyTable
+import openai
 
 
 class ModelEvaluation:
@@ -106,9 +109,89 @@ class ModelEvaluation:
         return rows
 
     def get_cluster_row(self, cluster_id, labels, joint_embeddings_all_llms):
-        # Similar to your existing code but isolated for a single cluster
-        # ... (other code)
-        return row  # return the row for this cluster
+        """Generates a row that represents a cluster's statistics and themes."""
+        row = [str(cluster_id)]
+
+        # Find the indices of items in this cluster
+        cluster_indices = np.where(labels == cluster_id)[0]
+        row.append(len(cluster_indices))  # Number of items in the cluster
+
+        # Extract the inputs, responses, and model attribution fractions for this cluster
+        inputs, responses, model_attribution_fractions = self.get_cluster_stats(
+            joint_embeddings_all_llms, labels, cluster_id
+        )
+
+        # Add the model attribution fractions to the row
+        for frac in model_attribution_fractions:
+            row.append(f"{round(100 * frac, 1)}%")
+
+        # Identify themes within this cluster
+        inputs_themes_str = self.identify_theme(inputs)
+        responses_themes_str = self.identify_theme(responses)
+
+        interactions = [
+            f'(Statement: "{input}", Response: "{response}")'
+            for input, response in zip(inputs, responses)
+        ]
+        interactions_themes_str = self.identify_theme(interactions)
+
+        # Add themes to the row
+        row.append(inputs_themes_str)
+        row.append(responses_themes_str)
+        row.append(interactions_themes_str)
+        return row
+
+    def get_cluster_stats(self, joint_embeddings_all_llms, cluster_labels, cluster_ID):
+        inputs = []
+        responses = []
+        cluster_size = 0
+        n_llms = max([e[0] for e in joint_embeddings_all_llms])
+        fractions = [0 for _ in range(n_llms + 1)]
+        n_datapoints = len(joint_embeddings_all_llms)
+        for e, l in zip(joint_embeddings_all_llms, cluster_labels):
+            if l != cluster_ID:
+                continue
+            if e[0] >= 0:
+                fractions[e[0]] += 1
+            cluster_size += 1
+            inputs.append(e[1])
+            responses.append(e[2])
+        return inputs, responses, [f / cluster_size for f in fractions]
+
+    def identify_theme(
+        self,
+        texts,
+        sampled_texts=5,
+        model="gpt-3.5-turbo",
+        temp=1,
+        max_tokens=50,
+        instructions="Briefly describe the overall theme of the following texts:",
+    ):
+        theme_identify_prompt = instructions + "\n\n"
+        sampled_texts = random.sample(texts, min(len(texts), sampled_texts))
+        for i in range(len(sampled_texts)):
+            theme_identify_prompt = (
+                theme_identify_prompt
+                + "Text "
+                + str(i + 1)
+                + ": "
+                + sampled_texts[i]
+                + "\n"
+            )
+        # theme_identify_prompt = theme_identify_prompt + "\nTheme:"
+        for i in range(20):
+            try:
+                completion = openai.ChatCompletion.create(
+                    model=model,
+                    messages=[{"role": "user", "content": theme_identify_prompt}],
+                    max_tokens=max_tokens,
+                    temperature=temp,
+                )
+                break
+            except:
+                print("Skipping API error", i)
+                time.sleep(2)
+        return completion["choices"][0]["message"]["content"]
 
     def save_and_display_results(self, chosen_clustering, rows):
         pickle.dump(

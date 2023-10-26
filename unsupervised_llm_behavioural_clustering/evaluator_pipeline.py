@@ -68,15 +68,32 @@ class EvaluatorPipeline:
         self.save_results(generation_results, file_name)
         loaded_results = self.load_results(file_name)
 
-    def run_evaluation(self):
-        generation_results = self.model_eval.generate_responses(
-            self.all_texts[: self.args.texts_subset], self.args.llm, self.args.prompt
-        )
-        joint_embeddings_all_llms = self.model_eval.embed_responses(generation_results)
-        clustering = self.model_eval.perform_clustering(joint_embeddings_all_llms)
-        rows = self.model_eval.analyze_clusters(joint_embeddings_all_llms, clustering)
-        dim_reduce_tsne = self.model_eval.tsne_dimension_reduction(
-            joint_embeddings_all_llms, iterations=2000, p=50
-        )
-        self.viz.plot_dimension_reduction(dim_reduce_tsne)
-        self.viz.visualize_hierarchical_clustering(clustering, rows)
+
+def run_evaluation(self):
+    # Generate responses and embed them
+    generation_results = self.model_eval.generate_responses(
+        self.all_texts[: self.args.texts_subset], self.args.llm, self.args.prompt
+    )
+    joint_embeddings_all_llms = self.model_eval.embed_responses(generation_results)
+
+    # Perform clustering and store the results
+    self.model_eval.run_clustering(joint_embeddings_all_llms)
+
+    # Choose which clustering result to analyze further
+    chosen_clustering = self.model_eval.clustering_results["Spectral"]
+
+    # Analyze the clusters and get a summary table
+    rows = self.model_eval.analyze_clusters(chosen_clustering)
+
+    # Save and display the results
+    self.model_eval.save_and_display_results(chosen_clustering, rows)
+
+    # Perform dimensionality reduction
+    dim_reduce_tsne = self.model_eval.tsne_dimension_reduction(
+        joint_embeddings_all_llms, iterations=2000, p=50
+    )
+
+    # Visualizations
+    self.viz.plot_dimension_reduction(dim_reduce_tsne)
+    self.viz.plot_embedding_responses(joint_embeddings_all_llms)
+    self.viz.visualize_hierarchical_clustering(chosen_clustering, rows)
