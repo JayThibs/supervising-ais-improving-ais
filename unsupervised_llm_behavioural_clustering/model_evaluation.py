@@ -1,5 +1,5 @@
 import numpy as np
-from .utils import query_model, get_joint_embedding, compile_cluster_table
+from .utils import query_model_on_statements, get_joint_embedding, compile_cluster_table
 from sklearn.cluster import KMeans
 
 
@@ -11,7 +11,9 @@ class ModelEvaluation:
 
     def generate_responses(self) -> list:
         """Generate responses from a model on a subset of texts using a prompt."""
-        generation_results = query_model(self.texts_subset, self.llm, self.prompt)
+        generation_results = query_model_on_statements(
+            self.texts_subset, self.llm, self.prompt
+        )
         return generation_results
 
     def embed_responses(

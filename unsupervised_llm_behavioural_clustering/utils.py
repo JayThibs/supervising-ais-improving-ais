@@ -7,26 +7,38 @@ import random
 import time
 import tqdm
 import openai
+from langchain.chat_models import ChatOpenAI
+from langchain.prompts import PromptTemplate
+from langchain.chains import LLMChain
 
 
-def query_model(statements, model, prompt, model_name="gpt-3.5-turbo"):
+def query_model_on_statements(statements, llm, prompt, model_name="gpt-3.5-turbo"):
     """Query a model with a list of statements and a prompt."""
+    ### TODO: Replace langchain with openai and other models
+    # Initialize empty lists for each output variable
     inputs = []
     responses = []
     full_conversations = []
+    # Get the number of statements
     n_statements = len(statements)
-    chain = LLMChain(llm=model, prompt=prompt)
+    # Create a chain object
+    chain = LLMChain(llm=llm, prompt=prompt)
+    # Create a list of prompts, one for each statement
     prompts = [prompt.format(statement=s) for s in statements]
-    results = model.generate(prompts).generations
+    # Generate responses to each prompt
+    results = llm.generate(prompts).generations
+    # Iterate through each statement
     for i in range(n_statements):
+        # Get the response
         r = results[i][0].text
+        # Add the statement and response to the appropriate lists
         inputs.append(statements[i])
         responses.append(r)
         full_conversations.append(prompts[i] + r)
     return inputs, responses, full_conversations
 
 
-def get_model_approval(
+def get_model_approvals(
     statements, prompt, system_role_str, approve_strs=["yes"], disapprove_strs=["no"]
 ):
     """Get model's approval for a list of statements."""
@@ -71,6 +83,54 @@ def get_model_approval(
         print(f"An unexpected error occurred: {e}")
 
 
+def embed_texts(texts, model="text-embedding-ada-002"):
+    embeddings = []
+    n_texts = len(texts)
+    n_batches = n_texts // 20 + int(n_texts % 20 != 0)
+    for i in tqdm.tqdm(range(n_batches)):
+        for j in range(50):
+            try:
+                texts_subset = texts[20 * i : min(20 * (i + 1), n_texts)]
+                embedding = openai.Embedding.create(
+                    model="text-embedding-ada-002", input=texts_subset
+                )
+                break
+            except:
+                print("Skipping server error number " + str(j))
+                time.sleep(2)
+        embeddings += [e["embedding"] for e in embedding["data"]]
+    return embeddings
+
+
+def joint_embedding(
+    inputs, responses, model="text-embedding-ada-002", combine_statements=False
+):
+    if not combine_statements:
+        inputs_embeddings = embed_texts(inputs)
+        responses_embeddings = embed_texts(responses)
+        joint_embeddings = [
+            i + r for i, r in zip(inputs_embeddings, responses_embeddings)
+        ]
+    else:
+        joint_embeddings = embed_texts(
+            [input + response for input, response in zip(inputs, responses)]
+        )
+    return joint_embeddings
+
+
+def select_by_indices(curation_results, indices):
+    found_points = []
+    for i in indices:
+        point_status = []
+        point_status.append(curation_results[0][i][0])
+        point_status.append([])
+        for cr in curation_results:
+            point_status[1].append(cr[i][1])
+        found_points.append(point_status)
+    return found_points
+
+
+# delete ???
 def get_joint_embedding(
     inputs,
     responses,

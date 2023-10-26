@@ -21,7 +21,7 @@ def get_args():
         "--texts_subset",
         type=int,
         default=10,
-        help="Number of texts to consider as a subset for evaluation.",
+        help="Number of texts to consider as a subset for evaluation. 10 works as a test.",
     )
     parser.add_argument(
         "--llm", type=str, required=True, help="Language Model to use for evaluation."
