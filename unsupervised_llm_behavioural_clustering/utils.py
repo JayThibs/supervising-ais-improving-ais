@@ -10,9 +10,7 @@ import openai
 
 
 def query_model(statements, model, prompt, model_name="gpt-3.5-turbo"):
-    """
-    Query a model with a list of statements and a prompt.
-    """
+    """Query a model with a list of statements and a prompt."""
     inputs = []
     responses = []
     full_conversations = []
@@ -32,7 +30,6 @@ def get_model_approval(
     statements, prompt, system_role_str, approve_strs=["yes"], disapprove_strs=["no"]
 ):
     """Get model's approval for a list of statements."""
-
     try:
         approvals = []
         n_statements = len(statements)
@@ -75,11 +72,12 @@ def get_model_approval(
 
 
 def get_joint_embedding(
-    inputs, responses, model="text-embedding-ada-002", combine_statements=False
+    inputs,
+    responses,
+    model_name="text-embedding-ada-002",  # Added model_name as a parameter
+    combine_statements=False,
 ):
-    """
-    Get joint embedding for a list of inputs and responses.
-    """
+    """Get joint embedding for a list of inputs and responses."""
     if not combine_statements:
         inputs_embeddings = embed_texts(inputs)
         responses_embeddings = embed_texts(responses)
@@ -95,45 +93,47 @@ def get_joint_embedding(
 
 def identify_theme(
     texts,
+    model_name="gpt-3.5-turbo",
     sampled_texts=5,
-    model="gpt-3.5-turbo",
     temp=1,
     max_tokens=50,
     instructions="Briefly describe the overall theme of the following texts:",
 ):
-    """
-    Summarizes key themes from a sample of texts from a cluster.
-    """
-    theme_identify_prompt = instructions + "\n\n"
-    sampled_texts = random.sample(texts, min(len(texts), sampled_texts))
-    for i in range(len(sampled_texts)):
-        theme_identify_prompt = (
-            theme_identify_prompt
-            + "Text "
-            + str(i + 1)
-            + ": "
-            + sampled_texts[i]
-            + "\n"
-        )
-    for i in range(20):
-        try:
-            completion = openai.ChatCompletion.create(
-                model=model,
-                messages=[{"role": "user", "content": theme_identify_prompt}],
-                max_tokens=max_tokens,
-                temperature=temp,
+    """Summarizes key themes from a sample of texts from a cluster."""
+    try:
+        theme_identify_prompt = instructions + "\n\n"
+        sampled_texts = random.sample(texts, min(len(texts), sampled_texts))
+        for i in range(len(sampled_texts)):
+            theme_identify_prompt = (
+                theme_identify_prompt
+                + "Text "
+                + str(i + 1)
+                + ": "
+                + sampled_texts[i]
+                + "\n"
             )
-            break
-        except:
-            print("Skipping API error", i)
-            time.sleep(2)
-    return completion["choices"][0]["message"]["content"]
+        for i in range(20):
+            try:
+                completion = openai.ChatCompletion.create(
+                    model=model,
+                    messages=[{"role": "user", "content": theme_identify_prompt}],
+                    max_tokens=max_tokens,
+                    temperature=temp,
+                )
+                break
+            except:
+                print("Skipping API error", i)
+                time.sleep(2)
+        return completion["choices"][0]["message"]["content"]
+
+    except openai.OpenAIError as e:
+        print(f"OpenAI API error: {e}")
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
 
 
 def get_cluster_stats(joint_embeddings_all_llms, cluster_labels, cluster_ID):
-    """
-    Analyzes a cluster and extracts aggregated statistics.
-    """
+    """Analyzes a cluster and extracts aggregated statistics."""
     inputs = []
     responses = []
     cluster_size = 0
@@ -154,9 +154,7 @@ def get_cluster_stats(joint_embeddings_all_llms, cluster_labels, cluster_ID):
 def get_cluster_approval_stats(
     approvals_statements_and_embeddings, cluster_labels, cluster_ID
 ):
-    """
-    Analyzes a cluster and extracts aggregated approval statistics.
-    """
+    """Analyzes a cluster and extracts aggregated approval statistics."""
     inputs = []
     responses = []
     cluster_size = 0
@@ -175,9 +173,7 @@ def get_cluster_approval_stats(
 
 
 def get_cluster_centroids(embeddings, cluster_labels):
-    """
-    Calculates the centroid for each cluster.
-    """
+    """Calculates the centroid for each cluster."""
     centroids = []
     for i in range(max(cluster_labels) + 1):
         c = np.mean(embeddings[cluster_labels == i], axis=0).tolist()
@@ -191,9 +187,7 @@ def compile_cluster_table(
     theme_summary_instructions="Briefly describe the overall theme of the following texts:",
     max_desc_length=250,
 ):
-    """
-    Tabulates high-level statistics and themes for each cluster.
-    """
+    """Tabulates high-level statistics and themes for each cluster."""
     n_clusters = max(clustering.labels_) + 1
     rows = []
     for cluster_id in tqdm.tqdm(range(n_clusters)):
