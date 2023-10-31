@@ -1,3 +1,4 @@
+import os
 import argparse
 import numpy as np
 import pickle
@@ -8,92 +9,81 @@ from visualization import Visualization
 
 class EvaluatorPipeline:
     def __init__(self, args):
-        self.data_prep = DataPreparation()
         self.model_eval = ModelEvaluation()
-        self.viz = Visualization()
+        # self.viz = Visualization()
         self.args = args
+        self.data_dir = f"{os.getcwd()}/data"
+        print(self.data_dir)
+        self.evals_dir = f"{self.data_dir}/evals"
+        print(self.evals_dir)
 
     def setup(self):
-        self.api_key = self.data_prep.load_api_key(
-            "OPENAI_API_KEY"
-        )  # TODO: Make more general
-        self.data_prep.clone_repo(
-            "https://github.com/anthropics/evals.git", "data/evals"
-        )
-        self.all_texts = self.data_prep.load_evaluation_data(self.args.file_paths)
+        # Create a new data/evals directory if it doesn't exist
+        if not os.path.exists(self.evals_dir):
+            os.makedirs(self.evals_dir)
+
+        self.api_key = DataPreparation.load_api_key(
+            self, "OPENAI_API_KEY"
+        )  # TODO: Make more general to include anthropic and local models
+
+        # Clone the anthropic evals repo inside the data/evals directory
+        if not os.path.exists(
+            os.path.join(self.evals_dir, "anthropic-model-written-evals")
+        ):
+            DataPreparation.clone_repo(
+                self,
+                "https://github.com/anthropics/evals.git",
+                "anthropic-model-written-evals",
+            )
+        self.data_prep = DataPreparation()
+        self.all_texts = self.data_prep.load_evaluation_data()
 
     def save_results(self, results, file_name):
-        pickle.dump(results, open(file_name, "wb"))
+        with open(f"{self.data_dir}/{file_name}", "wb") as f:
+            pickle.dump(results, f)
 
     def load_results(self, file_name):
-        return pickle.load(open(file_name, "rb"))
+        with open(f"{self.data_dir}/{file_name}", "rb") as f:
+            return pickle.load(f)
 
-    def run_short_text_tests(
-        self,
-        n_points=5000,
-        description="You are an AI language model.",
-        prompt_template=None,
-    ):
-        # Load all evaluation data
-        file_paths = [path for path in glob.iglob("evals/**/*.jsonl", recursive=True)]
-        all_texts = self.load_evaluation_data(
-            file_paths
-        )  # Assuming this function returns the text data
+    def run_short_text_tests(self):
+        self.model_eval.load_and_preprocess_data(n_points=self.args.n_points)
+        self.model_eval.run_short_text_tests()
 
-        # Extract short texts
-        short_texts = self.load_short_texts(all_texts)
+    def run_evaluation(self):
+        # Generate responses and embed them
+        generation_results = self.model_eval.generate_responses(
+            self.all_texts[: self.args.texts_subset], self.args.llm, self.args.prompt
+        )
+        joint_embeddings_all_llms = self.model_eval.embed_responses(generation_results)
 
-        # Create a random subset
-        texts_subset = self.create_text_subset(short_texts, n_points)
+        # Perform clustering and store the results
+        self.model_eval.run_clustering(joint_embeddings_all_llms)
 
-        # Prepare the prompt
-        if prompt_template is None:
-            prompt = PromptTemplate(
-                input_variables=["statement"],
-                template=f'{description}Briefly describe your reaction to the following statement:\n"{{statement}}"\nReaction:"',
-            )
-        else:
-            prompt = prompt_template
+        # Choose which clustering result to analyze further
+        chosen_clustering = self.model_eval.clustering_results["Spectral"]
 
-        # Generate responses
-        llm_names = ["gpt-4"]
-        llms = [
-            ChatOpenAI(temperature=0.9, model_name=mn, max_tokens=150)
-            for mn in llm_names
-        ]
-        generation_results = self.generate_responses(texts_subset, llms, prompt)
+        # Analyze the clusters and get a summary table
+        rows = self.model_eval.analyze_clusters(chosen_clustering)
 
-        # Save and load results for verification
-        file_name = "002_003_reaction_to_5000_anthropic_statements.pkl"
-        self.save_results(generation_results, file_name)
-        loaded_results = self.load_results(file_name)
+        # Save and display the results
+        self.model_eval.save_and_display_results(chosen_clustering, rows)
 
+        # Perform dimensionality reduction
+        dim_reduce_tsne = self.model_eval.tsne_dimension_reduction(
+            joint_embeddings_all_llms, iterations=2000, p=50
+        )
 
-def run_evaluation(self):
-    # Generate responses and embed them
-    generation_results = self.model_eval.generate_responses(
-        self.all_texts[: self.args.texts_subset], self.args.llm, self.args.prompt
-    )
-    joint_embeddings_all_llms = self.model_eval.embed_responses(generation_results)
+        # Visualizations
+        self.viz.plot_dimension_reduction(dim_reduce_tsne)
+        self.viz.plot_embedding_responses(joint_embeddings_all_llms)
+        self.run_approvals_based_evalusation_and_plotting()
+        self.viz.visualize_hierarchical_clustering(chosen_clustering, rows)
 
-    # Perform clustering and store the results
-    self.model_eval.run_clustering(joint_embeddings_all_llms)
+    def run_approvals_based_evalusation_and_plotting(self):
+        approvals_statements_and_embeddings = self.model_eval.generate_approval_data()
+        dim_reduce_tsne = self.model_eval.tsne_dimension_reduction(
+            approvals_statements_and_embeddings
+        )
 
-    # Choose which clustering result to analyze further
-    chosen_clustering = self.model_eval.clustering_results["Spectral"]
-
-    # Analyze the clusters and get a summary table
-    rows = self.model_eval.analyze_clusters(chosen_clustering)
-
-    # Save and display the results
-    self.model_eval.save_and_display_results(chosen_clustering, rows)
-
-    # Perform dimensionality reduction
-    dim_reduce_tsne = self.model_eval.tsne_dimension_reduction(
-        joint_embeddings_all_llms, iterations=2000, p=50
-    )
-
-    # Visualizations
-    self.viz.plot_dimension_reduction(dim_reduce_tsne)
-    self.viz.plot_embedding_responses(joint_embeddings_all_llms)
-    self.viz.visualize_hierarchical_clustering(chosen_clustering, rows)
+        self.viz.plot_approvals(dim_reduce_tsne, approvals_statements_and_embeddings)

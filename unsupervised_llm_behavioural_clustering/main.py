@@ -1,7 +1,16 @@
+print("Loading evaluation pipeline...")
 from evaluator_pipeline import EvaluatorPipeline
+
+print("Loading data preparation...")
 from data_preparation import DataPreparation
+
+print("Loading model evaluation...")
 from model_evaluation import ModelEvaluation
-from utils import query_model
+
+print("query_model_on_statements...")
+from utils import query_model_on_statements
+
+print("loaded query_model_on_statements")
 import argparse
 import numpy as np
 from sklearn.manifold import TSNE
@@ -13,58 +22,58 @@ def get_args():
     )
 
     parser.add_argument(
-        "--file_paths",
-        nargs="+",
-        type=str,
-        required=True,
-        help="List of file paths for loading evaluation data.",
-    )
-    parser.add_argument(
         "--texts_subset",
         type=int,
         default=10,
         help="Number of texts to consider as a subset for evaluation. 10 works as a test.",
     )
+
     parser.add_argument(
-        "--run_tests",
+        "--hide-plots",
         action="store_true",
-        help="Run tests on short texts.",
+        help="Hide the plots while still saving them.",
     )
 
     parser.add_argument(
-        "--llm", type=str, required=True, help="Language Model to use for evaluation."
-    )
-    parser.add_argument(
-        "--prompt", type=str, required=True, help="Prompt to use for model evaluation."
-    )
-
-    parser.add_argument(
-        "--n_clusters", type=int, default=200, help="Number of clusters for KMeans."
+        "--model-family",
+        type=str,
+        required=True,
+        help="Language Model family to use. Options: 'openai', 'anthropic', 'local'.",
     )
 
     parser.add_argument(
-        "--plot_dim", type=str, default="16,16", help="Dimensions of the plot."
+        "--model",
+        type=str,
+        required=True,
+        help="Language Model to use for evaluation. Options: 'gpt-3.5-turbo', 'gpt-4', etc.",
     )
 
     parser.add_argument(
-        "--save_path", type=str, default="data/plots", help="Path for saving plots."
+        "--n_clusters",
+        type=int,
+        default=200,
+        help="Number of clusters for KMeans.",
+    )
+    parser.add_argument(
+        "--test-mode",
+        action="store_true",
+        help="Runn in test mode on a small data subset.",
     )
 
     return parser.parse_args()
 
 
-# # Include function arguments for variables that are not defined within main()
 def main(args):
-    pipeline = EvaluatorPipeline()
-    pipeline.setup()
+    print("Loading evaluator pipeline...")
+    evaluator = EvaluatorPipeline(args)
+    print("Loading and preprocessing data...")
+    evaluator.setup()
 
-    if args.run_tests:
-        data_preparation = DataPreparation()
-        model_evaluation = ModelEvaluation()
-        model_evaluation.run_short_text_tests()
+    if args.test_mode:
+        print("Running short text tests...")
+        evaluator.run_short_text_tests()
     else:
-        evaluator = EvaluatorPipeline(args)
-        evaluator.setup()
+        print("Running evaluation...")
         evaluator.run_evaluation()
 
 

@@ -1,104 +1,107 @@
 import numpy as np
+import sklearn
 from sklearn.cluster import KMeans
 from sklearn.manifold import TSNE
+import scipy
 from scipy.cluster.hierarchy import dendrogram, linkage
 from terminaltables import AsciiTable
 import random
 import time
 import tqdm
-import openai
-from langchain.chat_models import ChatOpenAI
-from langchain.prompts import PromptTemplate
-from langchain.chains import LLMChain
+from models import OpenAIModel, AnthropicModel, LocalModel
+import openai  # TODO: Update to use OpenAIModel
 
 
-def query_model_on_statements(statements, llm, prompt, model_name="gpt-3.5-turbo"):
-    """Query a model with a list of statements and a prompt."""
-    ### TODO: Replace langchain with openai and other models
-    # Initialize empty lists for each output variable
+def query_model_on_statements(statements, model_family, model, prompt_template):
     inputs = []
     responses = []
     full_conversations = []
-    # Get the number of statements
-    n_statements = len(statements)
-    # Create a chain object
-    chain = LLMChain(llm=llm, prompt=prompt)
-    # Create a list of prompts, one for each statement
-    prompts = [prompt.format(statement=s) for s in statements]
-    # Generate responses to each prompt
-    results = llm.generate(prompts).generations
-    # Iterate through each statement
-    for i in range(n_statements):
-        # Get the response
-        r = results[i][0].text
-        # Add the statement and response to the appropriate lists
-        inputs.append(statements[i])
-        responses.append(r)
-        full_conversations.append(prompts[i] + r)
+    model_instance = None
+
+    if "openai" == model_family:
+        model_instance = OpenAIModel()
+    elif "anthropic" == model_family:
+        model_instance = AnthropicModel()
+    elif model_family == "local":
+        model_instance = LocalModel()
+    else:
+        raise ValueError("Invalid model name")
+
+    for statement in statements:
+        prompt = prompt_template.format(statement=statement)
+        response = model_instance.generate(prompt, model)
+        inputs.append(statement)
+        responses.append(response)
+        full_conversations.append(prompt + response)
+
     return inputs, responses, full_conversations
 
 
 def get_model_approvals(
-    statements, prompt, system_role_str, approve_strs=["yes"], disapprove_strs=["no"]
+    statements,
+    prompt_template,
+    model,
+    system_role_str,
+    approve_strs=["yes"],
+    disapprove_strs=["no"],
 ):
-    """Get model's approval for a list of statements."""
-    try:
-        approvals = []
-        n_statements = len(statements)
-        prompts = [prompt.format(statement=s) for s in statements]
+    approvals = []
+    model_instance = None
 
-        for i in tqdm.tqdm(range(n_statements)):
-            for j in range(20):
-                try:
-                    comp = openai.ChatCompletion.create(
-                        model="gpt-3.5-turbo",
-                        messages=[
-                            {"role": "system", "content": system_role_str},
-                            {"role": "user", "content": prompts[i]},
-                        ],
-                        temperature=0,
-                        max_tokens=5,
-                    )
-                    break
-                except:
-                    print("Server error", j)
-                    time.sleep(2)
-            r = str.lower(comp["choices"][0]["message"]["content"])
+    if model == "openai":
+        model_instance = OpenAIModel()
+    elif model == "anthropic":
+        model_instance = AnthropicModel()
+    elif model == "local":
+        model_instance = LocalModel()
+    else:
+        raise ValueError("Invalid model name")
 
-            approve_strs_in_response = sum([s in r for s in approve_strs])
-            disapprove_strs_in_response = sum([s in r for s in disapprove_strs])
+    for statement in tqdm.tqdm(statements):
+        prompt = prompt_template.format(statement=statement)
+        response = model_instance.generate(prompt).lower()
 
-            if approve_strs_in_response and not disapprove_strs_in_response:
-                approvals.append(1)
-            elif not approve_strs_in_response and disapprove_strs_in_response:
-                approvals.append(0)
-            else:
-                # Uncertain response:
-                approvals.append(-1)
-        return prompts, approvals
+        is_approved = any(s in response for s in approve_strs)
+        is_disapproved = any(s in response for s in disapprove_strs)
 
-    except openai.OpenAIError as e:
-        print(f"OpenAI API error: {e}")
-    except Exception as e:
-        print(f"An unexpected error occurred: {e}")
+        if is_approved and not is_disapproved:
+            approvals.append(1)
+        elif not is_approved and is_disapproved:
+            approvals.append(0)
+        else:
+            approvals.append(-1)
+
+    return statements, approvals
 
 
-def embed_texts(texts, model="text-embedding-ada-002"):
+def embed_texts(
+    texts,
+    model="text-embedding-ada-002",
+    batch_size=20,
+    max_retries=50,
+    initial_sleep_time=2,
+):
     embeddings = []
     n_texts = len(texts)
-    n_batches = n_texts // 20 + int(n_texts % 20 != 0)
+    n_batches = n_texts // batch_size + int(n_texts % batch_size != 0)
+
     for i in tqdm.tqdm(range(n_batches)):
-        for j in range(50):
+        for retry_count in range(max_retries):
             try:
-                texts_subset = texts[20 * i : min(20 * (i + 1), n_texts)]
-                embedding = openai.Embedding.create(
-                    model="text-embedding-ada-002", input=texts_subset
-                )
-                break
-            except:
-                print("Skipping server error number " + str(j))
-                time.sleep(2)
+                start_idx = batch_size * i
+                end_idx = min(batch_size * (i + 1), n_texts)
+                texts_subset = texts[start_idx:end_idx]
+
+                embedding = openai.Embedding.create(model=model, input=texts_subset)
+                break  # Exit the retry loop if successful
+            except Exception as e:
+                print(f"Skipping due to server error number {retry_count}: {e}")
+                time.sleep(
+                    initial_sleep_time * (2**retry_count)
+                )  # Exponential backoff
+
         embeddings += [e["embedding"] for e in embedding["data"]]
+
     return embeddings
 
 
@@ -130,7 +133,6 @@ def select_by_indices(curation_results, indices):
     return found_points
 
 
-# delete ???
 def get_joint_embedding(
     inputs,
     responses,
@@ -152,44 +154,133 @@ def get_joint_embedding(
 
 
 def identify_theme(
+    self,
     texts,
-    model_name="gpt-3.5-turbo",
     sampled_texts=5,
+    model_instance=None,
     temp=1,
     max_tokens=50,
     instructions="Briefly describe the overall theme of the following texts:",
 ):
-    """Summarizes key themes from a sample of texts from a cluster."""
-    try:
-        theme_identify_prompt = instructions + "\n\n"
-        sampled_texts = random.sample(texts, min(len(texts), sampled_texts))
-        for i in range(len(sampled_texts)):
-            theme_identify_prompt = (
-                theme_identify_prompt
-                + "Text "
-                + str(i + 1)
-                + ": "
-                + sampled_texts[i]
-                + "\n"
-            )
-        for i in range(20):
-            try:
-                completion = openai.ChatCompletion.create(
-                    model=model,
-                    messages=[{"role": "user", "content": theme_identify_prompt}],
-                    max_tokens=max_tokens,
-                    temperature=temp,
-                )
-                break
-            except:
-                print("Skipping API error", i)
-                time.sleep(2)
-        return completion["choices"][0]["message"]["content"]
+    theme_identify_prompt = instructions + "\n\n"
+    sampled_texts = random.sample(texts, min(len(texts), sampled_texts))
+    for i in range(len(sampled_texts)):
+        theme_identify_prompt = (
+            theme_identify_prompt
+            + "Text "
+            + str(i + 1)
+            + ": "
+            + sampled_texts[i]
+            + "\n"
+        )
 
-    except openai.OpenAIError as e:
-        print(f"OpenAI API error: {e}")
-    except Exception as e:
-        print(f"An unexpected error occurred: {e}")
+    for i in range(20):
+        try:
+            # Use the generate method of the provided model instance
+            completion = model_instance.generate(theme_identify_prompt)
+            break
+        except:
+            print("Skipping API error", i)
+            time.sleep(2)
+    return completion
+
+
+# Still need to test the following two functions
+def text_match_theme(
+    text,
+    theme,
+    matching_instructions='Does the following text contain themes of "{theme}"? Answer either "yes" or "no".\nText: "{text}"\nAnswer:',
+    model="gpt-3.5-turbo",
+):
+    for i in range(20):
+        try:
+            completion = openai.ChatCompletion.create(
+                model=model,
+                messages=[{"role": "user", "content": matching_instructions}],
+                max_tokens=3,
+                temperature=0,
+            )
+            break
+        except:
+            print("Skipping API error", i)
+            time.sleep(2)
+    return "yes" in str.lower(completion["choices"][0]["message"]["content"])
+
+
+def purify_cluster(cluster_texts_and_embeddings, theme_list):
+    n_themes = len(theme_list)
+    n_texts = len(cluster_texts_and_embeddings)
+    texts = [e[0] for e in cluster_texts_and_embeddings]
+    embeddings = [e[1] for e in cluster_texts_and_embeddings]
+    pure_cluster_texts_and_embeddings = [[] for _ in range(n_themes)]
+    pure_cluster_counts = [0 for _ in range(n_themes)]
+    remaining_texts_mask = [True for _ in range(n_texts)]
+
+    for i, theme in enumerate(theme_list):
+        for j, (embed, text) in enumerate(zip(embeddings, texts)):
+            if text_match_theme(text, theme):
+                pure_cluster_texts_and_embeddings[i].append([text, embed])
+                pure_cluster_counts[i] += 1
+                remaining_texts_mask[j] = False
+    return (
+        pure_cluster_texts_and_embeddings,
+        pure_cluster_counts,
+        cluster_texts_and_embeddings[remaining_texts_mask],
+    )
+
+
+def lookup_cid_pos_in_rows(rows, cid):
+    for i in range(len(rows)):
+        if int(rows[i][0]) == cid:
+            return i
+    return -1
+
+
+def print_cluster(cid, labels, rows=None):
+    print(
+        "####################################################################################"
+    )
+    if not rows is None:
+        cid_pos = lookup_cid_pos_in_rows(rows, cid)
+        print("### Input desc:")
+        print(rows[cid_pos][4])
+        print("### Response desc:")
+        print(rows[cid_pos][5])
+        print("### Interaction desc:")
+        print(rows[cid_pos][6])
+        print(rows[cid_pos][2] + " / " + rows[cid_pos][3])
+    for i in range(len(labels)):
+        if labels[i] == cid:
+            print(
+                "============================================================\nPoint "
+                + str(i)
+                + ": ("
+                + str(2 + joint_embeddings_all_llms[i][0])
+                + ")"
+            )
+            print(joint_embeddings_all_llms[i][1])
+            print(joint_embeddings_all_llms[i][2])
+
+
+def print_cluster_approvals(
+    cid, labels, approvals_statements_and_embeddings, rows=None
+):
+    print(
+        "####################################################################################"
+    )
+    if not rows is None:
+        cid_pos = lookup_cid_pos_in_rows(rows, cid)
+        print("### Input desc:")
+        print(rows[cid_pos][-1])
+        print(rows[cid_pos][1:-1])
+    for i in range(len(labels)):
+        if labels[i] == cid:
+            print(
+                "============================================================\nPoint "
+                + str(i)
+                + ":"
+            )
+            print(approvals_statements_and_embeddings[i][1])
 
 
 def get_cluster_stats(joint_embeddings_all_llms, cluster_labels, cluster_ID):
@@ -276,3 +367,77 @@ def compile_cluster_table(
         rows.append(row)
     rows = sorted(rows, key=lambda x: x[1], reverse=True)
     return rows
+
+
+def compare_response_pair(
+    approvals_statements_and_embeddings, r_1_name, r_2_name, labels, response_type
+):
+    response_type_int = lookup_response_type_int(response_type)
+    r_1_index = lookup_name_index(labels, r_1_name)
+    r_2_index = lookup_name_index(labels, r_2_name)
+
+    r_1_mask = np.array(
+        [
+            e[0][r_1_index] == response_type_int
+            for e in approvals_statements_and_embeddings
+        ]
+    )
+    r_2_mask = np.array(
+        [
+            e[0][r_2_index] == response_type_int
+            for e in approvals_statements_and_embeddings
+        ]
+    )
+
+    print(r_1_name + ' "' + response_type + '" responses:', sum(r_1_mask))
+    print(r_2_name + ' "' + response_type + '" responses:', sum(r_2_mask))
+
+    print(
+        "Intersection matrix for "
+        + r_1_name
+        + " and "
+        + r_2_name
+        + ' "'
+        + response_type
+        + '" responses:'
+    )
+    conf_matrix = sklearn.metrics.confusion_matrix(r_1_mask, r_2_mask)
+    conf_rows = [["", "Not In " + r_1_name, "In " + r_1_name]]
+    conf_rows.append(["Not In " + r_2_name, conf_matrix[0][0], conf_matrix[1][0]])
+    conf_rows.append(["In " + r_2_name, conf_matrix[0][1], conf_matrix[1][1]])
+    t = AsciiTable(conf_rows)
+    t.inner_row_border = True
+    print(t.table)
+
+    pearson_r = scipy.stats.pearsonr(r_1_mask, r_2_mask)
+    print(
+        'Pearson correlation between "'
+        + response_type
+        + '" responses for '
+        + r_1_name
+        + " and "
+        + r_2_name
+        + ":",
+        round(pearson_r.correlation, 5),
+    )
+    print("(P-value " + str(round(pearson_r.pvalue, 5)) + ")")
+
+
+def lookup_name_index(labels, name):
+    for i, l in zip(range(len(labels)), labels):
+        if name == l:
+            return i
+    print("Please provide valid name")
+    return
+
+
+def lookup_response_type_int(response_type):
+    response_type = str.lower(response_type)
+    if response_type in ["approve", "approval", "a"]:
+        return 1
+    elif response_type in ["disapprove", "disapproval", "d"]:
+        return 0
+    elif response_type in ["no response", "no decision", "nr", "nd"]:
+        return -1
+    print("Please provide valid response type.")
+    return

@@ -99,6 +99,38 @@ class Visualization:
         )
         plt.show()
 
+    def plot_approvals(
+        self,
+        dim_reduce_data,
+        approval_data,
+        condition,
+        colors,
+        shapes,
+        labels,
+        sizes,
+        title,
+    ):
+        plt.rcParams["figure.figsize"] = [25, 25]
+        plt.rcParams["font.size"] = 25
+
+        for idx, (color, shape, label, size) in enumerate(
+            zip(colors, shapes, labels, sizes)
+        ):
+            mask = [e[0] == condition for e in approval_data]
+            plt.scatter(
+                dim_reduce_data[:, 0][mask],
+                dim_reduce_data[:, 1][mask],
+                c=color,
+                label=label,
+                s=size,
+                marker=shape,
+                alpha=0.5,
+            )
+
+        plt.legend()
+        plt.title(title)
+        plt.show()
+
     def visualize_hierarchical_clustering(
         cluster_data, method="ward", metric="euclidean", color_threshold=None
     ):
