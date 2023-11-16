@@ -1,7 +1,7 @@
-from unsupervised_behavioural_clustering.models import GPT4, LLM
-from unsupervised_behavioural_clustering.generation import query_model
-from unsupervised_behavioural_clustering.analysis import compare_results
-from unsupervised_behavioural_clustering.prompts import (
+from unsupervised_llm_behavioural_clustering.models import GPT4, LLM
+from unsupervised_llm_behavioural_clustering.generation import query_model
+from unsupervised_llm_behavioural_clustering.analysis import compare_results
+from unsupervised_llm_behavioural_clustering.prompts import (
     PROMPT_TEMPLATES,
 )  # Importing PROMPT_TEMPLATES
 

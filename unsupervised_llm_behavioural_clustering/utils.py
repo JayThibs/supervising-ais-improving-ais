@@ -1,5 +1,7 @@
 import numpy as np
 import sklearn
+import pdb
+from tqdm import tqdm
 from sklearn.cluster import KMeans
 from sklearn.manifold import TSNE
 import scipy
@@ -7,9 +9,9 @@ from scipy.cluster.hierarchy import dendrogram, linkage
 from terminaltables import AsciiTable
 import random
 import time
-import tqdm
+from typing import List
 from models import OpenAIModel, AnthropicModel, LocalModel
-import openai  # TODO: Update to use OpenAIModel
+from openai import OpenAI
 
 
 def query_model_on_statements(statements, model_family, model, prompt_template):
@@ -18,8 +20,10 @@ def query_model_on_statements(statements, model_family, model, prompt_template):
     full_conversations = []
     model_instance = None
 
+    print("query_model_on_statements...")
+
     if "openai" == model_family:
-        model_instance = OpenAIModel()
+        model_instance = OpenAIModel(model)
     elif "anthropic" == model_family:
         model_instance = AnthropicModel()
     elif model_family == "local":
@@ -28,11 +32,24 @@ def query_model_on_statements(statements, model_family, model, prompt_template):
         raise ValueError("Invalid model name")
 
     for statement in statements:
+        print("statement:", statement)
         prompt = prompt_template.format(statement=statement)
-        response = model_instance.generate(prompt, model)
+        print("prompt:", prompt)
+        response = model_instance.generate(prompt)
+        print("response:", response)
         inputs.append(statement)
         responses.append(response)
         full_conversations.append(prompt + response)
+
+    # print all variables
+    print("statements:", statements)
+    print("model_family:", model_family)
+    print("model:", model)
+    print("prompt_template:", prompt_template)
+    print("inputs:", inputs)
+    print("responses:", responses)
+    print("full_conversations:", full_conversations)
+    print("model_instance:", model_instance)
 
     return inputs, responses, full_conversations
 
@@ -57,7 +74,7 @@ def get_model_approvals(
     else:
         raise ValueError("Invalid model name")
 
-    for statement in tqdm.tqdm(statements):
+    for statement in tqdm(statements):
         prompt = prompt_template.format(statement=statement)
         response = model_instance.generate(prompt).lower()
 
@@ -75,24 +92,29 @@ def get_model_approvals(
 
 
 def embed_texts(
-    texts,
+    texts: List[List[str]],
     model="text-embedding-ada-002",
     batch_size=20,
     max_retries=50,
     initial_sleep_time=2,
 ):
+    client = OpenAI()
     embeddings = []
     n_texts = len(texts)
     n_batches = n_texts // batch_size + int(n_texts % batch_size != 0)
 
-    for i in tqdm.tqdm(range(n_batches)):
+    for i in tqdm(range(n_batches)):
         for retry_count in range(max_retries):
             try:
                 start_idx = batch_size * i
                 end_idx = min(batch_size * (i + 1), n_texts)
-                texts_subset = texts[start_idx:end_idx]
+                print(texts)
+                text_subset = texts[start_idx:end_idx]
+                print("text_subset:", text_subset)
+                embeddings_data = client.embeddings.create(
+                    model=model, input=text_subset
+                ).data
 
-                embedding = openai.Embedding.create(model=model, input=texts_subset)
                 break  # Exit the retry loop if successful
             except Exception as e:
                 print(f"Skipping due to server error number {retry_count}: {e}")
@@ -100,23 +122,29 @@ def embed_texts(
                     initial_sleep_time * (2**retry_count)
                 )  # Exponential backoff
 
-        embeddings += [e["embedding"] for e in embedding["data"]]
-
+        # print("embedding:", embedding)
+        embeddings += [item.embedding for item in embeddings_data]
     return embeddings
 
 
-def joint_embedding(
-    inputs, responses, model="text-embedding-ada-002", combine_statements=False
+def get_joint_embedding(
+    inputs,
+    responses,
+    model_name="text-embedding-ada-002",  # Added model_name as a parameter
+    combine_statements=False,
 ):
+    """Get joint embedding for a list of inputs and responses."""
     if not combine_statements:
-        inputs_embeddings = embed_texts(inputs)
-        responses_embeddings = embed_texts(responses)
+        inputs_embeddings = embed_texts(texts=[inputs])
+        responses_embeddings = embed_texts(texts=[responses])
         joint_embeddings = [
             i + r for i, r in zip(inputs_embeddings, responses_embeddings)
         ]
     else:
+        print("inputs:", inputs)
+        print("responses:", responses)
         joint_embeddings = embed_texts(
-            [input + response for input, response in zip(inputs, responses)]
+            texts=[input + " " + response for input, response in zip(inputs, responses)]
         )
     return joint_embeddings
 
@@ -131,26 +159,6 @@ def select_by_indices(curation_results, indices):
             point_status[1].append(cr[i][1])
         found_points.append(point_status)
     return found_points
-
-
-def get_joint_embedding(
-    inputs,
-    responses,
-    model_name="text-embedding-ada-002",  # Added model_name as a parameter
-    combine_statements=False,
-):
-    """Get joint embedding for a list of inputs and responses."""
-    if not combine_statements:
-        inputs_embeddings = embed_texts(inputs)
-        responses_embeddings = embed_texts(responses)
-        joint_embeddings = [
-            i + r for i, r in zip(inputs_embeddings, responses_embeddings)
-        ]
-    else:
-        joint_embeddings = embed_texts(
-            [input + response for input, response in zip(inputs, responses)]
-        )
-    return joint_embeddings
 
 
 def identify_theme(
@@ -192,9 +200,10 @@ def text_match_theme(
     matching_instructions='Does the following text contain themes of "{theme}"? Answer either "yes" or "no".\nText: "{text}"\nAnswer:',
     model="gpt-3.5-turbo",
 ):
+    client = OpenAI()
     for i in range(20):
         try:
-            completion = openai.ChatCompletion.create(
+            completion = OpenAI.chat.completions.create(
                 model=model,
                 messages=[{"role": "user", "content": matching_instructions}],
                 max_tokens=3,
@@ -236,7 +245,7 @@ def lookup_cid_pos_in_rows(rows, cid):
     return -1
 
 
-def print_cluster(cid, labels, rows=None):
+def print_cluster(cid, labels, joint_embeddings_all_llms, rows=None):
     print(
         "####################################################################################"
     )
@@ -341,7 +350,7 @@ def compile_cluster_table(
     """Tabulates high-level statistics and themes for each cluster."""
     n_clusters = max(clustering.labels_) + 1
     rows = []
-    for cluster_id in tqdm.tqdm(range(n_clusters)):
+    for cluster_id in tqdm(range(n_clusters)):
         row = [str(cluster_id)]
         cluster_indices = np.arange(len(clustering.labels_))[
             clustering.labels_ == cluster_id

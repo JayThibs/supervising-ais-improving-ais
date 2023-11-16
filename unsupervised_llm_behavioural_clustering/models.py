@@ -1,4 +1,4 @@
-import openai
+from openai import OpenAI
 
 
 class LanguageModelInterface:
@@ -12,17 +12,25 @@ class OpenAIModel(LanguageModelInterface):
         self.temperature = temperature
         self.max_tokens = max_tokens
 
-    def generate(self, prompts):
-        return (
-            openai.Completion.create(
-                model=self.model,
-                prompt=prompts,
-                temperature=self.temperature,
-                max_tokens=self.max_tokens,
-            )
-            .choices[0]
-            .text
+    def generate(self, prompt, system_message="You are an AI language model."):
+        client = OpenAI()
+
+        completion = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {
+                    "role": "system",
+                    "content": system_message,
+                },
+                {
+                    "role": "user",
+                    "content": prompt,
+                },
+            ],
+            temperature=self.temperature,
+            max_tokens=self.max_tokens,
         )
+        return completion.choices[0].message.content
 
 
 class AnthropicModel(LanguageModelInterface):

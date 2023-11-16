@@ -15,7 +15,7 @@ class DataPreparation:
         self.evals_dir = f"{self.data_dir}/evals"
         print(self.evals_dir)
         self.file_paths = self._get_jsonl_file_paths(self.evals_dir)
-        print(self.file_paths)
+        print("Grabbed file paths.")
         self.folder_path = self.evals_dir
 
     @staticmethod
@@ -53,17 +53,19 @@ class DataPreparation:
             )
         return file_paths
 
-    def load_evaluation_data(self) -> List[List[str]]:
+    def load_evaluation_data(self, file_paths: List[str]) -> List[List[str]]:
         """Load evaluation data from a list of file paths."""
         all_texts = []
-        for path in self.file_paths:
+        for path in file_paths:
             if not os.path.exists(path):
                 continue
 
             with open(path, "r") as f:
                 json_lines = f.readlines()
                 dicts = [[path, json.loads(l)] for l in json_lines]
-                all_texts.extend([d["statements"] for d in dicts if "statement" in d])
+                for d in dicts:
+                    if "statement" in d[1]:
+                        all_texts.append([d[0], d[1]["statement"]])
 
         return all_texts
 
@@ -75,9 +77,13 @@ class DataPreparation:
         return rng.permutation(texts)[:n_points]
 
     def save_to_pickle(self, data, filename):
-        with open(filename, "wb") as f:
+        pickle_dir = "data/intermediate/pickle_files"
+        if not os.path.exists(pickle_dir):
+            os.makedirs(pickle_dir)
+        with open(os.path.join(pickle_dir, filename), "wb") as f:
             pickle.dump(data, f)
 
     def load_from_pickle(self, filename):
-        with open(filename, "rb") as f:
+        pickle_dir = "data/intermediate/pickle_files"
+        with open(os.path.join(pickle_dir, filename), "rb") as f:
             return pickle.load(f)

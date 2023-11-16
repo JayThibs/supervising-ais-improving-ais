@@ -1,3 +1,5 @@
+import os
+import pdb
 import matplotlib.pyplot as plt
 from scipy.cluster.hierarchy import dendrogram, linkage
 from sklearn.manifold import TSNE
@@ -5,104 +7,56 @@ import numpy as np
 
 
 class Visualization:
-    def __init__(self, data, plot_dim: str, save_path: str):
-        self.data = data
+    def __init__(self, plot_dim=(16, 16), save_path="data/plots"):
         self.plot_dim = plot_dim
         self.save_path = save_path
+        if not os.path.exists(self.save_path):
+            os.makedirs(self.save_path)
 
-    def plot_dimension_reduction(
-        dim_reduce_tsne, joint_embeddings_all_llms, plot_colors=None
-    ):
-        """
-        Plot the dimension reduction.
-        """
-        if plot_colors is None:
-            plot_colors = [
-                "plum",
-                "salmon",
-                "darkgreen",
-                "cyan",
-                "slategrey",
-                "purple",
-                "black",
-                "yellow",
-                "slategrey",
-                "darkgreen",
-            ]
-
-        plt.rcParams["figure.figsize"] = [16, 16]
-        plt.rcParams["font.size"] = 25
-
-        mask_002 = [e[0] == 0 for e in joint_embeddings_all_llms]
-        mask_003 = [e[0] == 1 for e in joint_embeddings_all_llms]
-
-        plt.scatter(
-            dim_reduce_tsne[:, 0][mask_003],
-            dim_reduce_tsne[:, 1][mask_003],
-            c="blue",
-            label="003",
-            s=20,
-            alpha=0.5,
-        )
-        plt.scatter(
-            dim_reduce_tsne[:, 0][mask_002],
-            dim_reduce_tsne[:, 1][mask_002],
-            c="red",
-            label="002",
-            s=20,
-            alpha=0.5,
-        )
-        plt.legend()
-        plt.title("Embeddings of Davinci 002 and 003 responses")
-        plt.show()
+    def save_plot(self, filename):
+        plt.savefig(os.path.join(self.save_path, filename))
 
     def plot_embedding_responses(
         self,
-        joint_embeddings_all_llms,
-        model_names=["002", "003"],
-        colors=["red", "blue"],
+        dim_reduce_tsne,
+        labels,
+        model_names,
+        filename,
     ):
-        # Prepare the data
-        combined_embeddings = np.array([e[3] for e in joint_embeddings_all_llms])
+        plt.figure(figsize=self.plot_dim)
+        unique_labels = np.unique(labels)
 
-        # Dimensionality reduction
-        iterations = 2000
-        p = 50
-        dim_reduce_tsne = TSNE(
-            perplexity=p,
-            n_iter=iterations,
-            angle=0.8,
-            init="pca",
-            early_exaggeration=22,
-            learning_rate="auto",
-            random_state=42,
-        ).fit_transform(X=combined_embeddings)
+        # Check if there's a mismatch in the number of unique labels and provided model names
+        if len(model_names) < len(unique_labels):
+            raise ValueError(
+                "Number of model names is less than the number of unique labels"
+            )
 
-        # Plotting
-        plt.rcParams["figure.figsize"] = [16, 16]
-        plt.rcParams["font.size"] = 25
+        for label in unique_labels:
+            mask = labels == label
+            x_values = dim_reduce_tsne[:, 0][mask]
+            y_values = dim_reduce_tsne[:, 1][mask]
 
-        for idx, model_name in enumerate(model_names):
-            mask = [e[0] == idx for e in joint_embeddings_all_llms]
+            # Use label as index if it's an integer, otherwise use the label itself
+            model_label = model_names[label] if isinstance(label, int) else label
+
             plt.scatter(
-                dim_reduce_tsne[:, 0][mask],
-                dim_reduce_tsne[:, 1][mask],
-                c=colors[idx],
-                label=model_name,
+                x_values,
+                y_values,
+                label=model_label,
                 s=20,
                 alpha=0.5,
             )
-
         plt.legend()
-        plt.title(
-            f"Embeddings of Davinci {model_names[0]} and {model_names[1]} responses"
-        )
-        plt.show()
+        plt.title(f"Embeddings of {', '.join(model_names)} responses")
+        plt.savefig(filename)  # Saving the plot
+        plt.close()
 
     def plot_approvals(
         self,
         dim_reduce_data,
         approval_data,
+        filename,
         condition,
         colors,
         shapes,
@@ -110,6 +64,8 @@ class Visualization:
         sizes,
         title,
     ):
+        plt.figure(figsize=self.plot_dim)
+
         plt.rcParams["figure.figsize"] = [25, 25]
         plt.rcParams["font.size"] = 25
 
@@ -130,9 +86,11 @@ class Visualization:
         plt.legend()
         plt.title(title)
         plt.show()
+        plt.save_plot(filename)
+        # plt.close()
 
     def visualize_hierarchical_clustering(
-        cluster_data, method="ward", metric="euclidean", color_threshold=None
+        cluster_data, filename, method="ward", metric="euclidean", color_threshold=None
     ):
         """
         Visualize hierarchical clustering of data using dendrograms.
@@ -170,6 +128,8 @@ class Visualization:
                 plt.axhline(y=color_threshold, c="black", lw=1, linestyle="dashed")
 
             plt.show()
+            plt.save_plot(filename)
+            # plt.close()
 
         except Exception as e:
             print(

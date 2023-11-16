@@ -57,7 +57,13 @@ def get_args():
     parser.add_argument(
         "--test-mode",
         action="store_true",
-        help="Runn in test mode on a small data subset.",
+        help="Run in test mode on a small data subset.",
+    )
+    parser.add_argument(
+        "--n_points",
+        type=int,
+        default=5000,
+        help="Number of points to use for clustering.",
     )
 
     return parser.parse_args()
@@ -79,6 +85,11 @@ def main(args):
 
 if __name__ == "__main__":
     try:
+        """
+        Run using:
+
+        python unsupervised_llm_behavioural_clustering/main.py --model-family="openai" --model="gpt-3.5-turbo" --test-mode
+        """
         args = get_args()
         main(args)
     except Exception as e:

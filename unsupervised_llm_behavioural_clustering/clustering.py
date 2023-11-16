@@ -9,20 +9,28 @@ from utils import lookup_cid_pos_in_rows, identify_theme
 
 
 class Clustering:
-    def __init__(self, embeddings):
+    def __init__(self, embeddings, args):
         self.embeddings = embeddings
+        self.args = args
 
     def perform_multiple_clustering(self):
         cluster_algorithms = {
             "OPTICS": OPTICS(min_samples=2, xi=0.12),
-            "Spectral": SpectralClustering(100),
-            "Agglomerative": AgglomerativeClustering(100),
-            "KMeans": KMeans(n_clusters=200, random_state=42),
+            "Spectral": SpectralClustering(100 if not self.args.test_mode else 2),
+            "Agglomerative": AgglomerativeClustering(
+                100 if not self.args.test_mode else 2
+            ),
+            "KMeans": KMeans(
+                n_clusters=200 if not self.args.test_mode else 2, random_state=42
+            ),
             # Add more as needed
         }
 
+        print("Embeddings shape:", self.embeddings.shape)
+        print("Embeddings:", self.embeddings)
         clustering_results = {}
         for name, algorithm in cluster_algorithms.items():
+            print(f"Running {name} clustering...")
             clustering_results[name] = algorithm.fit(self.embeddings)
 
         return clustering_results
@@ -159,7 +167,7 @@ class Clustering:
         n_clusters = max(clustering.labels_) + 1
 
         rows = []
-        for cluster_id in tqdm.tqdm(range(n_clusters)):
+        for cluster_id in tqdm(range(n_clusters)):
             row = [str(cluster_id)]
             cluster_indices = np.arange(len(clustering.labels_))[
                 clustering.labels_ == cluster_id

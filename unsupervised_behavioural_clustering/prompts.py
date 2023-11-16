@@ -1,3 +1,0 @@
-POSITIVE_PROMPT = "Say something positive: "
-NEGATIVE_PROMPT = "Say something negative: "
-PROMPT_TEMPLATES = [POSITIVE_PROMPT, NEGATIVE_PROMPT]
