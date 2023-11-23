@@ -29,13 +29,13 @@ def get_args():
     )
 
     parser.add_argument(
-        "--hide-plots",
+        "--hide_plots",
         action="store_true",
         help="Hide the plots while still saving them.",
     )
 
     parser.add_argument(
-        "--model-family",
+        "--model_family",
         type=str,
         required=True,
         help="Language Model family to use. Options: 'openai', 'anthropic', 'local'.",
@@ -55,7 +55,7 @@ def get_args():
         help="Number of clusters for KMeans.",
     )
     parser.add_argument(
-        "--test-mode",
+        "--test_mode",
         action="store_true",
         help="Run in test mode on a small data subset.",
     )
@@ -64,6 +64,13 @@ def get_args():
         type=int,
         default=5000,
         help="Number of points to use for clustering.",
+    )
+
+    parser.add_argument(
+        "--test_prompt",
+        type=str,
+        default=f'You are an AI language model. Briefly describe the following text:\n"{{statement}}"\nReaction:"',
+        help="Prompt to use for testing.",
     )
 
     return parser.parse_args()

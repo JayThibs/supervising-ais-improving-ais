@@ -57,7 +57,12 @@ class ModelEvaluation:
         approvals = []
         for text in text_subset:
             prompt = prompt_template.format(statement=text)
-            response = query_model_on_statements(
+            (
+                inputs,
+                response,
+                full_conversations,
+                model_instance,
+            ) = query_model_on_statements(
                 [text], model_family, model, role_description + prompt
             )
             approval = (
@@ -177,7 +182,9 @@ class ModelEvaluation:
         self.clustering_results = clustering_obj.perform_multiple_clustering()
         return self.clustering_results
 
-    def analyze_clusters(self, chosen_clustering, combined_embeddings):
+    def analyze_clusters(
+        self, chosen_clustering, combined_embeddings, generation_results
+    ):
         rows = []
         n_clusters = max(chosen_clustering.labels_) + 1
 
@@ -186,14 +193,19 @@ class ModelEvaluation:
             print(f"Cluster {cluster_id} size: {len(combined_embeddings)}")
             print(f"Cluster {cluster_id} labels: {chosen_clustering.labels_}")
             row = self.get_cluster_row(
-                cluster_id, chosen_clustering.labels_, combined_embeddings
+                cluster_id,
+                chosen_clustering.labels_,
+                combined_embeddings,
+                generation_results,
             )
             rows.append(row)
 
         rows = sorted(rows, key=lambda x: x[1], reverse=True)
         return rows
 
-    def get_cluster_row(self, cluster_id, labels, joint_embeddings_all_llms):
+    def get_cluster_row(
+        self, cluster_id, labels, joint_embeddings_all_llms, generation_results
+    ):
         """Generates a row that represents a cluster's statistics and themes."""
         row = [str(cluster_id)]
 
@@ -211,26 +223,30 @@ class ModelEvaluation:
             row.append(f"{round(100 * frac, 1)}%")
 
         # Identify themes within this cluster
-        inputs_themes_str = identify_theme(inputs)
-        responses_themes_str = identify_theme(responses)
+        for i in range(len(generation_results)):
+            print(f"Identifying themes for LLM {i}...")
+            model_instance = generation_results[i][3]
+            print(f"model_instance: {model_instance}")
+            inputs_themes_str = identify_theme(inputs, model_instance)
+            responses_themes_str = identify_theme(responses, model_instance)
 
-        interactions = [
-            f'(Statement: "{input}", Response: "{response}")'
-            for input, response in zip(inputs, responses)
-        ]
-        interactions_themes_str = identify_theme(interactions)
+            interactions = [
+                f'(Statement: "{input}", Response: "{response}")'
+                for input, response in zip(inputs, responses)
+            ]
+            interactions_themes_str = identify_theme(interactions, model_instance)
 
-        # Add themes to the row
-        row.append(inputs_themes_str)
-        row.append(responses_themes_str)
-        row.append(interactions_themes_str)
+            # Add themes to the row
+            row.append(inputs_themes_str)
+            row.append(responses_themes_str)
+            row.append(interactions_themes_str)
         return row
 
     def get_cluster_stats(self, joint_embeddings_all_llms, cluster_labels, cluster_ID):
         inputs = []
         responses = []
         cluster_size = 0
-        n_llms = max([e[0] for e in joint_embeddings_all_llms])
+        n_llms = int(max([e[0] for e in joint_embeddings_all_llms]))
         fractions = [0 for _ in range(n_llms + 1)]
         n_datapoints = len(joint_embeddings_all_llms)
         for e, l in zip(joint_embeddings_all_llms, cluster_labels):
@@ -255,8 +271,7 @@ class ModelEvaluation:
             [
                 "ID",
                 "N",
-                "002",
-                "003",
+                "gpt-3.5-turbo",  # TODO: Make this dynamic
                 "Inputs Themes",
                 "Responses Themes",
                 "Interaction Themes",

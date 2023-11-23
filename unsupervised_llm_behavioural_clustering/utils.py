@@ -51,7 +51,7 @@ def query_model_on_statements(statements, model_family, model, prompt_template):
     print("full_conversations:", full_conversations)
     print("model_instance:", model_instance)
 
-    return inputs, responses, full_conversations
+    return inputs, responses, full_conversations, model_instance
 
 
 def get_model_approvals(
@@ -162,10 +162,9 @@ def select_by_indices(curation_results, indices):
 
 
 def identify_theme(
-    self,
     texts,
+    model_instance,
     sampled_texts=5,
-    model_instance=None,
     temp=1,
     max_tokens=50,
     instructions="Briefly describe the overall theme of the following texts:",
@@ -178,18 +177,18 @@ def identify_theme(
             + "Text "
             + str(i + 1)
             + ": "
-            + sampled_texts[i]
+            + str(sampled_texts[i])  # Convert to string
             + "\n"
         )
-
-    for i in range(20):
-        try:
-            # Use the generate method of the provided model instance
-            completion = model_instance.generate(theme_identify_prompt)
-            break
-        except:
-            print("Skipping API error", i)
-            time.sleep(2)
+    # for i in range(20):
+    print("model_instance:", model_instance)
+    completion = model_instance.generate(theme_identify_prompt)
+    # try:
+    #     # Use the generate method of the provided model instance
+    #     break
+    # except:
+    #     print("Skipping API error", i)
+    #     time.sleep(2)
     return completion
 
 

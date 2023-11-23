@@ -16,18 +16,16 @@ class Visualization:
     def save_plot(self, filename):
         plt.savefig(os.path.join(self.save_path, filename))
 
-    def plot_embedding_responses(
-        self,
-        dim_reduce_tsne,
-        labels,
-        model_names,
-        filename,
-    ):
+    def plot_embedding_responses(self, dim_reduce_tsne, labels, model_names, filename):
         plt.figure(figsize=self.plot_dim)
         unique_labels = np.unique(labels)
+        print("unique_labels", unique_labels)
 
-        # Check if there's a mismatch in the number of unique labels and provided model names
-        if len(model_names) < len(unique_labels):
+        # If only one model name is provided, use it for all labels
+        if len(model_names) == 1:
+            model_names = [model_names[0] for _ in unique_labels]
+        elif len(model_names) < len(unique_labels):
+            # If there are more labels than model names, raise an error or handle it as needed
             raise ValueError(
                 "Number of model names is less than the number of unique labels"
             )
@@ -37,8 +35,7 @@ class Visualization:
             x_values = dim_reduce_tsne[:, 0][mask]
             y_values = dim_reduce_tsne[:, 1][mask]
 
-            # Use label as index if it's an integer, otherwise use the label itself
-            model_label = model_names[label] if isinstance(label, int) else label
+            model_label = model_names[label]  # Assuming label can be used as an index
 
             plt.scatter(
                 x_values,

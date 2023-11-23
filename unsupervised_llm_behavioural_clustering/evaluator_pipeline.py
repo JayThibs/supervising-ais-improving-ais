@@ -26,6 +26,11 @@ class EvaluatorPipeline:
         self.labels = ["Google Chat", "Bing Chat", "Bing Chat Emoji", "Bing Chat Janus"]
         self.sizes = [5, 30, 200, 300]
 
+        if args.test_mode:
+            self.prompt_template = self.args.test_prompt
+        else:
+            self.prompt_template = self.args.prompt_template
+
         print(self.data_dir)
         print(self.evals_dir)
 
@@ -118,24 +123,29 @@ class EvaluatorPipeline:
         approval_filename = self.generate_plot_filename(
             self.args.model_family, self.args.model, "approval_responses"
         )
-        pdb.set_trace()
+        print(f"labels: {labels}")
+        print(f"self.args.model: {self.args.model}")
         self.viz.plot_embedding_responses(
             dim_reduce_tsne, labels, [self.args.model], tsne_filename
         )
-        plt.hist(labels, bins=50)
-        plt.show()
+        # plt.hist(labels, bins=50)
+        # plt.show()
+        # plt.close()
 
         # Analyze the clusters and get a summary table
         print("Compiling cluster table...")
         print(chosen_clustering)
 
-        rows = self.model_eval.analyze_clusters(chosen_clustering, embeddings)
+        rows = self.model_eval.analyze_clusters(
+            chosen_clustering, embeddings, generation_results=generation_results
+        )
 
         # Save and display the results
         print("Saving and displaying results...")
         self.model_eval.save_and_display_results(chosen_clustering, rows)
+        pdb.set_trace()
 
-        self.run_approvals_based_evalusation_and_plotting(approval_filename)
+        self.run_approvals_based_evaluation_and_plotting(approval_filename)
         self.viz.visualize_hierarchical_clustering(chosen_clustering, rows)
 
     def run_evaluation(self):
@@ -183,7 +193,7 @@ class EvaluatorPipeline:
                 self.all_texts[: self.args.texts_subset],
                 self.args.model_family,
                 self.args.model,
-                self.args.prompt_template,
+                self.prompt_template,
                 self.args.role_description,
             )
         )
