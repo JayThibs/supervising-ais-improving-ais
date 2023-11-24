@@ -7,7 +7,7 @@ class LanguageModelInterface:
 
 
 class OpenAIModel(LanguageModelInterface):
-    def __init__(self, model, temperature=0.5, max_tokens=150):
+    def __init__(self, model, temperature=0.1, max_tokens=150):
         self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens

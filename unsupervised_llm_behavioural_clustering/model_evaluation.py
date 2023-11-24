@@ -95,11 +95,7 @@ class ModelEvaluation:
             for input, response, embedding in zip(inputs, responses, joint_embeddings):
                 joint_embeddings_all_llms.append([i, input, response, embedding])
 
-        combined_embeddings = np.array([e[3] for e in joint_embeddings_all_llms])
-        print(f"combined_embeddings: {combined_embeddings}")
-        print(f"combined_embeddings.shape: {combined_embeddings.shape}")
-        print(f"combined_embeddings[0].shape: {combined_embeddings[0].shape}")
-        return combined_embeddings
+        return joint_embeddings_all_llms
 
     def tsne_dimension_reduction(
         self, embeddings, dimensions=2, perplexity=50, iterations=2000, random_state=42
@@ -183,19 +179,19 @@ class ModelEvaluation:
         return self.clustering_results
 
     def analyze_clusters(
-        self, chosen_clustering, combined_embeddings, generation_results
+        self, chosen_clustering, joint_embeddings_all_llms, generation_results
     ):
         rows = []
         n_clusters = max(chosen_clustering.labels_) + 1
 
         for cluster_id in tqdm(range(n_clusters)):
             print(f"Analyzing cluster {cluster_id}...")
-            print(f"Cluster {cluster_id} size: {len(combined_embeddings)}")
+            print(f"Cluster {cluster_id} size: {len(joint_embeddings_all_llms)}")
             print(f"Cluster {cluster_id} labels: {chosen_clustering.labels_}")
             row = self.get_cluster_row(
                 cluster_id,
                 chosen_clustering.labels_,
-                combined_embeddings,
+                joint_embeddings_all_llms,
                 generation_results,
             )
             rows.append(row)
@@ -227,6 +223,8 @@ class ModelEvaluation:
             print(f"Identifying themes for LLM {i}...")
             model_instance = generation_results[i][3]
             print(f"model_instance: {model_instance}")
+            print(f"inputs: {inputs}")
+            print(f"responses: {responses}")
             inputs_themes_str = identify_theme(inputs, model_instance)
             responses_themes_str = identify_theme(responses, model_instance)
 
@@ -236,6 +234,8 @@ class ModelEvaluation:
             ]
             interactions_themes_str = identify_theme(interactions, model_instance)
 
+            print(f"interactions: {interactions}")
+            print(f"inputs_themes_str: {inputs_themes_str}")
             # Add themes to the row
             row.append(inputs_themes_str)
             row.append(responses_themes_str)

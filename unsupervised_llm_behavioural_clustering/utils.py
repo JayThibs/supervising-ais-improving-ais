@@ -165,9 +165,9 @@ def identify_theme(
     texts,
     model_instance,
     sampled_texts=5,
-    temp=1,
+    temp=0.1,
     max_tokens=50,
-    instructions="Briefly describe the overall theme of the following texts:",
+    instructions="Briefly describe the overall theme of the following texts. Do not give the theme of any individual text.",
 ):
     theme_identify_prompt = instructions + "\n\n"
     sampled_texts = random.sample(texts, min(len(texts), sampled_texts))
@@ -180,15 +180,14 @@ def identify_theme(
             + str(sampled_texts[i])  # Convert to string
             + "\n"
         )
-    # for i in range(20):
-    print("model_instance:", model_instance)
-    completion = model_instance.generate(theme_identify_prompt)
-    # try:
-    #     # Use the generate method of the provided model instance
-    #     break
-    # except:
-    #     print("Skipping API error", i)
-    #     time.sleep(2)
+    theme_identify_prompt = theme_identify_prompt + "\nTheme:"
+    for i in range(20):
+        try:
+            completion = model_instance.generate(theme_identify_prompt)
+            break
+        except:
+            print("Skipping API error", i)
+            time.sleep(2)
     return completion
 
 
@@ -212,7 +211,7 @@ def text_match_theme(
         except:
             print("Skipping API error", i)
             time.sleep(2)
-    return "yes" in str.lower(completion["choices"][0]["message"]["content"])
+    return "yes" in str.lower(completion.choices[0].message.content)
 
 
 def purify_cluster(cluster_texts_and_embeddings, theme_list):

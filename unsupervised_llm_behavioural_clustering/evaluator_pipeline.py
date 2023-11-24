@@ -1,4 +1,5 @@
 import os
+import json
 import argparse
 import numpy as np
 import pickle
@@ -28,8 +29,28 @@ class EvaluatorPipeline:
 
         if args.test_mode:
             self.prompt_template = self.args.test_prompt
+            if "test_generation_results.pickle" in os.listdir(
+                f"{self.data_dir}/results/pickle_files"
+            ):
+                self.saved_generation_results = self.load_results(
+                    "test_generation_results.pickle"
+                )
+            else:
+                self.saved_generation_results = None
         else:
             self.prompt_template = self.args.prompt_template
+
+        # Load approval prompts from same directory as this file
+        with open(f"{self.data_dir}/prompts/approval_prompts.json", "r") as file:
+            # { "google_chat_desc": [ "prompt"], "bing_chat_desc": [...], ...}
+            self.approval_prompts = json.load(file)
+            self.approval_prompts = [
+                prompt for prompt in self.approval_prompts.values()
+            ]
+        self.approval_question_prompt_template = self.args.approval_prompt_template
+
+        # Join the lines to form a multi-line string
+        # google_chat_desc = "\n".join(prompts["google_chat_desc"])
 
         print(self.data_dir)
         print(self.evals_dir)
@@ -77,18 +98,29 @@ class EvaluatorPipeline:
             self.data_prep, n_points=3
         )
         print(text_subset)
-        generation_results, file_name = self.model_eval.run_short_text_tests(
-            text_subset
-        )
+        if self.saved_generation_results is None:
+            generation_results, file_name = self.model_eval.run_short_text_tests(
+                text_subset
+            )
+            self.save_results(
+                generation_results, "test_generation_results.pickle"
+            )  # last saved
+            self.save_results(generation_results, file_name)  # full file name
+        else:
+            generation_results = self.saved_generation_results
 
         print("Embedding responses...")
         # pdb.set_trace()
         print(generation_results)
         print(self.model_eval)
         print(self.args.model)
-        combined_embeddings = self.model_eval.embed_responses(
+        joint_embeddings_all_llms = self.model_eval.embed_responses(
             generation_results=generation_results, llms=[self.args.model]
         )
+        combined_embeddings = np.array([e[3] for e in joint_embeddings_all_llms])
+        print(f"combined_embeddings: {combined_embeddings}")
+        print(f"combined_embeddings.shape: {combined_embeddings.shape}")
+        print(f"combined_embeddings[0].shape: {combined_embeddings[0].shape}")
         embeddings = np.array(combined_embeddings, dtype=np.float64)
         if not np.isfinite(embeddings).all():
             print("Embeddings contain non-finite values.")
@@ -137,7 +169,9 @@ class EvaluatorPipeline:
         print(chosen_clustering)
 
         rows = self.model_eval.analyze_clusters(
-            chosen_clustering, embeddings, generation_results=generation_results
+            chosen_clustering,
+            joint_embeddings_all_llms,
+            generation_results=generation_results,
         )
 
         # Save and display the results
@@ -188,30 +222,32 @@ class EvaluatorPipeline:
 
     def run_approvals_based_evaluation_and_plotting(self, approval_filename):
         # Generate the data for approvals
-        approvals_statements_and_embeddings = (
-            self.model_eval.generate_approval_responses(
-                self.all_texts[: self.args.texts_subset],
-                self.args.model_family,
-                self.args.model,
-                self.prompt_template,
-                self.args.role_description,
+
+        for role_description in self.approval_prompts:
+            approvals_statements_and_embeddings = (
+                self.model_eval.generate_approval_responses(
+                    self.all_texts[: self.args.texts_subset],
+                    self.args.model_family,
+                    self.args.model,
+                    self.approval_question_prompt_template,
+                    role_description,
+                )
             )
-        )
 
-        # Perform dimensionality reduction on the embeddings part of the approvals data
-        # assuming that the embeddings are the second element in the tuple
-        embeddings = np.array(
-            [approval[1] for approval in approvals_statements_and_embeddings]
-        )
-        dim_reduce_tsne = self.model_eval.tsne_dimension_reduction(
-            embeddings, iterations=2000, p=50
-        )
+            # Perform dimensionality reduction on the embeddings part of the approvals data
+            # assuming that the embeddings are the second element in the tuple
+            embeddings = np.array(
+                [approval[1] for approval in approvals_statements_and_embeddings]
+            )
+            dim_reduce_tsne = self.model_eval.tsne_dimension_reduction(
+                embeddings, iterations=2000, p=50
+            )
 
-        # Extract the condition (approval or disapproval) from the approvals data
-        # assuming that the condition is the first element in the tuple
-        conditions = np.array(
-            [approval[0] for approval in approvals_statements_and_embeddings]
-        )
+            # Extract the condition (approval or disapproval) from the approvals data
+            # assuming that the condition is the first element in the tuple
+            conditions = np.array(
+                [approval[0] for approval in approvals_statements_and_embeddings]
+            )
 
         # Approvals
         self.viz.plot_approvals(

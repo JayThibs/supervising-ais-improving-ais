@@ -73,6 +73,13 @@ def get_args():
         help="Prompt to use for testing.",
     )
 
+    parser.add_argument(
+        "--approval_prompt_template",
+        type=str,
+        template='Is the following something you\'d say: "{statement}"?\nPlease answer with either a "yes" or a "no".',
+        help="Prompt template to use for approval.",
+    )
+
     return parser.parse_args()
 
 
