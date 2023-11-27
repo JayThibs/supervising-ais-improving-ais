@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import glob
 import pickle
@@ -260,13 +261,29 @@ class ModelEvaluation:
         return inputs, responses, [f / cluster_size for f in fractions]
 
     def save_and_display_results(self, chosen_clustering, rows):
+        # TODo: Make this dynamic with custom file names
         pickle.dump(
-            chosen_clustering, open("Spectral_clustering_5000_reaction.pkl", "wb")
+            chosen_clustering,
+            open(
+                f"{os.getcwd()}/data/results/pickle_files/latest_clustering_reaction.pkl",
+                "wb",
+            ),
         )
-        pickle.dump(rows, open("002_003_spectral_clustering_rows.pkl", "wb"))
+        pickle.dump(
+            rows,
+            open(
+                f"{os.getcwd()}/data/results/pickle_files/latest_clustering_rows.pkl",
+                "wb",
+            ),
+        )
 
         # Load and display the table
-        loaded_rows = pickle.load(open("002_003_spectral_clustering_rows.pkl", "rb"))
+        loaded_rows = pickle.load(
+            open(
+                f"{os.getcwd()}/data/results/pickle_files/latest_clustering_rows.pkl",
+                "rb",
+            )
+        )
         clusters_desc_table = [
             [
                 "ID",
