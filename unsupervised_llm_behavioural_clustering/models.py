@@ -1,4 +1,9 @@
 from openai import OpenAI
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_random_exponential,
+)  # for exponential backoff
 
 
 class LanguageModelInterface:
@@ -7,29 +12,41 @@ class LanguageModelInterface:
 
 
 class OpenAIModel(LanguageModelInterface):
-    def __init__(self, model, temperature=0.1, max_tokens=150):
+    def __init__(self, model, system_message, temperature=0.1, max_tokens=150):
         self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens
+        self.system_message = system_message
+        self.client = OpenAI()
 
-    def generate(self, prompt, system_message="You are an AI language model."):
-        client = OpenAI()
+    def generate(self, prompt):
+        print("Generating with OpenAI API...")
 
-        completion = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {
-                    "role": "system",
-                    "content": system_message,
-                },
-                {
-                    "role": "user",
-                    "content": prompt,
-                },
-            ],
-            temperature=self.temperature,
-            max_tokens=self.max_tokens,
-        )
+        @retry(wait=wait_random_exponential(min=1, max=60), stop=stop_after_attempt(6))
+        def completion_with_backoff(**kwargs):
+            model = kwargs["model"]
+            prompt = kwargs["prompt"]
+            completion = self.client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": self.system_message,
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt,
+                    },
+                ],
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
+                timeout=10,
+            )
+            return completion
+
+        completion = completion_with_backoff(model="gpt-3.5-turbo", prompt=prompt)
+
+        print("Completed generation.")
         return completion.choices[0].message.content
 
 

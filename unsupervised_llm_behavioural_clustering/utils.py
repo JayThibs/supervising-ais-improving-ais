@@ -14,7 +14,28 @@ from models import OpenAIModel, AnthropicModel, LocalModel
 from openai import OpenAI
 
 
-def query_model_on_statements(statements, model_family, model, prompt_template):
+def initialize_model(
+    model_family, model, system_message, temperature=0.1, max_tokens=150
+):
+    """Initialize a language model."""
+    if model_family == "openai":
+        model_instance = OpenAIModel(
+            model, system_message, temperature=temperature, max_tokens=max_tokens
+        )
+    elif model_family == "anthropic":
+        model_instance = AnthropicModel(model)
+    elif model_family == "local":  # This should be replaced by Mistral and other models
+        model_instance = LocalModel(model)
+    else:
+        raise ValueError(
+            f"Invalid model family {model_family}. Options: 'openai', 'anthropic', 'local'."
+        )
+    return model_instance
+
+
+def query_model_on_statements(
+    statements, model_family, model, prompt_template, system_message
+):
     inputs = []
     responses = []
     full_conversations = []
@@ -22,20 +43,37 @@ def query_model_on_statements(statements, model_family, model, prompt_template):
 
     print("query_model_on_statements...")
 
-    if "openai" == model_family:
-        model_instance = OpenAIModel(model)
-    elif "anthropic" == model_family:
-        model_instance = AnthropicModel()
-    elif model_family == "local":
-        model_instance = LocalModel()
-    else:
-        raise ValueError("Invalid model name")
+    model_instance = initialize_model(model_family, model, system_message)
 
-    for statement in statements:
-        print("statement:", statement)
+    for i, statement in enumerate(statements):
+        print(f"statement {i}:", statement)
         prompt = prompt_template.format(statement=statement)
         print("prompt:", prompt)
-        response = model_instance.generate(prompt)
+        for j in range(10):
+            try:
+                start_time = time.time()
+                while True:
+                    try:
+                        response = model_instance.generate(prompt)
+
+                        break
+                    except Exception as e:
+                        if time.time() - start_time > 20:
+                            raise e
+                        print(f"Exception: {type(e).__name__}, {str(e)}")
+                        print("Retrying generation due to exception...")
+                        time.sleep(2)
+                    # Check if we are about to exceed the OpenAI rate limit
+                    if model_family == "openai" and i % 60 == 0 and i != 0:
+                        print(
+                            "Sleeping for 60 seconds to avoid exceeding OpenAI rate limit..."
+                        )
+                        time.sleep(60)
+                break
+            except Exception as e:
+                print(f"Exception: {type(e).__name__}, {str(e)}")
+                print("Skipping API error", j)
+                time.sleep(2)
         print("response:", response)
         inputs.append(statement)
         responses.append(response)
@@ -51,44 +89,14 @@ def query_model_on_statements(statements, model_family, model, prompt_template):
     print("full_conversations:", full_conversations)
     print("model_instance:", model_instance)
 
-    return inputs, responses, full_conversations, model_instance
+    model_info = [model_family, model, system_message]
 
-
-def get_model_approvals(
-    statements,
-    prompt_template,
-    model,
-    system_role_str,
-    approve_strs=["yes"],
-    disapprove_strs=["no"],
-):
-    approvals = []
-    model_instance = None
-
-    if model == "openai":
-        model_instance = OpenAIModel()
-    elif model == "anthropic":
-        model_instance = AnthropicModel()
-    elif model == "local":
-        model_instance = LocalModel()
-    else:
-        raise ValueError("Invalid model name")
-
-    for statement in tqdm(statements):
-        prompt = prompt_template.format(statement=statement)
-        response = model_instance.generate(prompt).lower()
-
-        is_approved = any(s in response for s in approve_strs)
-        is_disapproved = any(s in response for s in disapprove_strs)
-
-        if is_approved and not is_disapproved:
-            approvals.append(1)
-        elif not is_approved and is_disapproved:
-            approvals.append(0)
-        else:
-            approvals.append(-1)
-
-    return statements, approvals
+    return (
+        inputs,
+        responses,
+        full_conversations,
+        model_info,
+    )
 
 
 def embed_texts(
@@ -163,7 +171,7 @@ def select_by_indices(curation_results, indices):
 
 def identify_theme(
     texts,
-    model_instance,
+    model_info,
     sampled_texts=5,
     temp=0.1,
     max_tokens=50,
@@ -181,6 +189,10 @@ def identify_theme(
             + "\n"
         )
     theme_identify_prompt = theme_identify_prompt + "\nTheme:"
+    model_family, model, system_message = model_info[0], model_info[1], model_info[2]
+    model_instance = initialize_model(
+        model_family, model, system_message, temp, max_tokens
+    )
     for i in range(20):
         try:
             completion = model_instance.generate(theme_identify_prompt)
@@ -196,9 +208,17 @@ def text_match_theme(
     text,
     theme,
     matching_instructions='Does the following text contain themes of "{theme}"? Answer either "yes" or "no".\nText: "{text}"\nAnswer:',
+    model_family="openai",
     model="gpt-3.5-turbo",
+    system_message="You are an AI language model.",
+    temperature=0,
+    max_tokens=3,
 ):
     client = OpenAI()
+    matching_instructions = matching_instructions.format(theme=theme, text=text)
+    model_instance = initialize_model(
+        model_family, model, system_message, temperature, max_tokens
+    )
     for i in range(20):
         try:
             completion = OpenAI.chat.completions.create(
@@ -362,6 +382,9 @@ def compile_cluster_table(
         cluster_inputs_themes = [
             identify_theme(
                 inputs,
+                model_family,
+                model,
+                system_message,
                 sampled_texts=10,
                 max_tokens=70,
                 temp=0.5,

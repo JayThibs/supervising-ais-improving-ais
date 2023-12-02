@@ -1,19 +1,22 @@
+import os
 import numpy as np
-import matplotlib.pyplot as plt
 from tqdm import tqdm
+import pickle
+import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
 import matplotlib.patches as mpatches
+import sklearn
+from terminaltables import AsciiTable
 from sklearn.cluster import OPTICS, SpectralClustering, AgglomerativeClustering, KMeans
 from scipy.cluster.hierarchy import dendrogram, linkage, to_tree
-from utils import lookup_cid_pos_in_rows, identify_theme
+from utils import lookup_cid_pos_in_rows, identify_theme, compare_response_pair
 
 
 class Clustering:
-    def __init__(self, embeddings, args):
-        self.embeddings = embeddings
+    def __init__(self, args):
         self.args = args
 
-    def perform_multiple_clustering(self):
+    def perform_multiple_clustering(self, embeddings):
         cluster_algorithms = {
             "OPTICS": OPTICS(min_samples=2, xi=0.12),
             "Spectral": SpectralClustering(100 if not self.args.test_mode else 2),
@@ -26,12 +29,12 @@ class Clustering:
             # Add more as needed
         }
 
-        print("Embeddings shape:", self.embeddings.shape)
-        print("Embeddings:", self.embeddings)
+        print("Embeddings shape:", embeddings.shape)
+        print("Embeddings:", embeddings)
         clustering_results = {}
         for name, algorithm in cluster_algorithms.items():
             print(f"Running {name} clustering...")
-            clustering_results[name] = algorithm.fit(self.embeddings)
+            clustering_results[name] = algorithm.fit(embeddings)
 
         return clustering_results
 
@@ -42,26 +45,93 @@ class Clustering:
             centroids.append(c)
         return np.array(centroids)
 
-    def hierarchical_cluster(
-        self,
-        clustering,
-        approvals_statements_and_embeddings,
-        rows,
-        colors,
-        labels=None,
-        bar_height=1,
-        bb_width=10,
-        x_leftshift=0,
-        y_downshift=0,
-        figsize=(35, 35),
-        filename="hierarchical_clustering.pdf",
-    ):
-        def llf(id):
-            if id < n_clusters:
-                return leaf_labels[id]
-            else:
-                return "Error: id too high."
+    def cluster_statement_embeddings(self, statement_embeddings):
+        print("Running clustering on statement embeddings...")
+        clustering = sklearn.cluster.SpectralClustering(120, random_state=42).fit(
+            statement_embeddings
+        )
 
+        plt.hist(
+            clustering.labels_, bins=120, title="Spectral Clustering of Statements"
+        )
+        plt.show()
+        return clustering
+
+    def cluster_approval_stats(
+        self,
+        approvals_statements_and_embeddings,
+        statement_clustering,
+        labels,
+    ):
+        # Calculating the confusion matrix and pearson correlation between responses
+        chat_modes = ["Bing Chat", "Google Chat", "Bing Chat Emoji", "Bing Chat Janus"]
+        response_types = ["approve", "disapprove"]
+
+        for response_type in response_types:
+            for i in range(len(chat_modes)):
+                for j in range(i + 1, len(chat_modes)):
+                    compare_response_pair(
+                        approvals_statements_and_embeddings,
+                        chat_modes[i],
+                        chat_modes[j],
+                        labels,
+                        response_type,
+                    )
+            print("\n\n")
+
+        # rows = pickle.load(open("chat_mode_approvals_spectral_clustering_rows.pkl", "rb"))
+        rows = self.compile_cluster_table(
+            statement_clustering,
+            approvals_statements_and_embeddings,
+            theme_summary_instructions="Briefly list the common themes of the following texts:",
+            max_desc_length=250,
+        )
+
+        pickle.dump(
+            rows,
+            open(
+                f"{os.getcwd()}/data/results/pickle_files/rows_chatbots_G_B_BE_BJ.pkl",
+                "wb",
+            ),
+        )
+        pickle.dump(
+            statement_clustering,
+            open(
+                f"{os.getcwd()}/data/results/pickle_files/clustering_chatbots_G_B_BE_BJ.pkl",
+                "wb",
+            ),
+        )
+
+        # rows = pickle.load(open("chat_mode_approvals_spectral_clustering_rows.pkl", "rb"))
+        clusters_desc_table = [
+            [
+                "ID",
+                "N",
+                "Google Chat",
+                "Bing Chat",
+                "Bing Chat Emojis",
+                "Bing Chat Janus",
+                "Inputs Themes",
+            ]
+        ]
+        for r in rows:
+            clusters_desc_table.append(r)
+        t = AsciiTable(clusters_desc_table)
+        t.inner_row_border = True
+        print(t.table)
+        print("\n\n")
+        print("Saving table to file...")
+        pickle.dump(
+            clusters_desc_table,
+            open(
+                f"{os.getcwd()}/data/results/pickle_files/clusters_desc_table_chatbots_G_B_BE_BJ.pkl",
+                "wb",
+            ),
+        )
+
+    def calculate_hierarchical_cluster_data(
+        self, clustering, approvals_statements_and_embeddings, rows
+    ):
         statement_embeddings = np.array(
             [e[2] for e in approvals_statements_and_embeddings]
         )
@@ -100,62 +170,12 @@ class Clustering:
 
         original_cluster_sizes = all_cluster_sizes[:n_clusters]
         merged_cluster_sizes = all_cluster_sizes[n_clusters:]
-
-        # leaf_labels=[":".join([str(condition_size) for condition_size in s]) + " : " + l for s,l in zip(original_cluster_sizes,cluster_labels)]
         leaf_labels = [
             str(s[0]) + " : " + l
             for s, l in zip(original_cluster_sizes, cluster_labels)
         ]
 
-        # adapted from: https://stackoverflow.com/questions/30317688/annotating-dendrogram-nodes-in-scipy-matplotlib
-
-        Z[:, 2] = np.arange(1.0, len(Z) + 1)
-        fig, ax = plt.subplots(1, 1, figsize=figsize, dpi=120)
-        dn = dendrogram(
-            Z, ax=ax, leaf_rotation=-90, leaf_font_size=20, leaf_label_func=llf
-        )
-
-        ii = np.argsort(np.array(dn["dcoord"])[:, 1])
-        for j, (icoord, dcoord) in enumerate(zip(dn["icoord"], dn["dcoord"])):
-            x = 0.5 * sum(icoord[1:3])
-            y = dcoord[1]
-            ind = np.nonzero(ii == j)[0][0]
-            s = merged_cluster_sizes[ind]
-            # ax.annotate(merged_cluster_labels[ind], (x,y), va='top', ha='center')
-            for i in range(len(colors)):
-                ax.add_patch(
-                    Rectangle(
-                        (
-                            x - bb_width / 2 - x_leftshift,
-                            y
-                            - y_downshift
-                            - i * bar_height
-                            + bar_height * (len(colors) - 1),
-                        ),
-                        bb_width * s[i + 1] / s[0],
-                        bar_height,
-                        facecolor=colors[i],
-                    )
-                )
-
-            ax.add_patch(
-                Rectangle(
-                    (x - bb_width / 2 - x_leftshift, y - y_downshift),
-                    bb_width,
-                    bar_height * len(colors),
-                    facecolor="none",
-                    ec="k",
-                    lw=1,
-                )
-            )
-        if not labels is None:
-            patch_colors = [
-                mpatches.Patch(color=c, label=l) for c, l in zip(colors, labels)
-            ]
-            ax.legend(handles=patch_colors)
-
-        plt.tight_layout()
-        plt.savefig(filename)
+        return Z, leaf_labels, original_cluster_sizes, merged_cluster_sizes
 
     def compile_cluster_table(
         self,
