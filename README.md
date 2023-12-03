@@ -50,3 +50,4 @@ Our intent is to generate ~300 high quality labeled data points for each subtask
 * (Probably) replace all the LangChain code with the OpenAI API instead
 * Improve clustering method
 * Improve labeling method
+* Build additional tooling and pipelines for automatically extracting useful insights from contrastively decoded text and clustering results on that text
