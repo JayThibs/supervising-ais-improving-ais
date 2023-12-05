@@ -47,6 +47,6 @@ Our intent is to generate ~300 high quality labeled data points for each subtask
 # TODO
 
 * Refactor notebook code in python scripts
-* (Probably) replace all the LangChain code with the OpenAI API instead
+* Integrate all methods
 * Improve clustering method
 * Improve labeling method
