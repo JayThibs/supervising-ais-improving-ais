@@ -72,9 +72,9 @@ class DataPreparation:
     def load_short_texts(self, all_texts, max_length=150):
         return [t[1] for t in all_texts if len(t[1]) < max_length]
 
-    def create_text_subset(self, texts, n_points=5000, seed=42):
+    def create_text_subset(self, texts, n_statements=5000, seed=42):
         rng = np.random.default_rng(seed=seed)
-        return rng.permutation(texts)[:n_points]
+        return rng.permutation(texts)[:n_statements]
 
     def save_to_pickle(self, data, filename):
         pickle_dir = "data/intermediate/pickle_files"

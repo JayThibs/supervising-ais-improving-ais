@@ -48,6 +48,7 @@ class EvaluatorPipeline:
                 prompt for prompt in self.approval_prompts.values()
             ]
         self.approval_question_prompt_template = self.args.approval_prompt_template
+        self.use_saved_approvals = self.args.use_saved_approvals
 
     def setup(self):
         # Create a new data/evals directory if it doesn't exist
@@ -88,14 +89,14 @@ class EvaluatorPipeline:
         return filename
 
     def run_short_text_tests(self):
-        n_points = 100
+        n_statements = 100
         self.text_subset = self.model_eval.load_and_preprocess_data(
-            self.data_prep, n_points=n_points
-        )
+            self.data_prep, n_statements=n_statements
+        ).tolist()
         print(self.text_subset)
         if self.saved_query_results is None:
             query_results, file_name = self.model_eval.run_short_text_tests(
-                self.text_subset, n_points=n_points
+                self.text_subset, n_statements=n_statements
             )
             print("Saving generated results...")
             self.save_results(
@@ -113,7 +114,6 @@ class EvaluatorPipeline:
         print(query_results)
         print(self.model_eval)
         print(self.args.model)
-        pdb.set_trace()
         joint_embeddings_all_llms = self.model_eval.embed_responses(
             query_results=query_results, llms=[self.args.model]
         )
@@ -176,8 +176,8 @@ class EvaluatorPipeline:
 
         # Save and display the results
         print("Saving and displaying results...")
-        self.model_eval.save_and_display_results(chosen_clustering, rows)
         pdb.set_trace()
+        self.model_eval.save_and_display_results(chosen_clustering, rows)
 
         self.run_approvals_based_evaluation_and_plotting(approval_filename)
         self.clustering_obj = Clustering(self.args)
@@ -279,8 +279,7 @@ class EvaluatorPipeline:
     def run_approvals_based_evaluation_and_plotting(self, approval_filename):
         # Generate the data for approvals
 
-        use_saved_approvals = False
-        if use_saved_approvals:
+        if self.use_saved_approvals:
             self.approvals_statements_and_embeddings = pickle.load(
                 open(
                     f"{os.getcwd()}/data/results/pickle_files/approvals_statements_and_embeddings_G_B_BE.pkl",
@@ -291,20 +290,23 @@ class EvaluatorPipeline:
         else:
             print("Embedding statements...")
             statement_embeddings = embed_texts(
-                self.text_subset.tolist(), model="text-embedding-ada-002"
+                self.text_subset, model="text-embedding-ada-002"
             )
             print("Generating approvals...")
+            print(self.text_subset)
+            print(type(self.text_subset))
             all_condition_approvals = [
                 self.model_eval.get_model_approvals(
-                    self.all_texts[: self.args.texts_subset],
-                    self.args.model_family,
-                    self.args.model,
-                    self.approval_question_prompt_template,
-                    role_description,
+                    statements=self.text_subset,
+                    prompt_template=self.approval_question_prompt_template,
+                    model_family=self.args.model_family,
+                    model=self.args.model,
+                    system_message=role_description,
                 )
                 for role_description in self.approval_prompts
             ]
 
+            self.approvals_statements_and_embeddings = []
             for i in range(len(self.text_subset)):
                 record_approvals = [
                     condition_approvals[i]
@@ -316,7 +318,7 @@ class EvaluatorPipeline:
                     statement_embeddings[i],
                 ]
                 self.approvals_statements_and_embeddings.append(record)
-                pickle.save(
+                pickle.dump(
                     self.approvals_statements_and_embeddings,
                     open(
                         f"{os.getcwd()}/data/results/pickle_files/approvals_statements_and_embeddings_G_B_BE.pkl",
@@ -326,11 +328,14 @@ class EvaluatorPipeline:
 
         # Perform dimensionality reduction on the embeddings part of the approvals data
         # assuming that the embeddings are the second element in the tuple
+        print("Performing dimensionality reduction...")
+        pdb.set_trace()
+        print(self.approvals_statements_and_embeddings)
         self.statement_embeddings = np.array(
             [approval[2] for approval in self.approvals_statements_and_embeddings]
         )
         dim_reduce_tsne = self.model_eval.tsne_dimension_reduction(
-            statement_embeddings, iterations=2000, p=50
+            self.statement_embeddings, iterations=2000, p=50
         )
 
         # Extract the condition (approval or disapproval) from the approvals data

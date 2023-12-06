@@ -22,7 +22,7 @@ class ModelEvaluation:
         self.text_subset = []
 
     # TODO: Consider moving this to utils.py or data_preparation.py
-    def load_and_preprocess_data(self, data_prep, n_points: int = 5000) -> list:
+    def load_and_preprocess_data(self, data_prep, n_statements: int = 5000) -> list:
         # Load all evaluation data
         file_paths = [
             path for path in glob.iglob("data/evals/**/*.jsonl", recursive=True)
@@ -30,7 +30,7 @@ class ModelEvaluation:
         print(f"Found {len(file_paths)} files.")
         self.all_texts = data_prep.load_evaluation_data(file_paths)
         self.short_texts = data_prep.load_short_texts(self.all_texts)
-        self.text_subset = data_prep.create_text_subset(self.short_texts, n_points)
+        self.text_subset = data_prep.create_text_subset(self.short_texts, n_statements)
         print(f"Loaded {len(self.all_texts)} texts.")
         print(f"Loaded {len(self.short_texts)} short texts.")
         print(f"Loaded {len(self.text_subset)} text subset.")
@@ -53,8 +53,10 @@ class ModelEvaluation:
         )
 
     def get_model_approvals(
+        self,
         statements,
         prompt_template,
+        model_family,
         model,
         system_message="",
         approve_strs=["yes"],
@@ -65,16 +67,21 @@ class ModelEvaluation:
         prompts = [prompt_template.format(statement=s) for s in statements]
         model_instance = None
 
-        if model == "openai":
-            model_instance = OpenAIModel(system_message=system_message)
-        elif model == "anthropic":
+        if model_family == "openai":
+            print("System message:", system_message)
+            print("Model:", model)
+            model_instance = OpenAIModel(
+                model, system_message, temperature=0, max_tokens=5
+            )
+        elif model_family == "anthropic":
             model_instance = AnthropicModel()
-        elif model == "local":
+        elif model_family == "local":
             model_instance = LocalModel()
         else:
             raise ValueError("Invalid model name")
 
         for i in tqdm(range(n_statements)):
+            print(f"Prompt {i}: {prompts[i]}")
             r = model_instance.generate(prompt=prompts[i]).lower()
 
             approve_strs_in_response = sum([s in r for s in approve_strs])
@@ -146,7 +153,7 @@ class ModelEvaluation:
         return reduced_embeddings
 
     def perform_clustering(
-        combined_embeddings: np.array, n_clusters: int = 200
+        self, combined_embeddings: np.array, n_clusters: int = 200
     ) -> KMeans:
         """Perform clustering on combined embeddings."""
         clustering = KMeans(n_clusters=n_clusters, random_state=42).fit(
@@ -164,7 +171,7 @@ class ModelEvaluation:
     def run_short_text_tests(
         self,
         text_subset,
-        n_points=10,
+        n_statements=10,
         model_family="openai",
         model="gpt-3.5-turbo",
     ):
@@ -172,9 +179,7 @@ class ModelEvaluation:
         prompt_template = self.args.statements_prompt_template
 
         # Check if there is a saved generated responses file
-        file_name = (
-            f"{model_family}_{model}_reaction_to_{n_points}_anthropic_statements.pkl"
-        )
+        file_name = f"{model_family}_{model}_reaction_to_{n_statements}_anthropic_statements.pkl"
         query_results = self.generate_responses(
             text_subset, model_family, model, prompt_template, system_message
         )  # dictionary of inputs, responses, and model instance
@@ -193,6 +198,7 @@ class ModelEvaluation:
         rows = []
         n_clusters = max(chosen_clustering.labels_) + 1
 
+        print("Analyzing clusters...")
         for cluster_id in tqdm(range(n_clusters)):
             print(f"Analyzing cluster {cluster_id}...")
             print(f"Cluster {cluster_id} size: {len(joint_embeddings_all_llms)}")
@@ -204,8 +210,12 @@ class ModelEvaluation:
                 query_results,
             )
             rows.append(row)
+            # this should be a list of lists where each row is a cluster
 
+        print(f"row: {row}")
+        print(f"rows: {rows}")
         rows = sorted(rows, key=lambda x: x[1], reverse=True)
+        print(f"rows: {rows}")
         return rows
 
     def get_cluster_row(
@@ -227,12 +237,12 @@ class ModelEvaluation:
         for frac in model_attribution_fractions:
             row.append(f"{round(100 * frac, 1)}%")
 
-        pdb.set_trace()
         print(f"query_results: {query_results['inputs']}")
         print(f"{type(query_results['inputs'])}")
 
         # Identify themes within this cluster
-        for i in range(len(query_results["inputs"])):
+        # TODO: Make this work for multiple llms
+        for i in range(1):  # loop through llms
             print(f"Identifying themes for LLM {i}...")
             model_info = query_results["model_info"]
             print(f"inputs: {inputs}")
@@ -252,6 +262,7 @@ class ModelEvaluation:
             row.append(inputs_themes_str)
             row.append(responses_themes_str)
             row.append(interactions_themes_str)
+        print(f"row: {row}")
         return row
 
     def get_cluster_stats(self, joint_embeddings_all_llms, cluster_labels, cluster_ID):
@@ -295,14 +306,15 @@ class ModelEvaluation:
                 "rb",
             )
         )
+        # TODO: Make gpt-3.5-turbo dynamic to add multiple models to the table (so that % makes sense)
         clusters_desc_table = [
             [
-                "ID",
-                "N",
-                "gpt-3.5-turbo",  # TODO: Make this dynamic
-                "Inputs Themes",
-                "Responses Themes",
-                "Interaction Themes",
+                "ID",  # cluster ID
+                "N",  # number of items in the cluster
+                "gpt-3.5-turbo",  # % of items in the cluster generated by gpt-3.5-turbo
+                "Inputs Themes",  # LLM says the theme of the input
+                "Responses Themes",  # LLM says the theme of the response
+                "Interaction Themes",  # LLM says the theme of the input and response together
             ]
         ]
         for r in loaded_rows:
