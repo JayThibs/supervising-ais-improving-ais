@@ -2,11 +2,27 @@
 
 Future prosaic AIs will likely shape their own development or that of successor AIs. We're trying to make sure they don't go insane.
 
+The rise of powerful, general language modeling systems has lead to the rise of a bewildering variety of techniques and datasets for influencing the behaviors of those systems. However, it's often difficult to tell how a given intervention actually changes a model's behavior. This makes it difficult to evaluate the safety of a given intervention, or to compare the safety of different interventions. This research agenda aims to develop methods for evaluating the behavioral effects of different interventions, and to use those methods to evaluate the safety of different interventions.
+
+# Table of Contents
+
+- [Summary](#summary)
+- [Projects for the Agenda](#projects-for-the-agenda)
+- [Methods](#methods)
+  - [Contrastive Decoding](#contrastive-decoding)
+  - [Clustering](#clustering)
+  - [LLM-Automated Analysis](#llm-automated-analysis)
+- [How to Use](#how-to-use)
+  - [Setup](#setup)
+  - [Running](#running)
+- [TODO](#todo)
+- [Acknowledgements](#acknowledgements)
+
 # Summary
 
 There are two main ways AIs can get better: by improving their training algorithms or by improving their training data.
 
-We consider both scenarios, and tentatively believe that data-based improvement is riskier than architecture based improvement. Current models mostly derive their behavior from their training data, and not training algorithms [meaning their architectures, hyperparameters, loss functions, optimizers or the like](1). So far, most improvements to AI training algorithms seem 'value neutral'[2]. Also note that most of human value drift currently derives from cultural shifts changing the 'training data' available in the environment, not biological evolution over the brain's base learning algorithms[3].
+We consider both scenarios, and tentatively believe that data-based improvement is riskier than architecture based improvement. Current models mostly derive their behavior from their training data, and not training algorithms (meaning their architectures, hyperparameters, loss functions, optimizers or the like). So far, most improvements to AI training algorithms seem 'value neutral'. Also note that most of human value drift currently derives from cultural shifts changing the 'training data' available in the environment, not biological evolution over the brain's base learning algorithms.
 
 We imagine a future where AIs self-augment by continuously seeking out more and better training data, and either creating successor AIs or training themselves on that data. Often, these data will come from the AIs running experiments in the real world (doing science), deliberately seeking data that would cover a specific gap in its current capabilities, analogous to how human scientists seek data from domains where our current understanding is limited. With AI, this could involve AgentGPT-like systems that spin up many instances of themselves to run experiments in parallel, potentially leading to quick improvements if we are in an agency overhang.
 
@@ -21,28 +37,57 @@ We want to find methods of ensuring such 'automated science' processes remain sa
 
 Currently, we're focusing on scalable methods of tracking behavioral drift in language models, as well as benchmarks for evaluating a language model's capacity for stable self-modification via self-training.
 
-We now have a channel on the EleutherAI discord server called ai-supervisors. If you’d like to help with this agenda, please go there!
+# Methods
 
-In the channel, Quintin shared a quick overview of the two projects we mentioned in this post. I’m sharing it below two provide some clarity on what we are working towards at the moment:
+## Contrastive Decoding
 
-This agenda has two projects as its current focuses.
+Contrastive decoding is a method for comparing the behavioral tendencies of two language models. It works by querying the two models to generate a wide variety of responses, then using a combination of unsupervised clustering and supervisor models to compare the response patterns of the two LMs, and automatically highlight any differences that seems surprising or relevant from an alignment perspective.
 
-Project 1: Unsupervised behavioral evaluation
+## Clustering
 
-This project focuses on scalable ways to compare the behavioral tendencies of different LMs (or different ways of prompting the same LM), without necessarily knowing what you're looking for beforehand. The project's current approach is to query the two LMs to generate a wide variety of responses, then use a combination of unsupervised clustering and supervisor models to compare the response patterns of the two LMs, and automatically highlight any differences that seems surprising or relevant from an alignment perspective.
+Clustering is a method for grouping generated responses into clusters based on their semantic similarity. This is useful for identifying the different types of responses a model can generate, and for identifying which types of responses are most common.
 
-The ultimate goal of this project is to greatly accelerate the part of LM alignment research where we evaluate how a given finetuning / alignment approach impacts an LM's behaviors, so that LM alignment researchers can more quickly experiment with different finetuning approaches.
+## LLM-Automated Analysis
 
-Project 2: Benchmarks for stable reflectivity
+LLM-Automated Analysis involves using a language model to evaluate the behavioral tendencies of another language model. We use this approach along with the clustering techniques to study the behavioral differences between language models. Primarily, we measure the behavioral differences between a pre-trained language model and its fine-tuned version.
 
-This project focuses on building probing datasets to evaluate a model's competence at various sub-tasks associated with reflectivity / metacognition / values stability. Currently, these sub-tasks include:
-* Tracking one’s own values versus the values of others
-* Differentiating one’s current values versus one’s future values
-* Identifying events that could influence personal or others' values
-* Predicting how events may impact one's values
-* Evaluating the desirability of specific influences on personal values
+# How to Use
 
-Our intent is to generate ~300 high quality labeled data points for each subtask, as well as a pipeline for quickly generating and validating more such probing datasets.
+## Setup
+
+1. Clone the repository
+
+```bash
+git clone https://github.com/JayThibs/supervising-ais-improving-ais
+```
+
+2. Install the dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+3. Download the models
+
+```bash
+python download_models.py
+```
+
+For models the Llama-2, you will need to request access on the Meta website.
+
+## Running
+
+1. Run the following command to generate an entire test run:
+    
+```bash
+python unsupervised_llm_behavioural_clustering/main.py --model_family="openai" --model="gpt-3.5-turbo" --test_mode
+```
+
+2. Run the following command to do a full run on 5000 statements:
+
+```bash
+python unsupervised_llm_behavioural_clustering/main.py --model_family="openai" --model="gpt-3.5-turbo" --num_statements=5000
+```
 
 # TODO
 
@@ -50,3 +95,7 @@ Our intent is to generate ~300 high quality labeled data points for each subtask
 * Integrate all methods
 * Improve clustering method
 * Improve labeling method
+
+# Acknowledgements
+
+This work is supported by the [Long-Term Future Fund](https://funds.effectivealtruism.org/funds/far-future), [Lightspeed Grants](https://lightspeedgrants.org/), and [Open Philanthropy](https://www.openphilanthropy.org/).
