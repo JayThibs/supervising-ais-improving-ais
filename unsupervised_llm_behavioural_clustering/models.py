@@ -22,12 +22,10 @@ class OpenAIModel(LanguageModelInterface):
     def generate(self, prompt):
         print("Generating with OpenAI API...")
 
-        @retry(wait=wait_random_exponential(min=1, max=60), stop=stop_after_attempt(6))
-        def completion_with_backoff(**kwargs):
-            model = kwargs["model"]
-            prompt = kwargs["prompt"]
+        @retry(wait=wait_random_exponential(min=20, max=60), stop=stop_after_attempt(6))
+        def completion_with_backoff(model, prompt):
             completion = self.client.chat.completions.create(
-                model="gpt-3.5-turbo",
+                model=model,
                 messages=[
                     {
                         "role": "system",
@@ -40,7 +38,7 @@ class OpenAIModel(LanguageModelInterface):
                 ],
                 temperature=self.temperature,
                 max_tokens=self.max_tokens,
-                timeout=10,
+                timeout=60,
             )
             return completion
 

@@ -360,12 +360,18 @@ def get_cluster_centroids(embeddings, cluster_labels):
 def compile_cluster_table(
     clustering,
     approvals_statements_and_embeddings,
+    model_info,
     theme_summary_instructions="Briefly describe the overall theme of the following texts:",
     max_desc_length=250,
 ):
     """Tabulates high-level statistics and themes for each cluster."""
     n_clusters = max(clustering.labels_) + 1
     rows = []
+    model_family, model, system_message = (
+        model_info["model_family"],
+        model_info["model"],
+        model_info["system_message"],
+    )
     for cluster_id in tqdm(range(n_clusters)):
         row = [str(cluster_id)]
         cluster_indices = np.arange(len(clustering.labels_))[
