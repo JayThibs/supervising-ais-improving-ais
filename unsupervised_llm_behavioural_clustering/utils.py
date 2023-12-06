@@ -14,10 +14,13 @@ from models import OpenAIModel, AnthropicModel, LocalModel
 from openai import OpenAI
 
 
-def initialize_model(
-    model_family, model, system_message, temperature=0.1, max_tokens=150
-):
+def initialize_model(model_info, temperature=0.1, max_tokens=150):
     """Initialize a language model."""
+    model_family, model, system_message = (
+        model_info["model_family"],
+        model_info["model"],
+        model_info["system_message"],
+    )
     if model_family == "openai":
         model_instance = OpenAIModel(
             model, system_message, temperature=temperature, max_tokens=max_tokens
@@ -36,14 +39,17 @@ def initialize_model(
 def query_model_on_statements(
     statements, model_family, model, prompt_template, system_message
 ):
-    inputs = []
-    responses = []
-    full_conversations = []
-    model_instance = None
+    query_results = {}
+    inputs, responses, full_conversations = [], [], []
+    model_info = {}
+    model_info["model_family"] = model_family
+    model_info["model"] = model
+    model_info["system_message"] = system_message
+    query_results["model_info"] = model_info
 
     print("query_model_on_statements...")
 
-    model_instance = initialize_model(model_family, model, system_message)
+    model_instance = initialize_model(model_info)
 
     for i, statement in enumerate(statements):
         print(f"statement {i}:", statement)
@@ -87,16 +93,13 @@ def query_model_on_statements(
     print("inputs:", inputs)
     print("responses:", responses)
     print("full_conversations:", full_conversations)
-    print("model_instance:", model_instance)
 
-    model_info = [model_family, model, system_message]
+    query_results["inputs"] = inputs
+    query_results["responses"] = responses
+    query_results["full_conversations"] = full_conversations
+    query_results["model_info"] = model_info
 
-    return (
-        inputs,
-        responses,
-        full_conversations,
-        model_info,
-    )
+    return query_results
 
 
 def embed_texts(
@@ -189,10 +192,7 @@ def identify_theme(
             + "\n"
         )
     theme_identify_prompt = theme_identify_prompt + "\nTheme:"
-    model_family, model, system_message = model_info[0], model_info[1], model_info[2]
-    model_instance = initialize_model(
-        model_family, model, system_message, temp, max_tokens
-    )
+    model_instance = initialize_model(model_info, temp, max_tokens)
     for i in range(20):
         try:
             completion = model_instance.generate(theme_identify_prompt)
@@ -216,16 +216,14 @@ def text_match_theme(
 ):
     client = OpenAI()
     matching_instructions = matching_instructions.format(theme=theme, text=text)
-    model_instance = initialize_model(
-        model_family, model, system_message, temperature, max_tokens
-    )
+    # model_instance = initialize_model(model_info, temperature, max_tokens)
     for i in range(20):
         try:
             completion = OpenAI.chat.completions.create(
                 model=model,
                 messages=[{"role": "user", "content": matching_instructions}],
                 max_tokens=3,
-                temperature=0,
+                temperature=temperature,
             )
             break
         except:
@@ -362,12 +360,18 @@ def get_cluster_centroids(embeddings, cluster_labels):
 def compile_cluster_table(
     clustering,
     approvals_statements_and_embeddings,
+    model_info,
     theme_summary_instructions="Briefly describe the overall theme of the following texts:",
     max_desc_length=250,
 ):
     """Tabulates high-level statistics and themes for each cluster."""
     n_clusters = max(clustering.labels_) + 1
     rows = []
+    model_family, model, system_message = (
+        model_info["model_family"],
+        model_info["model"],
+        model_info["system_message"],
+    )
     for cluster_id in tqdm(range(n_clusters)):
         row = [str(cluster_id)]
         cluster_indices = np.arange(len(clustering.labels_))[

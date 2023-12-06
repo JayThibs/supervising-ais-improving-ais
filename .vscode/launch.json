@@ -1,7 +1,4 @@
 {
-    // Use IntelliSense to learn about possible attributes.
-    // Hover to view descriptions of existing attributes.
-    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
         {
@@ -15,5 +12,4 @@
             "args": ["--model-family=openai", "--model=gpt-3.5-turbo", "--test-mode"]
         }
     ]
-} // I use launch.json to run main.py with Debug Python File because I like the VSCode UI
-// You can switch out the args depending on what you are trying to debug
+}

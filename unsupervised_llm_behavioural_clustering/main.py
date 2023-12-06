@@ -60,10 +60,10 @@ def get_args():
         help="Run in test mode on a small data subset.",
     )
     parser.add_argument(
-        "--n_points",
+        "--n_statements",
         type=int,
         default=5000,
-        help="Number of points to use for clustering.",
+        help="Number of statements to use for clustering.",
     )
 
     parser.add_argument(
@@ -91,6 +91,12 @@ def get_args():
         "--new_generation",
         action="store_true",
         help="Generate new data for evaluation.",
+    )
+
+    parser.add_argument(
+        "--use_saved_approvals",
+        action="store_true",
+        help="Use saved approvals for evaluation.",
     )
 
     return parser.parse_args()
