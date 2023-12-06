@@ -98,4 +98,4 @@ python unsupervised_llm_behavioural_clustering/main.py --model_family="openai" -
 
 # Acknowledgements
 
-This work is supported by the [Long-Term Future Fund](https://funds.effectivealtruism.org/funds/far-future), [Lightspeed Grants](https://lightspeedgrants.org/), and [Open Philanthropy](https://www.openphilanthropy.org/).
+This work is supported through grants by the [Long-Term Future Fund](https://funds.effectivealtruism.org/funds/far-future), [Lightspeed Grants](https://lightspeedgrants.org/), and [Open Philanthropy](https://www.openphilanthropy.org/).
