@@ -1,58 +1,122 @@
 name: supervising-ais
 channels:
+  - conda-forge
   - defaults
 dependencies:
-  - bzip2=1.0.8=h1de35cc_0
-  - ca-certificates=2023.05.30=hecd8cb5_0
-  - libcxx=14.0.6=h9765a3e_0
-  - libffi=3.3=hb1e8313_2
-  - ncurses=6.4=hcec6c5f_0
-  - openssl=1.1.1u=hca72f7f_0
-  - pip=23.2.1=py310hecd8cb5_0
-  - python=3.10.6=hdfd78df_1
-  - readline=8.2=hca72f7f_0
-  - setuptools=68.0.0=py310hecd8cb5_0
-  - sqlite=3.41.2=h6c40b1e_0
-  - tk=8.6.12=h5d9f67b_0
-  - tzdata=2023c=h04d1e81_0
-  - wheel=0.38.4=py310hecd8cb5_0
-  - xz=5.4.2=h6c40b1e_0
-  - zlib=1.2.13=h4dc903c_0
+  - appnope=0.1.2=py311hca03da5_1001
+  - asttokens=2.0.5=pyhd3eb1b0_0
+  - backcall=0.2.0=pyhd3eb1b0_0
+  - bzip2=1.0.8=h620ffc9_4
+  - ca-certificates=2023.08.22=hca03da5_0
+  - comm=0.1.2=py311hca03da5_0
+  - debugpy=1.6.7=py311h313beb8_0
+  - decorator=5.1.1=pyhd3eb1b0_0
+  - executing=0.8.3=pyhd3eb1b0_0
+  - ipykernel=6.26.0=pyh3cd1d5f_0
+  - ipython=8.15.0=py311hca03da5_0
+  - jedi=0.18.1=py311hca03da5_1
+  - jupyter_client=8.6.0=py311hca03da5_0
+  - jupyter_core=5.5.0=py311hca03da5_0
+  - libcxx=14.0.6=h848a8c0_0
+  - libffi=3.4.4=hca03da5_0
+  - libsodium=1.0.18=h1a28f6b_0
+  - matplotlib-inline=0.1.6=py311hca03da5_0
+  - ncurses=6.4=h313beb8_0
+  - nest-asyncio=1.5.6=py311hca03da5_0
+  - openssl=3.0.12=h1a28f6b_0
+  - packaging=23.1=py311hca03da5_0
+  - parso=0.8.3=pyhd3eb1b0_0
+  - pexpect=4.8.0=pyhd3eb1b0_3
+  - pickleshare=0.7.5=pyhd3eb1b0_1003
+  - pip=23.3.1=py311hca03da5_0
+  - prompt-toolkit=3.0.36=py311hca03da5_0
+  - psutil=5.9.0=py311h80987f9_0
+  - ptyprocess=0.7.0=pyhd3eb1b0_2
+  - pure_eval=0.2.2=pyhd3eb1b0_0
+  - pygments=2.15.1=py311hca03da5_1
+  - python=3.11.5=hb885b13_0
+  - python-dateutil=2.8.2=pyhd3eb1b0_0
+  - pyzmq=25.1.0=py311h313beb8_0
+  - readline=8.2=h1a28f6b_0
+  - setuptools=68.0.0=py311hca03da5_0
+  - six=1.16.0=pyhd3eb1b0_1
+  - sqlite=3.41.2=h80987f9_0
+  - stack_data=0.2.0=pyhd3eb1b0_0
+  - tk=8.6.12=hb8d0fd4_0
+  - tornado=6.3.3=py311h80987f9_0
+  - traitlets=5.7.1=py311hca03da5_0
+  - wheel=0.41.2=py311hca03da5_0
+  - xz=5.4.5=h80987f9_0
+  - zeromq=4.3.4=hc377ac9_0
+  - zlib=1.2.13=h5a0b063_0
   - pip:
-      - aiohttp==3.8.5
+      - aiohttp==3.8.6
       - aiosignal==1.3.1
-      - async-timeout==4.0.2
+      - annotated-types==0.6.0
+      - anyio==3.7.1
+      - async-timeout==4.0.3
       - attrs==23.1.0
-      - black==23.7.0
+      - black==23.10.1
       - certifi==2023.7.22
-      - charset-normalizer==3.2.0
-      - click==8.1.6
-      - dataclasses-json==0.5.13
+      - charset-normalizer==3.3.2
+      - click==8.1.7
+      - contourpy==1.2.0
+      - cycler==0.12.1
+      - datasets==2.14.6
+      - dill==0.3.7
+      - distro==1.8.0
+      - filelock==3.13.1
+      - fonttools==4.44.0
       - frozenlist==1.4.0
-      - greenlet==2.0.2
+      - fsspec==2023.10.0
+      - h11==0.14.0
+      - httpcore==1.0.1
+      - httpx==0.25.1
+      - huggingface-hub==0.17.3
       - idna==3.4
-      - langchain==0.0.247
-      - langsmith==0.0.15
-      - marshmallow==3.20.1
+      - jinja2==3.1.2
+      - joblib==1.3.2
+      - kiwisolver==1.4.5
+      - markupsafe==2.1.3
+      - matplotlib==3.8.1
+      - mpmath==1.3.0
       - multidict==6.0.4
+      - multiprocess==0.70.15
       - mypy-extensions==1.0.0
-      - numexpr==2.8.4
-      - numpy==1.25.1
-      - openai==0.27.8
-      - openapi-schema-pydantic==1.2.4
-      - packaging==23.1
+      - networkx==3.2.1
+      - numpy==1.26.1
+      - openai==1.1.1
+      - pandas==2.1.2
       - pathspec==0.11.2
-      - platformdirs==3.10.0
-      - pydantic==1.10.12
+      - pillow==10.1.0
+      - platformdirs==3.11.0
+      - prettytable==3.9.0
+      - pyarrow==14.0.0
+      - pydantic==2.4.2
+      - pydantic-core==2.10.1
+      - pyparsing==3.1.1
+      - python-dotenv==1.0.0
+      - pytz==2023.3.post1
       - pyyaml==6.0.1
+      - regex==2023.10.3
       - requests==2.31.0
-      - sqlalchemy==2.0.19
-      - tenacity==8.2.2
+      - safetensors==0.4.0
+      - scikit-learn==1.3.2
+      - scipy==1.11.3
+      - sniffio==1.3.0
+      - sympy==1.12
+      - tenacity==8.2.3
       - terminaltables==3.1.10
-      - tomli==2.0.1
-      - tqdm==4.65.0
-      - typing-extensions==4.7.1
-      - typing-inspect==0.9.0
-      - urllib3==2.0.4
+      - threadpoolctl==3.2.0
+      - tokenizers==0.14.1
+      - torch==2.1.0
+      - tqdm==4.66.1
+      - transformers==4.35.0
+      - treelib==1.7.0
+      - typing-extensions==4.9.0
+      - tzdata==2023.3
+      - urllib3==2.0.7
+      - wcwidth==0.2.9
+      - xxhash==3.4.1
       - yarl==1.9.2
 prefix: /Users/jacquesthibodeau/anaconda3/envs/supervising-ais
