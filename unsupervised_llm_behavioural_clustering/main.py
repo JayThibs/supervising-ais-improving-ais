@@ -36,6 +36,7 @@ def get_args():
 
     parser.add_argument(
         "--model_family",
+        nargs="+",
         type=str,
         required=True,
         help="Language Model family to use. Options: 'openai', 'anthropic', 'local'.",
@@ -43,6 +44,7 @@ def get_args():
 
     parser.add_argument(
         "--model",
+        nargs="+",
         type=str,
         required=True,
         help="Language Model to use for evaluation. Options: 'gpt-3.5-turbo', 'gpt-4', etc.",
@@ -97,6 +99,18 @@ def get_args():
         "--use_saved_approvals",
         action="store_true",
         help="Use saved approvals for evaluation.",
+    )
+
+    parser.add_argument(
+        "--reuse_conditions",
+        action="store_true",
+        help="Use saved conditions for evaluation.",
+    )
+
+    parser.add_argument(
+        "--reuse_cluster_rows",
+        action="store_true",
+        help="Use saved cluster rows for evaluation.",
     )
 
     return parser.parse_args()

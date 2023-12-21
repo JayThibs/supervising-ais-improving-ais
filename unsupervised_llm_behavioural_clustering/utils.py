@@ -21,6 +21,9 @@ def initialize_model(model_info, temperature=0.1, max_tokens=150):
         model_info["model"],
         model_info["system_message"],
     )
+    print("model_family:", model_family)
+    print("model:", model)
+    print("system_message:", system_message)
     if model_family == "openai":
         model_instance = OpenAIModel(
             model, system_message, temperature=temperature, max_tokens=max_tokens
@@ -97,7 +100,6 @@ def query_model_on_statements(
     query_results["inputs"] = inputs
     query_results["responses"] = responses
     query_results["full_conversations"] = full_conversations
-    query_results["model_info"] = model_info
 
     return query_results
 
@@ -141,21 +143,22 @@ def embed_texts(
 def get_joint_embedding(
     inputs,
     responses,
-    model_name="text-embedding-ada-002",  # Added model_name as a parameter
+    model_name="text-embedding-ada-002",  # Added model_name as a paramete
     combine_statements=False,
 ):
     """Get joint embedding for a list of inputs and responses."""
     if not combine_statements:
-        inputs_embeddings = embed_texts(texts=[inputs])
-        responses_embeddings = embed_texts(texts=[responses])
+        inputs_embeddings = embed_texts(texts=[inputs], model=model_name)
+        responses_embeddings = embed_texts(texts=[responses], model=model_name)
         joint_embeddings = [
             i + r for i, r in zip(inputs_embeddings, responses_embeddings)
         ]
     else:
-        print("inputs:", inputs)
-        print("responses:", responses)
         joint_embeddings = embed_texts(
-            texts=[input + " " + response for input, response in zip(inputs, responses)]
+            texts=[
+                input + " " + response for input, response in zip(inputs, responses)
+            ],
+            model=model_name,
         )
     return joint_embeddings
 
@@ -176,11 +179,12 @@ def identify_theme(
     texts,
     model_info,
     sampled_texts=5,
-    temp=0.1,
+    temp=1,
     max_tokens=50,
     instructions="Briefly describe the overall theme of the following texts. Do not give the theme of any individual text.",
 ):
     theme_identify_prompt = instructions + "\n\n"
+    model_info["system_message"] = ""
     sampled_texts = random.sample(texts, min(len(texts), sampled_texts))
     for i in range(len(sampled_texts)):
         theme_identify_prompt = (
@@ -306,101 +310,6 @@ def print_cluster_approvals(
                 + ":"
             )
             print(approvals_statements_and_embeddings[i][1])
-
-
-def get_cluster_stats(joint_embeddings_all_llms, cluster_labels, cluster_ID):
-    """Analyzes a cluster and extracts aggregated statistics."""
-    inputs = []
-    responses = []
-    cluster_size = 0
-    n_llms = max([e[0] for e in joint_embeddings_all_llms])
-    fractions = [0 for _ in range(n_llms + 1)]
-    n_datapoints = len(joint_embeddings_all_llms)
-    for e, l in zip(joint_embeddings_all_llms, cluster_labels):
-        if l != cluster_ID:
-            continue
-        if e[0] >= 0:
-            fractions[e[0]] += 1
-        cluster_size += 1
-        inputs.append(e[1])
-        responses.append(e[2])
-    return inputs, responses, [f / cluster_size for f in fractions]
-
-
-def get_cluster_approval_stats(
-    approvals_statements_and_embeddings, cluster_labels, cluster_ID
-):
-    """Analyzes a cluster and extracts aggregated approval statistics."""
-    inputs = []
-    responses = []
-    cluster_size = 0
-    n_conditions = len(approvals_statements_and_embeddings[0][0])
-    approval_fractions = [0 for _ in range(n_conditions)]
-    n_datapoints = len(approvals_statements_and_embeddings)
-    for e, l in zip(approvals_statements_and_embeddings, cluster_labels):
-        if l != cluster_ID:
-            continue
-        for i in range(n_conditions):
-            if e[0][i] == 1:
-                approval_fractions[i] += 1
-        cluster_size += 1
-        inputs.append(e[1])
-    return inputs, [f / cluster_size for f in approval_fractions]
-
-
-def get_cluster_centroids(embeddings, cluster_labels):
-    """Calculates the centroid for each cluster."""
-    centroids = []
-    for i in range(max(cluster_labels) + 1):
-        c = np.mean(embeddings[cluster_labels == i], axis=0).tolist()
-        centroids.append(c)
-    return np.array(centroids)
-
-
-def compile_cluster_table(
-    clustering,
-    approvals_statements_and_embeddings,
-    model_info,
-    theme_summary_instructions="Briefly describe the overall theme of the following texts:",
-    max_desc_length=250,
-):
-    """Tabulates high-level statistics and themes for each cluster."""
-    n_clusters = max(clustering.labels_) + 1
-    rows = []
-    model_family, model, system_message = (
-        model_info["model_family"],
-        model_info["model"],
-        model_info["system_message"],
-    )
-    for cluster_id in tqdm(range(n_clusters)):
-        row = [str(cluster_id)]
-        cluster_indices = np.arange(len(clustering.labels_))[
-            clustering.labels_ == cluster_id
-        ]
-        row.append(len(cluster_indices))
-        inputs, model_approval_fractions = get_cluster_approval_stats(
-            approvals_statements_and_embeddings, clustering.labels_, cluster_id
-        )
-        for frac in model_approval_fractions:
-            row.append(str(round(100 * frac, 1)) + "%")
-        cluster_inputs_themes = [
-            identify_theme(
-                inputs,
-                model_family,
-                model,
-                system_message,
-                sampled_texts=10,
-                max_tokens=70,
-                temp=0.5,
-                instructions=theme_summary_instructions,
-            )[:max_desc_length].replace("\n", " ")
-            for _ in range(1)
-        ]
-        inputs_themes_str = "\n".join(cluster_inputs_themes)
-        row.append(inputs_themes_str)
-        rows.append(row)
-    rows = sorted(rows, key=lambda x: x[1], reverse=True)
-    return rows
 
 
 def compare_response_pair(
