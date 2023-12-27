@@ -261,6 +261,9 @@ class EvaluatorPipeline:
             f"{self.pickle_dir}/Anthropic_5000_random_statements_embs.pkl", "rb"
         ) as f:
             Anthropic_5000_random_statements_embs = pickle.load(f)
+            Anthropic_5000_random_statements_embs = (
+                Anthropic_5000_random_statements_embs[:n_statements]
+            )
 
         data_include_statements_and_embeddings_4_prompts = [
             [[], s[0], s[2]] for s in Anthropic_5000_random_statements_embs
@@ -268,9 +271,9 @@ class EvaluatorPipeline:
 
         for condition in be_nice_conditions:
             for i, record in enumerate(condition):
-                if record[1] == "no":
+                if record == 0:
                     data_include_statements_and_embeddings_4_prompts[i][0].append(0)
-                elif record[1] == "yes":
+                elif record == 1:
                     data_include_statements_and_embeddings_4_prompts[i][0].append(1)
                 else:
                     data_include_statements_and_embeddings_4_prompts[i][0].append(-1)
@@ -282,6 +285,11 @@ class EvaluatorPipeline:
         # TODO: What is the difference between this statement_clustering and the one above?
         statement_clustering = self.clustering_obj.cluster_persona_embeddings(
             self.statement_embeddings
+        )
+        pdb.set_trace()
+        print(
+            "data_include_statements_and_embeddings_4_prompts:",
+            data_include_statements_and_embeddings_4_prompts,
         )
         self.viz.plot_approvals(
             dim_reduce_tsne,

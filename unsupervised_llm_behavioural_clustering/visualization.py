@@ -124,12 +124,12 @@ class Visualization:
         plt.legend()
         plt.savefig(os.path.join(self.save_path, filename))
         print(f"Saved plot to {os.path.join(self.save_path, filename)}")
-        plt.show()
+        # plt.show()
         plt.close()
 
     def visualize_hierarchical_cluster(
         self,
-        hierarchy_data,
+        hierarchy_data: tuple,
         plot_type: str,
         bar_height=1,
         bb_width=10,
@@ -142,6 +142,7 @@ class Visualization:
         colors = self.plot_aesthetics[plot_type]["colors"]
         filename += f"_{plot_type}.png"
 
+        # Unpack hierarchy data
         Z, leaf_labels, original_cluster_sizes, merged_cluster_sizes = hierarchy_data
 
         def llf(id):
@@ -189,6 +190,7 @@ class Visualization:
                 )
             )
 
+        pdb.set_trace()
         if labels is not None:
             patch_colors = [
                 mpatches.Patch(color=c, label=l) for c, l in zip(colors, labels)
