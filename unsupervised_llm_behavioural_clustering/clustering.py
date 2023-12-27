@@ -56,14 +56,15 @@ class Clustering:
         print("clustering.labels_", clustering.labels_)
         print("n_clusters:", n_clusters)
 
-        plt.figure()
-        plt.hist(clustering.labels_, bins=n_clusters)
-        plt.title("Spectral Clustering of Statements")
+        fig, ax = plt.subplots()
+        ax.hist(clustering.labels_, bins=n_clusters)
+        ax.set_title("Spectral Clustering of Statements")
+        fig.tight_layout()
         plt.show()
         filename = f"{os.getcwd()}/data/results/plots/spectral_clustering_persona_statements.png"
-        plt.savefig(filename)
+        fig.savefig(filename)
         print(f"Saved plot to {filename}")
-        plt.close()
+        plt.close("all")
         return clustering
 
     def get_cluster_approval_stats(

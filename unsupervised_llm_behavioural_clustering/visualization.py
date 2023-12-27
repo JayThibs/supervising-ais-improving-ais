@@ -102,6 +102,7 @@ class Visualization:
         title: str,
     ):
         plt.figure(figsize=self.plot_dim)
+        pdb.set_trace()
         colors, shapes, labels, sizes, order = self.plot_aesthetics[plot_type].values()
         n_persona = len(labels)
         if order is None:
@@ -131,8 +132,8 @@ class Visualization:
         self,
         hierarchy_data: tuple,
         plot_type: str,
-        bar_height=1,
-        bb_width=10,
+        bar_height=0.7,
+        bb_width=40,
         x_leftshift=0,
         y_downshift=0,
         figsize=(35, 35),
@@ -190,7 +191,6 @@ class Visualization:
                 )
             )
 
-        pdb.set_trace()
         if labels is not None:
             patch_colors = [
                 mpatches.Patch(color=c, label=l) for c, l in zip(colors, labels)
@@ -199,6 +199,7 @@ class Visualization:
 
         plt.tight_layout()
         plt.savefig(filename)
+        plt.savefig(filename, format="svg")
 
     def visualize_awareness(
         self,
