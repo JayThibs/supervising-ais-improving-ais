@@ -9,7 +9,7 @@ from data_preparation import DataPreparation
 from model_evaluation import ModelEvaluation
 from visualization import Visualization
 from clustering import Clustering
-from utils import embed_texts
+from utils import embed_texts, load_pkl_or_not
 
 
 class EvaluatorPipeline:
@@ -48,7 +48,9 @@ class EvaluatorPipeline:
                 prompt for prompt in self.approval_prompts.values()
             ]
         self.approval_question_prompt_template = self.args.approval_prompt_template
-        self.use_saved_approvals = self.args.use_saved_approvals
+        self.set_reuse_flags()
+        self.hide_plots = self.process_hide_plots(self.args.hide_plots)
+        self.plot_statement_clustering = False
 
         # Set up objects
         self.model_eval = ModelEvaluation(args, self.llms)
@@ -93,6 +95,57 @@ class EvaluatorPipeline:
         self.data_prep = DataPreparation()
         self.all_texts = self.data_prep.load_evaluation_data(self.data_prep.file_paths)
 
+    def process_reuse_data(self, reuse_data, all_data_types):
+        reuse_types = set()
+
+        if "all" in reuse_data:
+            reuse_types = all_data_types.copy()
+            for item in reuse_data:
+                if item.startswith("!"):
+                    exclude_type = item[1:]
+                    reuse_types.discard(exclude_type)
+        else:
+            for item in reuse_data:
+                if item in all_data_types:
+                    reuse_types.add(item)
+
+        return reuse_types
+
+    def set_reuse_flags(self):
+        data_types = [
+            "embedding_clustering",
+            "joint_embeddings",
+            "tsne",
+            "approvals",
+            "hierarchical",
+            "awareness",
+            "cluster_rows",
+            "conditions",
+        ]
+
+        reuse_data_types = self.process_reuse_data(self.args.reuse_data, data_types)
+        print("Data types to reuse:", reuse_data_types)
+
+        for data_type in data_types:
+            setattr(self, f"reuse_{data_type}", data_type in reuse_data_types)
+
+    def process_hide_plots(self, hide_plots):
+        all_plot_types = {"tsne", "approval", "awareness", "hierarchical"}
+        hide_types = set()
+
+        if "all" in hide_plots:
+            hide_types = all_plot_types.copy()
+            for plot_type in hide_plots:
+                if plot_type.startswith("!"):
+                    include_type = plot_type[1:]
+                    hide_types.discard(include_type)
+        else:
+            for plot_type in hide_plots:
+                if plot_type in all_plot_types:
+                    hide_types.add(plot_type)
+
+        return hide_types
+
     def save_results(self, results, file_name, sub_dir):
         if not os.path.exists(self.results_dir):
             os.makedirs(self.results_dir)
@@ -123,8 +176,6 @@ class EvaluatorPipeline:
             self.data_prep, n_statements=n_statements
         )
 
-        print(type(self.text_subset))
-        print(self.text_subset)
         if self.saved_query_results is None:
             all_query_results = []
             for llm in self.llms:
@@ -141,25 +192,32 @@ class EvaluatorPipeline:
             print(f"{file_name} saved.")
         else:
             all_query_results = [self.saved_query_results]
-            print(all_query_results)
 
         all_model_info = []
         for result in all_query_results:
-            print(result)
             all_model_info.append(result["model_info"])
             # {"model_family": ..., "model": ..., "system_message": ...}
 
         print("Embedding responses...")
         # print(query_results)
-        joint_embeddings_all_llms = self.model_eval.embed_responses(
-            query_results=all_query_results, llms=self.llms
+        # if not exists and no reload joint embeddings flag, create joint_embeddings_all_llms, else load it
+        file_loaded, joint_embeddings_all_llms = load_pkl_or_not(
+            "joint_embeddings_all_llms.pkl",
+            self.pickle_dir,
+            self.reuse_joint_embeddings,
         )
+        if not file_loaded:
+            # File doesn't exist or needs to be updated, generate new content
+            joint_embeddings_all_llms = self.model_eval.embed_responses(
+                query_results=all_query_results, llms=self.llms
+            )
+            # Save the new content
+            with open(f"{self.pickle_dir}/joint_embeddings_all_llms.pkl", "wb") as f:
+                pickle.dump(joint_embeddings_all_llms, f)
+
         combined_embeddings = np.array(
             [e[3] for e in joint_embeddings_all_llms]
         )  # grab the embeddings of the inputs + responses
-        print(f"combined_embeddings: {combined_embeddings}")
-        print(f"combined_embeddings.shape: {combined_embeddings.shape}")
-        print(f"combined_embeddings[0].shape: {combined_embeddings[0].shape}")
         embeddings = np.array(combined_embeddings, dtype=np.float64)
         if not np.isfinite(embeddings).all():
             print("Embeddings contain non-finite values.")
@@ -170,7 +228,15 @@ class EvaluatorPipeline:
 
         # Choose which clustering result to analyze further
         print("Analyzing clusters...")
-        chosen_clustering = self.model_eval.clustering_results["KMeans"]
+        file_loaded, chosen_clustering = load_pkl_or_not(
+            "chosen_clustering.pkl", self.pickle_dir, self.reuse_embedding_clustering
+        )
+        if not file_loaded:
+            # File doesn't exist or needs to be updated, generate new content
+            chosen_clustering = self.model_eval.clustering_results["KMeans"]
+            # Save the new content
+            with open(f"{self.pickle_dir}/chosen_clustering.pkl", "wb") as f:
+                pickle.dump(chosen_clustering, f)
         labels = chosen_clustering.labels_
         plt.hist(labels, bins=3)
 
@@ -195,22 +261,30 @@ class EvaluatorPipeline:
         approval_filename = self.generate_plot_filename(
             model_names, "approval_responses"
         )
-        self.viz.plot_embedding_responses(
-            dim_reduce_tsne, joint_embeddings_all_llms, model_names, tsne_filename
-        )
+        if "tsne" not in self.hide_plots:
+            self.viz.plot_embedding_responses(
+                dim_reduce_tsne, joint_embeddings_all_llms, model_names, tsne_filename
+            )
         # plt.hist(labels, bins=50)
         # plt.show()
         # plt.close()
 
         # Analyze the clusters and get a summary table
         print("Compiling cluster table...")
-        print(chosen_clustering)
 
-        rows = self.model_eval.analyze_clusters(
-            chosen_clustering,
-            joint_embeddings_all_llms,
-            query_results=all_query_results,
+        file_loaded, rows = load_pkl_or_not(
+            "rows.pkl", self.pickle_dir, self.reuse_cluster_rows
         )
+        if not file_loaded:
+            # File doesn't exist or needs to be updated, generate new content
+            rows = self.model_eval.analyze_clusters(
+                chosen_clustering,
+                joint_embeddings_all_llms,
+                query_results=all_query_results,
+            )
+            # Save the new content
+            with open(f"{self.pickle_dir}/rows.pkl", "wb") as f:
+                pickle.dump(rows, f)
 
         # Save and display the results
         print("Saving and displaying results...")
@@ -219,43 +293,44 @@ class EvaluatorPipeline:
         self.run_approvals_based_evaluation_and_plotting(approval_filename)
         self.clustering_obj = Clustering(self.args)
         statement_clustering = self.clustering_obj.cluster_persona_embeddings(
-            self.statement_embeddings, n_clusters=120
+            self.statement_embeddings,
+            n_clusters=120,
+            plot=self.plot_statement_clustering,
         )
         print(f"labels: {labels}")
         self.clustering_obj.cluster_approval_stats(
             self.approvals_statements_and_embeddings,
             statement_clustering,
             all_model_info,
-            reuse_cluster_rows=self.args.reuse_cluster_rows,
+            self.reuse_cluster_rows,
         )
         print("Calculating hierarchical cluster data...")
-        # Check if the hierarchical cluster data has already been calculated
-        if (
-            os.path.exists(f"{self.pickle_dir}/hierarchy_data.pkl")
-            and self.args.reuse_conditions
-        ):
-            hierarchy_data = pickle.load(
-                open(f"{self.pickle_dir}/hierarchy_data.pkl", "rb")
-            )
-        else:
+        file_loaded, hierarchy_data = load_pkl_or_not(
+            "hierarchy_data.pkl", self.pickle_dir, self.reuse_conditions
+        )
+        if not file_loaded:
+            # File doesn't exist or needs to be updated, generate new content
             hierarchy_data = self.clustering_obj.calculate_hierarchical_cluster_data(
                 statement_clustering,
                 self.approvals_statements_and_embeddings,
                 rows,
             )  # (Z, leaf_labels, original_cluster_sizes, merged_cluster_sizes)
-            pickle.dump(
-                hierarchy_data,
-                open(f"{self.pickle_dir}/hierarchy_data.pkl", "wb"),
-            )
+            # Save the new content
+            with open(f"{self.pickle_dir}/hierarchy_data.pkl", "wb") as f:
+                pickle.dump(hierarchy_data, f)
         print("Visualizing hierarchical cluster...")
-        self.viz.visualize_hierarchical_cluster(
-            hierarchy_data,
-            plot_type="approval",
-            labels=labels,
-        )
+        if "hierarchical" not in self.hide_plots:
+            self.viz.visualize_hierarchical_cluster(
+                hierarchy_data,
+                plot_type="approval",
+                labels=labels,
+            )
 
         with open(f"{self.pickle_dir}/conditions.pkl", "rb") as f:
             be_nice_conditions = pickle.load(f)
+
+        pdb.set_trace()
+        print(f"be_nice_conditions: {be_nice_conditions}")
 
         with open(
             f"{self.pickle_dir}/Anthropic_5000_random_statements_embs.pkl", "rb"
@@ -267,16 +342,43 @@ class EvaluatorPipeline:
 
         data_include_statements_and_embeddings_4_prompts = [
             [[], s[0], s[2]] for s in Anthropic_5000_random_statements_embs
-        ]
+        ]  # [empty list for conditions, statement, statement_embedding]
 
+        print(
+            f"data_include_statements_and_embeddings_4_prompts[0]: {data_include_statements_and_embeddings_4_prompts[0]}"
+        )
+
+        pdb.set_trace()
         for condition in be_nice_conditions:
             for i, record in enumerate(condition):
+                print(f"record: {record}")
+                print(f"i: {i}")
                 if record == 0:
                     data_include_statements_and_embeddings_4_prompts[i][0].append(0)
                 elif record == 1:
                     data_include_statements_and_embeddings_4_prompts[i][0].append(1)
                 else:
                     data_include_statements_and_embeddings_4_prompts[i][0].append(-1)
+
+        pdb.set_trace()
+        print(
+            f"data_include_statements_and_embeddings_4_prompts: {data_include_statements_and_embeddings_4_prompts}"
+        )
+        print(
+            f"len(data_include_statements_and_embeddings_4_prompts): {len(data_include_statements_and_embeddings_4_prompts)}"
+        )
+        print(
+            f"len(data_include_statements_and_embeddings_4_prompts[0]): {len(data_include_statements_and_embeddings_4_prompts[0])}"
+        )
+        print(
+            f"len(data_include_statements_and_embeddings_4_prompts[0][0]): {len(data_include_statements_and_embeddings_4_prompts[0][0])}"
+        )
+        print(
+            f"len(data_include_statements_and_embeddings_4_prompts[0][1]): {len(data_include_statements_and_embeddings_4_prompts[0][1])}"
+        )
+        print(
+            f"len(data_include_statements_and_embeddings_4_prompts[0][2]): {len(data_include_statements_and_embeddings_4_prompts[0][2])}"
+        )
 
         statement_embeddings = np.array(
             [e[2] for e in data_include_statements_and_embeddings_4_prompts]
@@ -286,19 +388,18 @@ class EvaluatorPipeline:
         statement_clustering = self.clustering_obj.cluster_persona_embeddings(
             self.statement_embeddings
         )
-        pdb.set_trace()
-        print(
-            "data_include_statements_and_embeddings_4_prompts:",
-            data_include_statements_and_embeddings_4_prompts,
-        )
-        self.viz.plot_approvals(
-            dim_reduce_tsne,
-            data_include_statements_and_embeddings_4_prompts,  # TODO: ???
-            1,
-            plot_type="awareness",
-            filename="embedding_of_approvals_diff_chats.png",
-            title=f"Embeddings of approvals for different chat modes",
-        )
+
+        if "awareness" not in self.hide_plots:
+            self.viz.plot_approvals(
+                dim_reduce_tsne,
+                data_include_statements_and_embeddings_4_prompts,  # TODO: ???
+                1,
+                plot_type="awareness",
+                filename="embedding_of_approvals_diff_chats.png",
+                title=f"Embeddings of approvals for different chat modes",
+            )
+
+        print("Done. Please check the results directory for the plots.")
 
     def run_evaluation(self):
         # Generate responses and embed them
@@ -340,16 +441,13 @@ class EvaluatorPipeline:
 
     def run_approvals_based_evaluation_and_plotting(self, approval_filename):
         # Generate the data for approvals
+        file_loaded, self.approvals_statements_and_embeddings = load_pkl_or_not(
+            "approvals_statements_and_embeddings_G_B_BE.pkl",
+            self.pickle_dir,
+            self.reuse_approvals,
+        )
 
-        if self.use_saved_approvals:
-            self.approvals_statements_and_embeddings = pickle.load(
-                open(
-                    f"{os.getcwd()}/data/results/pickle_files/approvals_statements_and_embeddings_G_B_BE.pkl",
-                    "rb",
-                )
-            )
-
-        else:
+        if not file_loaded:
             print("Embedding statements...")
             statement_embeddings = embed_texts(
                 self.text_subset.tolist(), model="text-embedding-ada-002"
@@ -357,14 +455,13 @@ class EvaluatorPipeline:
             print("Generating approvals...")
             print(self.text_subset)
             print(type(self.text_subset))
-            if self.args.reuse_conditions:
-                all_condition_approvals = pickle.load(
-                    open(
-                        f"{os.getcwd()}/data/results/pickle_files/all_condition_approvals.pkl",
-                        "rb",
-                    )
-                )
-            else:
+            all_condition_approvals = load_pkl_or_not(
+                "all_condition_approvals.pkl",
+                self.pickle_dir,
+                self.reuse_conditions,
+            )
+
+            if not self.reuse_conditions:
                 all_condition_approvals = [
                     self.model_eval.get_model_approvals(
                         statements=self.text_subset,
@@ -375,16 +472,14 @@ class EvaluatorPipeline:
                     )
                     for role_description in self.approval_prompts
                 ]
-            if not os.path.exists(
-                f"{os.getcwd()}/data/results/pickle_files/all_condition_approvals.pkl"
-            ):
-                pickle.dump(
-                    all_condition_approvals,
-                    open(
-                        f"{os.getcwd()}/data/results/pickle_files/all_condition_approvals.pkl",
-                        "wb",
-                    ),
-                )
+                if not os.path.exists(f"{self.pickle_dir}/all_condition_approvals.pkl"):
+                    pickle.dump(
+                        all_condition_approvals,
+                        open(
+                            f"{self.pickle_dir}/all_condition_approvals.pkl",
+                            "wb",
+                        ),
+                    )
             print(f"all_condition_approvals: {all_condition_approvals}")
 
             self.approvals_statements_and_embeddings = []
@@ -405,7 +500,7 @@ class EvaluatorPipeline:
                 pickle.dump(
                     self.approvals_statements_and_embeddings,
                     open(
-                        f"{os.getcwd()}/data/results/pickle_files/approvals_statements_and_embeddings_G_B_BE.pkl",
+                        f"{self.pickle_dir}/approvals_statements_and_embeddings_G_B_BE.pkl",
                         "wb",
                     ),
                 )
@@ -413,7 +508,6 @@ class EvaluatorPipeline:
         # Perform dimensionality reduction on the embeddings part of the approvals data
         # assuming that the embeddings are the second element in the tuple
         print("Performing dimensionality reduction...")
-        print(self.approvals_statements_and_embeddings)
         self.statement_embeddings = np.array(
             [approval[2] for approval in self.approvals_statements_and_embeddings]
         )
@@ -422,8 +516,6 @@ class EvaluatorPipeline:
             f"{os.getcwd()}/data/results/statement_embeddings.npy",
             self.statement_embeddings,
         )
-        print(self.statement_embeddings)
-        print(self.statement_embeddings.shape)
         dim_reduce_tsne = self.model_eval.tsne_dimension_reduction(
             self.statement_embeddings, iterations=2000, perplexity=self.perplexity
         )
@@ -440,17 +532,18 @@ class EvaluatorPipeline:
         )
 
         # Refactored approvals plotting
-        for condition in [1, 0, -1]:
-            condition_title = {
-                1: "approvals",
-                0: "disapprovals",
-                -1: "no response",
-            }[condition]
-            self.viz.plot_approvals(
-                dim_reduce_tsne,
-                self.approvals_statements_and_embeddings,
-                condition,
-                plot_type="approval",
-                filename=approval_filename,
-                title=f"Embeddings of {condition_title} for different chat modes",
-            )
+        if "approvals" not in self.hide_plots:
+            for condition in [1, 0, -1]:
+                condition_title = {
+                    1: "approvals",
+                    0: "disapprovals",
+                    -1: "no response",
+                }[condition]
+                self.viz.plot_approvals(
+                    dim_reduce_tsne,
+                    self.approvals_statements_and_embeddings,
+                    condition,
+                    plot_type="approval",
+                    filename=approval_filename,
+                    title=f"Embeddings of {condition_title} for different chat modes",
+                )

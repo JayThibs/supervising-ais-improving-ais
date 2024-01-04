@@ -29,12 +29,6 @@ def get_args():
     )
 
     parser.add_argument(
-        "--hide_plots",
-        action="store_true",
-        help="Hide the plots while still saving them.",
-    )
-
-    parser.add_argument(
         "--model_family",
         nargs="+",
         type=str,
@@ -96,21 +90,24 @@ def get_args():
     )
 
     parser.add_argument(
-        "--use_saved_approvals",
-        action="store_true",
-        help="Use saved approvals for evaluation.",
+        "--reuse_data",
+        nargs="*",
+        type=str,
+        default=[],
+        help="Specify data types to reuse. Use 'all' to reuse all types. Prefix with '!' to exclude a type. "
+        "Options: 'all', 'tsne', 'approvals', 'hierarchical', 'awareness', 'rows', 'conditions'. "
+        "Example: --reuse_data all !tsne !rows",
     )
 
     parser.add_argument(
-        "--reuse_conditions",
-        action="store_true",
-        help="Use saved conditions for evaluation.",
-    )
-
-    parser.add_argument(
-        "--reuse_cluster_rows",
-        action="store_true",
-        help="Use saved cluster rows for evaluation.",
+        "--hide_plots",
+        nargs="*",
+        type=str,
+        default=["all"],
+        help="Specify plot types to hide. Use 'all' to hide all plots. Prefix with '!' to include a plot. "
+        "Options: 'all', 'tsne', 'approval', 'awareness', 'hierarchical'. "
+        "Example: --hide_plots \!approvals OR --hide_plots '!awareness' "
+        "You need to add quotes or a backslash otherwise the command-line will think, for example, awareness is an event.",
     )
 
     return parser.parse_args()

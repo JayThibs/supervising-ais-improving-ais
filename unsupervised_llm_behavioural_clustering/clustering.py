@@ -48,7 +48,9 @@ class Clustering:
             centroids.append(c)
         return np.array(centroids)
 
-    def cluster_persona_embeddings(self, statement_embeddings, n_clusters=120):
+    def cluster_persona_embeddings(
+        self, statement_embeddings, n_clusters=120, plot=True
+    ):
         print("Running clustering on statement embeddings...")
         clustering = sklearn.cluster.SpectralClustering(
             n_clusters, random_state=42
@@ -56,15 +58,16 @@ class Clustering:
         print("clustering.labels_", clustering.labels_)
         print("n_clusters:", n_clusters)
 
-        fig, ax = plt.subplots()
-        ax.hist(clustering.labels_, bins=n_clusters)
-        ax.set_title("Spectral Clustering of Statements")
-        fig.tight_layout()
-        plt.show()
-        filename = f"{os.getcwd()}/data/results/plots/spectral_clustering_persona_statements.png"
-        fig.savefig(filename)
-        print(f"Saved plot to {filename}")
-        plt.close("all")
+        if plot:
+            fig, ax = plt.subplots()
+            ax.hist(clustering.labels_, bins=n_clusters)
+            ax.set_title("Spectral Clustering of Statements")
+            fig.tight_layout()
+            plt.show()
+            filename = f"{os.getcwd()}/data/results/plots/spectral_clustering_persona_statements.png"
+            fig.savefig(filename)
+            print(f"Saved plot to {filename}")
+            plt.close("all")
         return clustering
 
     def get_cluster_approval_stats(

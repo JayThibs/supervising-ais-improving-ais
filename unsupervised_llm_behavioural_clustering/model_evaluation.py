@@ -98,7 +98,6 @@ class ModelEvaluation:
                 responses=responses,
                 combine_statements=True,
             )
-            print(f"joint_embeddings for {model}: {joint_embeddings}")
             for input, response, embedding in zip(inputs, responses, joint_embeddings):
                 joint_embeddings_all_llms.append([i, input, response, embedding, model])
 
@@ -197,8 +196,6 @@ class ModelEvaluation:
             rows.append(row)
             # this should be a list of lists where each row is a cluster
 
-        print(f"row: {row}")
-        print(f"rows: {rows}")
         rows = sorted(rows, key=lambda x: x[1], reverse=True)
         print(f"rows: {rows}")
         return rows
@@ -221,9 +218,6 @@ class ModelEvaluation:
         # Add the model attribution fractions to the row
         for frac in model_attribution_fractions:
             row.append(f"{round(100 * frac, 1)}%")
-
-        print(f"query_results: {query_results[0]['inputs']}")
-        print(f"{type(query_results[0]['inputs'])}")
 
         # Identify themes within this cluster
         # TODO: Make this work for multiple llms
@@ -255,7 +249,6 @@ class ModelEvaluation:
         inputs = []
         responses = []
         cluster_size = 0
-        print(f"joint_embeddings_all_llms: {joint_embeddings_all_llms[0]}")
         n_llms = int(max([e[0] for e in joint_embeddings_all_llms]))
         fractions = [0 for _ in range(n_llms + 1)]
         n_datapoints = len(joint_embeddings_all_llms)

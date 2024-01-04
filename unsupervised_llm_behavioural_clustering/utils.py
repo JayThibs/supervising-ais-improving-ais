@@ -1,3 +1,9 @@
+import os
+import time
+import random
+import pickle
+import logging
+import datetime
 import numpy as np
 import sklearn
 import pdb
@@ -7,9 +13,7 @@ from sklearn.manifold import TSNE
 import scipy
 from scipy.cluster.hierarchy import dendrogram, linkage
 from terminaltables import AsciiTable
-import random
-import time
-from typing import List
+from typing import Tuple, Any, Optional, List
 from models import OpenAIModel, AnthropicModel, LocalModel
 from openai import OpenAI
 
@@ -384,3 +388,36 @@ def lookup_response_type_int(response_type):
         return -1
     print("Please provide valid response type.")
     return
+
+
+def load_pkl_or_not(
+    filename: str, directory: str, load_if_exists: bool
+) -> Tuple[bool, Optional[Any]]:
+    """
+    Loads a file if it exists and the condition allows, or prepares for the creation
+    of a new file by renaming the existing one.
+
+    Args:
+    - filename (str): Name of the file.
+    - directory (str): Directory where the file is stored.
+    - load_if_exists (bool): If True, load file if it exists. If False, rename the old file with a timestamp.
+
+    Returns:
+    - Tuple[bool, Optional[Any]]: A tuple where the first element is a boolean indicating if the file was loaded.
+                                  The second element is the loaded content or None.
+    """
+    filepath = os.path.join(directory, filename)
+
+    if load_if_exists and os.path.exists(filepath):
+        logging.info(f"Loading {filename}...")
+        with open(filepath, "rb") as file:
+            return True, pickle.load(file)
+    else:
+        if not load_if_exists and os.path.exists(filepath):
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            new_filename = f"{filename[:-4]}_{timestamp}.pkl"
+            new_filepath = os.path.join(directory, new_filename)
+            os.rename(filepath, new_filepath)
+            logging.info(f"Saved old {filename} as {new_filename}.")
+
+        return False, None
