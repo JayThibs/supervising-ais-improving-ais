@@ -99,15 +99,15 @@ class EvaluatorPipeline:
         reuse_types = set()
 
         if "all" in reuse_data:
-            reuse_types = all_data_types.copy()
+            reuse_types = set(all_data_types)  # Ensure it's a set
             for item in reuse_data:
                 if item.startswith("!"):
                     exclude_type = item[1:]
-                    reuse_types.discard(exclude_type)
+                    reuse_types.discard(exclude_type)  # discard method works on sets
         else:
             for item in reuse_data:
                 if item in all_data_types:
-                    reuse_types.add(item)
+                    reuse_types.add(item)  # add method to include in the set
 
         return reuse_types
 
@@ -306,7 +306,7 @@ class EvaluatorPipeline:
         )
         print("Calculating hierarchical cluster data...")
         file_loaded, hierarchy_data = load_pkl_or_not(
-            "hierarchy_data.pkl", self.pickle_dir, self.reuse_conditions
+            "hierarchy_approval_data.pkl", self.pickle_dir, self.reuse_hierarchical
         )
         if not file_loaded:
             # File doesn't exist or needs to be updated, generate new content
@@ -316,7 +316,7 @@ class EvaluatorPipeline:
                 rows,
             )  # (Z, leaf_labels, original_cluster_sizes, merged_cluster_sizes)
             # Save the new content
-            with open(f"{self.pickle_dir}/hierarchy_data.pkl", "wb") as f:
+            with open(f"{self.pickle_dir}/hierarchy_approval_data.pkl", "wb") as f:
                 pickle.dump(hierarchy_data, f)
         print("Visualizing hierarchical cluster...")
         if "hierarchical" not in self.hide_plots:
@@ -349,36 +349,14 @@ class EvaluatorPipeline:
         )
 
         pdb.set_trace()
-        for condition in be_nice_conditions:
-            for i, record in enumerate(condition):
-                print(f"record: {record}")
-                print(f"i: {i}")
+        for i, condition in enumerate(be_nice_conditions):
+            for record in condition:
                 if record == 0:
                     data_include_statements_and_embeddings_4_prompts[i][0].append(0)
                 elif record == 1:
                     data_include_statements_and_embeddings_4_prompts[i][0].append(1)
                 else:
                     data_include_statements_and_embeddings_4_prompts[i][0].append(-1)
-
-        pdb.set_trace()
-        print(
-            f"data_include_statements_and_embeddings_4_prompts: {data_include_statements_and_embeddings_4_prompts}"
-        )
-        print(
-            f"len(data_include_statements_and_embeddings_4_prompts): {len(data_include_statements_and_embeddings_4_prompts)}"
-        )
-        print(
-            f"len(data_include_statements_and_embeddings_4_prompts[0]): {len(data_include_statements_and_embeddings_4_prompts[0])}"
-        )
-        print(
-            f"len(data_include_statements_and_embeddings_4_prompts[0][0]): {len(data_include_statements_and_embeddings_4_prompts[0][0])}"
-        )
-        print(
-            f"len(data_include_statements_and_embeddings_4_prompts[0][1]): {len(data_include_statements_and_embeddings_4_prompts[0][1])}"
-        )
-        print(
-            f"len(data_include_statements_and_embeddings_4_prompts[0][2]): {len(data_include_statements_and_embeddings_4_prompts[0][2])}"
-        )
 
         statement_embeddings = np.array(
             [e[2] for e in data_include_statements_and_embeddings_4_prompts]
@@ -397,6 +375,30 @@ class EvaluatorPipeline:
                 plot_type="awareness",
                 filename="embedding_of_approvals_diff_chats.png",
                 title=f"Embeddings of approvals for different chat modes",
+            )
+
+        # hierarchical clustering for awareness
+        print("Calculating hierarchical cluster data for awareness prompts...")
+        file_loaded, hierarchy_data = load_pkl_or_not(
+            "hierarchy_awareness_data.pkl", self.pickle_dir, self.reuse_hierarchical
+        )
+        if not file_loaded:
+            # File doesn't exist or needs to be updated, generate new content
+            hierarchy_data = self.clustering_obj.calculate_hierarchical_cluster_data(
+                statement_clustering,
+                data_include_statements_and_embeddings_4_prompts,
+                rows,
+            )
+            # Save the new content
+            with open(f"{self.pickle_dir}/hierarchy_awareness_data.pkl", "wb") as f:
+                pickle.dump(hierarchy_data, f)
+
+        print("Visualizing hierarchical cluster...")
+        if "hierarchical" not in self.hide_plots:
+            self.viz.visualize_hierarchical_cluster(
+                hierarchy_data,
+                plot_type="awareness",
+                labels=labels,
             )
 
         print("Done. Please check the results directory for the plots.")

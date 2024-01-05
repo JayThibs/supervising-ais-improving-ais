@@ -220,8 +220,15 @@ class Clustering:
             str(s[0]) + " : " + l
             for s, l in zip(original_cluster_sizes, cluster_labels)
         ]
+        Z[:, 2] = np.arange(1.0, len(Z) + 1)
 
-        return (Z, leaf_labels, original_cluster_sizes, merged_cluster_sizes)
+        return (
+            Z,
+            leaf_labels,
+            original_cluster_sizes,
+            merged_cluster_sizes,
+            n_clusters,
+        )
 
     def compile_cluster_table(
         self,

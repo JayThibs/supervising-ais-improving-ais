@@ -102,15 +102,24 @@ class Visualization:
         title: str,
     ):
         plt.figure(figsize=self.plot_dim)
-        pdb.set_trace()
         colors, shapes, labels, sizes, order = self.plot_aesthetics[plot_type].values()
         n_persona = len(labels)
         if order is None:
             order = [i for i in range(n_persona)]
-        masks = [
-            np.array([e[0][i] == condition for e in approval_data])
-            for i in range(n_persona)
-        ]
+        print("approval_data length:", len(approval_data))
+        print("approval_data[3]:", approval_data[3])
+        print("approval_data[0][0]:", approval_data[0][0])
+        print("approval_data[0][0][0]:", approval_data[0][0][0])
+        print("n_persona:", n_persona)
+        masks = []
+        for i in range(n_persona):
+            print(f"num i: {i}")
+            for e in approval_data:
+                print(f"e[0]: {e[0]}")
+                print(f"e[0][i]: {e[0][i]}")
+            mask = np.array([e[0][i] == condition for e in approval_data])
+            masks.append(mask)
+            print(f"mask for persona {i}: {mask}")
         plt.scatter(dim_reduce[:, 0], dim_reduce[:, 1], c="grey", s=10, alpha=0.5)
         for i in order:
             plt.scatter(
@@ -140,18 +149,26 @@ class Visualization:
         labels=None,
         filename="hierarchical_clustering",
     ):
-        colors = self.plot_aesthetics[plot_type]["colors"]
+        colors = self.plot_aesthetics[plot_type]["colors"][:4]
         filename += f"_{plot_type}.png"
 
         # Unpack hierarchy data
-        Z, leaf_labels, original_cluster_sizes, merged_cluster_sizes = hierarchy_data
+        (
+            Z,
+            leaf_labels,
+            original_cluster_sizes,
+            merged_cluster_sizes,
+            n_clusters,
+        ) = hierarchy_data
 
         def llf(id):
-            if id < len(leaf_labels):
+            if id < n_clusters:
                 return leaf_labels[id]
             else:
                 return "Error: id too high."
 
+        # font size
+        plt.rcParams["font.size"] = 18
         fig, ax = plt.subplots(1, 1, figsize=figsize, dpi=120)
         dn = dendrogram(
             Z, ax=ax, leaf_rotation=-90, leaf_font_size=20, leaf_label_func=llf
