@@ -117,7 +117,8 @@ class EvaluatorPipeline:
             "joint_embeddings",
             "tsne",
             "approvals",
-            "hierarchical",
+            "hierarchical_approvals",
+            "hierarchical_awareness",
             "awareness",
             "cluster_rows",
             "conditions",
@@ -130,7 +131,13 @@ class EvaluatorPipeline:
             setattr(self, f"reuse_{data_type}", data_type in reuse_data_types)
 
     def process_hide_plots(self, hide_plots):
-        all_plot_types = {"tsne", "approval", "awareness", "hierarchical"}
+        all_plot_types = {
+            "tsne",
+            "approval",
+            "awareness",
+            "hierarchical_approvals",
+            "hierarchical_awareness",
+        }
         hide_types = set()
 
         if "all" in hide_plots:
@@ -290,10 +297,12 @@ class EvaluatorPipeline:
         print("Saving and displaying results...")
         self.model_eval.save_and_display_results(chosen_clustering, rows)
 
-        self.run_approvals_based_evaluation_and_plotting(approval_filename)
+        statement_embeddings = self.run_approvals_based_evaluation_and_plotting(
+            approval_filename
+        )
         self.clustering_obj = Clustering(self.args)
         statement_clustering = self.clustering_obj.cluster_persona_embeddings(
-            self.statement_embeddings,
+            statement_embeddings,
             n_clusters=120,
             plot=self.plot_statement_clustering,
         )
@@ -306,7 +315,9 @@ class EvaluatorPipeline:
         )
         print("Calculating hierarchical cluster data...")
         file_loaded, hierarchy_data = load_pkl_or_not(
-            "hierarchy_approval_data.pkl", self.pickle_dir, self.reuse_hierarchical
+            "hierarchy_approval_data.pkl",
+            self.pickle_dir,
+            self.reuse_hierarchical_approvals,
         )
         if not file_loaded:
             # File doesn't exist or needs to be updated, generate new content
@@ -319,11 +330,15 @@ class EvaluatorPipeline:
             with open(f"{self.pickle_dir}/hierarchy_approval_data.pkl", "wb") as f:
                 pickle.dump(hierarchy_data, f)
         print("Visualizing hierarchical cluster...")
-        if "hierarchical" not in self.hide_plots:
+        if "hierarchical_approvals" not in self.hide_plots:
             self.viz.visualize_hierarchical_cluster(
                 hierarchy_data,
                 plot_type="approval",
                 labels=labels,
+                bar_height=0.7,
+                bb_width=40,
+                x_leftshift=0,
+                y_downshift=0,
             )
 
         with open(f"{self.pickle_dir}/conditions.pkl", "rb") as f:
@@ -364,7 +379,7 @@ class EvaluatorPipeline:
 
         # TODO: What is the difference between this statement_clustering and the one above?
         statement_clustering = self.clustering_obj.cluster_persona_embeddings(
-            self.statement_embeddings
+            statement_embeddings
         )
 
         if "awareness" not in self.hide_plots:
@@ -380,7 +395,9 @@ class EvaluatorPipeline:
         # hierarchical clustering for awareness
         print("Calculating hierarchical cluster data for awareness prompts...")
         file_loaded, hierarchy_data = load_pkl_or_not(
-            "hierarchy_awareness_data.pkl", self.pickle_dir, self.reuse_hierarchical
+            "hierarchy_awareness_data.pkl",
+            self.pickle_dir,
+            self.reuse_hierarchical_awareness,
         )
         if not file_loaded:
             # File doesn't exist or needs to be updated, generate new content
@@ -394,11 +411,15 @@ class EvaluatorPipeline:
                 pickle.dump(hierarchy_data, f)
 
         print("Visualizing hierarchical cluster...")
-        if "hierarchical" not in self.hide_plots:
+        if "hierarchical_awareness" not in self.hide_plots:
             self.viz.visualize_hierarchical_cluster(
                 hierarchy_data,
                 plot_type="awareness",
                 labels=labels,
+                bar_height=0.7,
+                bb_width=40,
+                x_leftshift=0,
+                y_downshift=0,
             )
 
         print("Done. Please check the results directory for the plots.")
@@ -510,16 +531,16 @@ class EvaluatorPipeline:
         # Perform dimensionality reduction on the embeddings part of the approvals data
         # assuming that the embeddings are the second element in the tuple
         print("Performing dimensionality reduction...")
-        self.statement_embeddings = np.array(
+        statement_embeddings = np.array(
             [approval[2] for approval in self.approvals_statements_and_embeddings]
         )
         # saving the np array of statement embeddings
         np.save(
             f"{os.getcwd()}/data/results/statement_embeddings.npy",
-            self.statement_embeddings,
+            statement_embeddings,
         )
         dim_reduce_tsne = self.model_eval.tsne_dimension_reduction(
-            self.statement_embeddings, iterations=2000, perplexity=self.perplexity
+            statement_embeddings, iterations=2000, perplexity=self.perplexity
         )
 
         # Extract the condition (approval or disapproval) from the approvals data
@@ -549,3 +570,5 @@ class EvaluatorPipeline:
                     filename=approval_filename,
                     title=f"Embeddings of {condition_title} for different chat modes",
                 )
+
+        return statement_embeddings

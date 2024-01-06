@@ -52,6 +52,7 @@ class Visualization:
                 "labels": self.personas,
                 "sizes": [5, 30, 200, 300],
                 "order": None,
+                "font_size": 25,
             },
             "awareness": {
                 "colors": self.colors[: len(self.awareness)],
@@ -59,6 +60,7 @@ class Visualization:
                 "labels": self.awareness,
                 "sizes": [5, 30, 200, 300],
                 "order": [2, 1, 3, 0],
+                "font_size": 18,
             },
         }
         if not os.path.exists(self.save_path):
@@ -149,7 +151,7 @@ class Visualization:
         labels=None,
         filename="hierarchical_clustering",
     ):
-        colors = self.plot_aesthetics[plot_type]["colors"][:4]
+        colors = self.plot_aesthetics[plot_type]["colors"]
         filename += f"_{plot_type}.png"
 
         # Unpack hierarchy data
