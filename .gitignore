@@ -1,4 +1,9 @@
 data/anthropic_evals/
+data/results/
+check_pickle_file.py
+oai-test.py
+playground.ipynb
+data/evals/anthropic-model-written-evals/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

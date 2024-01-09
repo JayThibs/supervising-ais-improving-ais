@@ -9,68 +9,89 @@ import numpy as np
 
 
 class Visualization:
-    def __init__(self, plot_dim=(25, 25), save_path="data/plots"):
+    def __init__(
+        self,
+        plot_dim=(16, 16),
+        save_path=f"{os.getcwd()}/data/results/plots",
+        personas=[],
+    ):
         self.plot_dim = plot_dim
         self.save_path = save_path
-        # Define plotting aesthetics for statement approval plots
+        # Define plotting aesthetics
+        self.colors = [
+            "red",
+            "blue",
+            "green",
+            "black",
+            "purple",
+            "orange",
+            "brown",
+            "plum",
+            "salmon",
+            "darkgreen",
+            "cyan",
+            "slategrey",
+            "yellow",
+            "pink",
+        ]
+        if personas == []:
+            self.personas = [
+                "Google Chat",
+                "Bing Chat",
+                "Bing Chat Emoji",
+                "Bing Chat Janus",
+            ]
+        else:
+            self.personas = personas
+        self.awareness = ["Unaware", "Other AI", "Aware", "Other human"]
+        self.shapes = ["o", "o", "*", "+"]
         self.plot_aesthetics = {
             "approval": {
-                "colors": ["red", "black", "green", "blue"],
-                "shapes": ["o", "o", "*", "+"],
-                "labels": [
-                    "Google Chat",
-                    "Bing Chat",
-                    "Bing Chat Emoji",
-                    "Bing Chat Janus",
-                ],
+                "colors": self.colors[: len(self.personas)],
+                "shapes": self.shapes[: len(self.personas)],
+                "labels": self.personas,
                 "sizes": [5, 30, 200, 300],
                 "order": None,
+                "font_size": 30,
             },
             "awareness": {
-                "colors": ["red", "black", "green", "blue"],
-                "shapes": ["o", "o", "*", "+"],
-                "labels": ["Unaware", "Other AI", "Aware", "Other human"],
+                "colors": self.colors[: len(self.awareness)],
+                "shapes": self.shapes[: len(self.awareness)],
+                "labels": self.awareness,
                 "sizes": [5, 30, 200, 300],
                 "order": [2, 1, 3, 0],
+                "font_size": 30,
             },
         }
         if not os.path.exists(self.save_path):
             os.makedirs(self.save_path)
 
-    def save_plot(self, filename):
-        plt.savefig(os.path.join(self.save_path, filename))
-
-    def plot_embedding_responses(self, dim_reduce_tsne, labels, model_names, filename):
+    def plot_embedding_responses(
+        self, dim_reduce_tsne, joint_embeddings_all_llms, model_names, filename
+    ):
         plt.figure(figsize=self.plot_dim)
-        unique_labels = np.unique(labels)
-        print("unique_labels", unique_labels)
+        plt.rcParams["font.size"] = self.plot_aesthetics["approval"]["font_size"]
 
-        # If only one model name is provided, use it for all labels
-        if len(model_names) == 1:
-            model_names = [model_names[0] for _ in unique_labels]
-        elif len(model_names) < len(unique_labels):
-            # If there are more labels than model names, raise an error or handle it as needed
-            raise ValueError(
-                "Number of model names is less than the number of unique labels"
-            )
-
-        for label in unique_labels:
-            mask = labels == label
+        for i, model_name in enumerate(model_names):
+            mask = np.array([e[4] == model_name for e in joint_embeddings_all_llms])
             x_values = dim_reduce_tsne[:, 0][mask]
             y_values = dim_reduce_tsne[:, 1][mask]
-
-            model_label = model_names[label]  # Assuming label can be used as an index
 
             plt.scatter(
                 x_values,
                 y_values,
-                label=model_label,
+                c=self.colors[i % len(self.colors)],  # Choose color
+                label=model_name,
                 s=20,
                 alpha=0.5,
             )
+
         plt.legend()
         plt.title(f"Embeddings of {', '.join(model_names)} responses")
-        plt.savefig(filename)  # Saving the plot
+        plt.savefig(os.path.join(self.save_path, filename))
+        print(f"Saved plot to {os.path.join(self.save_path, filename)}")
+        # Commented out plt.show() to prevent displaying the plot
+        # plt.show()
         plt.close()
 
     def plot_approvals(
@@ -82,18 +103,31 @@ class Visualization:
         filename: str,
         title: str,
     ):
-        plt.figure(figsize=self.plot_dim)
-        colors, shapes, labels, sizes, order = self.plot_aesthetics[plot_type].values()
+        fig, ax = plt.subplots(figsize=self.plot_dim)
+        colors, shapes, labels, sizes, order, fontsize = self.plot_aesthetics[
+            plot_type
+        ].values()
+        ax.tick_params(axis="both", which="major", labelsize=fontsize)
         n_persona = len(labels)
         if order is None:
             order = [i for i in range(n_persona)]
-        masks = [
-            np.array([e[0][i] == condition for e in approval_data])
-            for i in range(n_persona)
-        ]
-        plt.scatter(dim_reduce[:, 0], dim_reduce[:, 1], c="grey", s=10, alpha=0.5)
+        print("approval_data length:", len(approval_data))
+        print("approval_data[3]:", approval_data[3])
+        print("approval_data[0][0]:", approval_data[0][0])
+        print("approval_data[0][0][0]:", approval_data[0][0][0])
+        print("n_persona:", n_persona)
+        masks = []
+        for i in range(n_persona):
+            print(f"num i: {i}")
+            for e in approval_data:
+                print(f"e[0]: {e[0]}")
+                print(f"e[0][i]: {e[0][i]}")
+            mask = np.array([e[0][i] == condition for e in approval_data])
+            masks.append(mask)
+            print(f"mask for persona {i}: {mask}")
+        ax.scatter(dim_reduce[:, 0], dim_reduce[:, 1], c="grey", s=10, alpha=0.5)
         for i in order:
-            plt.scatter(
+            ax.scatter(
                 dim_reduce[:, 0][masks[i]],
                 dim_reduce[:, 1][masks[i]],
                 marker=shapes[i],
@@ -101,35 +135,45 @@ class Visualization:
                 label=labels[i],
                 s=sizes[i],
             )
-        plt.title(title)
-        plt.legend()
-        plt.show()
-        plt.save_plot(filename)
-        # plt.close()
+        ax.set_title(title)
+        ax.legend()
+        fig.savefig(os.path.join(self.save_path, filename))
+        print(f"Saved plot to {os.path.join(self.save_path, filename)}")
+        # plt.show()
+        plt.close("all")
 
     def visualize_hierarchical_cluster(
         self,
-        Z,
-        leaf_labels,
-        original_cluster_sizes,
-        merged_cluster_sizes,
-        bar_height=1,
-        bb_width=10,
+        hierarchy_data: tuple,
+        plot_type: str,
+        bar_height=0.7,
+        bb_width=40,
         x_leftshift=0,
         y_downshift=0,
         figsize=(35, 35),
         labels=None,
-        filename="hierarchical_clustering.pdf",
+        filename="hierarchical_clustering",
     ):
-        colors = self.aware_plot_aesthetics["approval"]["colors"]
+        colors = self.plot_aesthetics[plot_type]["colors"]
+
+        # Unpack hierarchy data
+        (
+            Z,
+            leaf_labels,
+            original_cluster_sizes,
+            merged_cluster_sizes,
+            n_clusters,
+        ) = hierarchy_data
 
         def llf(id):
-            if id < len(leaf_labels):
+            if id < n_clusters:
                 return leaf_labels[id]
             else:
                 return "Error: id too high."
 
+        # font size
         fig, ax = plt.subplots(1, 1, figsize=figsize, dpi=120)
+        ax.tick_params(axis="both", which="major", labelsize=18)
         dn = dendrogram(
             Z, ax=ax, leaf_rotation=-90, leaf_font_size=20, leaf_label_func=llf
         )
@@ -144,15 +188,17 @@ class Visualization:
             for i in range(len(colors)):
                 ax.add_patch(
                     Rectangle(
-                        x - bb_width / 2 - x_leftshift,
-                        y
-                        - y_downshift
-                        - i * bar_height
-                        + bar_height * (len(colors) - 1),
-                    ),
-                    bb_width * s[i + 1] / s[0],
-                    bar_height,
-                    facecolor=colors[i],
+                        (
+                            x - bb_width / 2 - x_leftshift,
+                            y
+                            - y_downshift
+                            - i * bar_height
+                            + bar_height * (len(colors) - 1),
+                        ),
+                        bb_width * s[i + 1] / s[0],
+                        bar_height,
+                        facecolor=colors[i],
+                    )
                 )
 
             ax.add_patch(
@@ -173,7 +219,8 @@ class Visualization:
             ax.legend(handles=patch_colors)
 
         plt.tight_layout()
-        plt.savefig(filename)
+        plt.savefig(f"{filename}_{plot_type}.png")
+        plt.savefig(filename, format="svg")
 
     def visualize_awareness(
         self,
@@ -183,7 +230,7 @@ class Visualization:
         title,
         filename="awareness.png",
     ):
-        colors, shapes, labels, sizes, order = self.plot_aesthetics[
+        colors, shapes, labels, sizes, order, fontsize = self.plot_aesthetics[
             "awareness"
         ].values()
 
