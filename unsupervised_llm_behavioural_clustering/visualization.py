@@ -52,7 +52,7 @@ class Visualization:
                 "labels": self.personas,
                 "sizes": [5, 30, 200, 300],
                 "order": None,
-                "font_size": 25,
+                "font_size": 30,
             },
             "awareness": {
                 "colors": self.colors[: len(self.awareness)],
@@ -60,7 +60,7 @@ class Visualization:
                 "labels": self.awareness,
                 "sizes": [5, 30, 200, 300],
                 "order": [2, 1, 3, 0],
-                "font_size": 18,
+                "font_size": 30,
             },
         }
         if not os.path.exists(self.save_path):
@@ -70,7 +70,7 @@ class Visualization:
         self, dim_reduce_tsne, joint_embeddings_all_llms, model_names, filename
     ):
         plt.figure(figsize=self.plot_dim)
-        plt.rcParams["font.size"] = 25
+        plt.rcParams["font.size"] = self.plot_aesthetics["approval"]["font_size"]
 
         for i, model_name in enumerate(model_names):
             mask = np.array([e[4] == model_name for e in joint_embeddings_all_llms])
@@ -103,8 +103,11 @@ class Visualization:
         filename: str,
         title: str,
     ):
-        plt.figure(figsize=self.plot_dim)
-        colors, shapes, labels, sizes, order = self.plot_aesthetics[plot_type].values()
+        fig, ax = plt.subplots(figsize=self.plot_dim)
+        colors, shapes, labels, sizes, order, fontsize = self.plot_aesthetics[
+            plot_type
+        ].values()
+        ax.tick_params(axis="both", which="major", labelsize=fontsize)
         n_persona = len(labels)
         if order is None:
             order = [i for i in range(n_persona)]
@@ -122,9 +125,9 @@ class Visualization:
             mask = np.array([e[0][i] == condition for e in approval_data])
             masks.append(mask)
             print(f"mask for persona {i}: {mask}")
-        plt.scatter(dim_reduce[:, 0], dim_reduce[:, 1], c="grey", s=10, alpha=0.5)
+        ax.scatter(dim_reduce[:, 0], dim_reduce[:, 1], c="grey", s=10, alpha=0.5)
         for i in order:
-            plt.scatter(
+            ax.scatter(
                 dim_reduce[:, 0][masks[i]],
                 dim_reduce[:, 1][masks[i]],
                 marker=shapes[i],
@@ -132,12 +135,12 @@ class Visualization:
                 label=labels[i],
                 s=sizes[i],
             )
-        plt.title(title)
-        plt.legend()
-        plt.savefig(os.path.join(self.save_path, filename))
+        ax.set_title(title)
+        ax.legend()
+        fig.savefig(os.path.join(self.save_path, filename))
         print(f"Saved plot to {os.path.join(self.save_path, filename)}")
         # plt.show()
-        plt.close()
+        plt.close("all")
 
     def visualize_hierarchical_cluster(
         self,
@@ -152,7 +155,6 @@ class Visualization:
         filename="hierarchical_clustering",
     ):
         colors = self.plot_aesthetics[plot_type]["colors"]
-        filename += f"_{plot_type}.png"
 
         # Unpack hierarchy data
         (
@@ -170,8 +172,8 @@ class Visualization:
                 return "Error: id too high."
 
         # font size
-        plt.rcParams["font.size"] = 18
         fig, ax = plt.subplots(1, 1, figsize=figsize, dpi=120)
+        ax.tick_params(axis="both", which="major", labelsize=18)
         dn = dendrogram(
             Z, ax=ax, leaf_rotation=-90, leaf_font_size=20, leaf_label_func=llf
         )
@@ -217,7 +219,7 @@ class Visualization:
             ax.legend(handles=patch_colors)
 
         plt.tight_layout()
-        plt.savefig(filename)
+        plt.savefig(f"{filename}_{plot_type}.png")
         plt.savefig(filename, format="svg")
 
     def visualize_awareness(
@@ -228,7 +230,7 @@ class Visualization:
         title,
         filename="awareness.png",
     ):
-        colors, shapes, labels, sizes, order = self.plot_aesthetics[
+        colors, shapes, labels, sizes, order, fontsize = self.plot_aesthetics[
             "awareness"
         ].values()
 

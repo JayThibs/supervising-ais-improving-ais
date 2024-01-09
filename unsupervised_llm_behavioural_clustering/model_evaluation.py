@@ -119,7 +119,6 @@ class ModelEvaluation:
         Returns:
         np.ndarray: The reduced embeddings as a NumPy array.
         """
-        print("Performing t-SNE dimensionality reduction...")
         # Perform the t-SNE dimensionality reduction
         tsne = TSNE(
             n_components=dimensions,

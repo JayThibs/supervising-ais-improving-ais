@@ -131,25 +131,24 @@ class EvaluatorPipeline:
             setattr(self, f"reuse_{data_type}", data_type in reuse_data_types)
 
     def process_hide_plots(self, hide_plots):
-        all_plot_types = {
+        all_plot_types = [
             "tsne",
             "approval",
             "awareness",
             "hierarchical_approvals",
             "hierarchical_awareness",
-        }
-        hide_types = set()
+            "spectral",
+        ]
+        hide_types = []
 
-        if "all" in hide_plots:
-            hide_types = all_plot_types.copy()
-            for plot_type in hide_plots:
-                if plot_type.startswith("!"):
-                    include_type = plot_type[1:]
-                    hide_types.discard(include_type)
+        if "all" not in hide_plots:
+            hide_types = all_plot_types
         else:
             for plot_type in hide_plots:
-                if plot_type in all_plot_types:
-                    hide_types.add(plot_type)
+                if plot_type.startswith("!"):
+                    include_plot_type = plot_type[1:]
+                    if include_plot_type in all_plot_types:
+                        hide_types.remove(include_plot_type)
 
         return hide_types
 
@@ -248,7 +247,7 @@ class EvaluatorPipeline:
         plt.hist(labels, bins=3)
 
         # Perform dimensionality reduction
-        print("Performing dimensionality reduction...")
+        print("Performing t-SNE dimensionality reduction...")
         dim_reduce_tsne = self.model_eval.tsne_dimension_reduction(
             embeddings, iterations=300, perplexity=self.perplexity
         )
@@ -282,8 +281,10 @@ class EvaluatorPipeline:
         file_loaded, rows = load_pkl_or_not(
             "rows.pkl", self.pickle_dir, self.reuse_cluster_rows
         )
+        print(f"file_loaded: {file_loaded}", f"rows: {rows}")
         if not file_loaded:
             # File doesn't exist or needs to be updated, generate new content
+            print("Analyzing clusters...")
             rows = self.model_eval.analyze_clusters(
                 chosen_clustering,
                 joint_embeddings_all_llms,
@@ -304,7 +305,7 @@ class EvaluatorPipeline:
         statement_clustering = self.clustering_obj.cluster_persona_embeddings(
             statement_embeddings,
             n_clusters=120,
-            plot=self.plot_statement_clustering,
+            spectral_plot=False if "spectral" in self.hide_plots else True,
         )
         print(f"labels: {labels}")
         self.clustering_obj.cluster_approval_stats(
@@ -331,20 +332,24 @@ class EvaluatorPipeline:
                 pickle.dump(hierarchy_data, f)
         print("Visualizing hierarchical cluster...")
         if "hierarchical_approvals" not in self.hide_plots:
-            self.viz.visualize_hierarchical_cluster(
-                hierarchy_data,
-                plot_type="approval",
-                labels=labels,
-                bar_height=0.7,
-                bb_width=40,
-                x_leftshift=0,
-                y_downshift=0,
-            )
+            for model_name in model_names:
+                filename = (
+                    f"{self.viz_dir}/hierarchical_clustering_approval_{model_name}"
+                )
+                self.viz.visualize_hierarchical_cluster(
+                    hierarchy_data,
+                    plot_type="approval",
+                    labels=labels,
+                    bar_height=0.7,
+                    bb_width=40,
+                    x_leftshift=0,
+                    y_downshift=0,
+                    filename=filename,
+                )
 
         with open(f"{self.pickle_dir}/conditions.pkl", "rb") as f:
             be_nice_conditions = pickle.load(f)
 
-        pdb.set_trace()
         print(f"be_nice_conditions: {be_nice_conditions}")
 
         with open(
@@ -363,7 +368,6 @@ class EvaluatorPipeline:
             f"data_include_statements_and_embeddings_4_prompts[0]: {data_include_statements_and_embeddings_4_prompts[0]}"
         )
 
-        pdb.set_trace()
         for i, condition in enumerate(be_nice_conditions):
             for record in condition:
                 if record == 0:
@@ -379,7 +383,8 @@ class EvaluatorPipeline:
 
         # TODO: What is the difference between this statement_clustering and the one above?
         statement_clustering = self.clustering_obj.cluster_persona_embeddings(
-            statement_embeddings
+            statement_embeddings,
+            spectral_plot=False if "spectral" in self.hide_plots else True,
         )
 
         if "awareness" not in self.hide_plots:
@@ -412,55 +417,22 @@ class EvaluatorPipeline:
 
         print("Visualizing hierarchical cluster...")
         if "hierarchical_awareness" not in self.hide_plots:
-            self.viz.visualize_hierarchical_cluster(
-                hierarchy_data,
-                plot_type="awareness",
-                labels=labels,
-                bar_height=0.7,
-                bb_width=40,
-                x_leftshift=0,
-                y_downshift=0,
-            )
+            for model_name in model_names:
+                filename = (
+                    f"{self.viz_dir}/hierarchical_clustering_awareness_{model_name}"
+                )
+                self.viz.visualize_hierarchical_cluster(
+                    hierarchy_data,
+                    plot_type="awareness",
+                    labels=labels,
+                    bar_height=0.7,
+                    bb_width=40,
+                    x_leftshift=0,
+                    y_downshift=0,
+                    filename=filename,
+                )
 
         print("Done. Please check the results directory for the plots.")
-
-    def run_evaluation(self):
-        # Generate responses and embed them
-        query_results = self.model_eval.generate_responses(
-            self.all_texts[: self.args.texts_subset], self.args.llm, self.args.prompt
-        )
-        combined_embeddings = self.model_eval.embed_responses(query_results)
-
-        # Perform clustering and store the results
-        self.model_eval.run_clustering(combined_embeddings)
-
-        # Choose which clustering result to analyze further
-        chosen_clustering = self.model_eval.clustering_results["Spectral"]
-        labels = chosen_clustering.labels_
-
-        # Analyze the clusters and get a summary table
-        rows = self.model_eval.analyze_clusters(chosen_clustering)
-
-        # Save and display the results
-        self.model_eval.save_and_display_results(chosen_clustering, rows)
-
-        # Perform dimensionality reduction
-        dim_reduce_tsne = self.model_eval.tsne_dimension_reduction(
-            combined_embeddings, iterations=2000, perplexity=self.perplexity
-        )
-
-        # Visualizations
-        tsne_filename = self.generate_plot_filename(
-            self.args.model_family, self.args.model, "tsne_embedding_responses"
-        )
-        approval_filename = self.generate_plot_filename(
-            self.args.model_family, self.args.model, "approval_responses"
-        )
-        self.viz.plot_embedding_responses(
-            dim_reduce_tsne, labels, [self.args.model], tsne_filename
-        )
-        self.run_approvals_based_evalusation_and_plotting(approval_filename)
-        self.viz.visualize_hierarchical_clustering(chosen_clustering, rows)
 
     def run_approvals_based_evaluation_and_plotting(self, approval_filename):
         # Generate the data for approvals

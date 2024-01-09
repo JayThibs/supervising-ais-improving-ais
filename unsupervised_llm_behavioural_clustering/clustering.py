@@ -49,7 +49,7 @@ class Clustering:
         return np.array(centroids)
 
     def cluster_persona_embeddings(
-        self, statement_embeddings, n_clusters=120, plot=True
+        self, statement_embeddings, n_clusters=120, spectral_plot=True
     ):
         print("Running clustering on statement embeddings...")
         clustering = sklearn.cluster.SpectralClustering(
@@ -58,10 +58,11 @@ class Clustering:
         print("clustering.labels_", clustering.labels_)
         print("n_clusters:", n_clusters)
 
-        if plot:
+        if spectral_plot:
             fig, ax = plt.subplots()
+            ax.tick_params(axis="both", which="major", labelsize=15)
             ax.hist(clustering.labels_, bins=n_clusters)
-            ax.set_title("Spectral Clustering of Statements")
+            ax.set_title("Spectral Clustering of Statements", fontsize=20)
             fig.tight_layout()
             plt.show()
             filename = f"{os.getcwd()}/data/results/plots/spectral_clustering_persona_statements.png"
@@ -116,6 +117,7 @@ class Clustering:
 
         # rows = pickle.load(open("chat_mode_approvals_spectral_clustering_rows.pkl", "rb"))
         if reuse_cluster_rows:
+            print("Loading rows from file...")
             rows = pickle.load(
                 open(
                     f"{os.getcwd()}/data/results/pickle_files/rows_chatbots_G_B_BE_BJ.pkl",
@@ -123,6 +125,7 @@ class Clustering:
                 )
             )
         else:
+            print("Calculating rows...")
             rows = self.compile_cluster_table(
                 statement_clustering,
                 approvals_statements_and_embeddings,
