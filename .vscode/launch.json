@@ -8,8 +8,8 @@
             "program": "${file}",
             "console": "integratedTerminal",
             "justMyCode": true,
-            "cwd": "${workspaceFolder}/unsupervised_llm_behavioural_clustering",
-            "args": ["--model-family", "openai", "--model", "gpt-3.5-turbo", "--test-mode"]
+            "cwd": "${workspaceFolder}",
+            "args": ["--model_family", "openai", "--model", "gpt-3.5-turbo", "--test_mode", "--reuse_data", "all"]
         }
     ]
 }
