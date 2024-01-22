@@ -143,13 +143,6 @@ class ModelEvaluation:
         )
         return clustering
 
-    # def analyze_clusters(
-    #     clustering: KMeans, approvals_statements_and_embeddings
-    # ) -> list:
-    #     """Analyze the clusters."""
-    #     rows = compile_cluster_table(clustering, approvals_statements_and_embeddings)
-    #     return rows
-
     def run_short_text_tests(
         self,
         text_subset,

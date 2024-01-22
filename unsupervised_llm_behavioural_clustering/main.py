@@ -118,13 +118,8 @@ def main(args):
     evaluator = EvaluatorPipeline(args)
     print("Loading and preprocessing data...")
     evaluator.setup()
-
-    if args.test_mode:
-        print("Running short text tests...")
-        evaluator.run_short_text_tests()
-    else:
-        print("Running evaluation...")
-        evaluator.run_evaluation()
+    print("Running evaluation...")
+    evaluator.run_evaluations()
 
 
 if __name__ == "__main__":
@@ -132,7 +127,7 @@ if __name__ == "__main__":
         """
         Run using:
 
-        python unsupervised_llm_behavioural_clustering/main.py --model-family="openai" --model="gpt-3.5-turbo" --test-mode
+        python unsupervised_llm_behavioural_clustering/main.py --model-family="openai" --model="gpt-3.5-turbo" --test-mode --reuse_data all
         """
         args = get_args()
         main(args)

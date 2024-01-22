@@ -170,7 +170,7 @@ class EvaluatorPipeline:
         filename += f"{plot_type}.png"
         return filename
 
-    def run_short_text_tests(self):
+    def run_evaluations(self):
         if self.test_mode:
             n_statements = 300
             self.perplexity = 3
