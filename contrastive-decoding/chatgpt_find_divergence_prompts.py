@@ -38,7 +38,6 @@ def find_diverging_texts(
             sequential = True,
             n_past_texts_subsampled = 10,
             subsampling_randomness_temperature = 0.5,
-            contrastive_decoding = True, # Should be kept at True. Non-contrastive decoding is largely not implemented.
             api_key_path = "../../key.txt",
             edit_desc_str = "edited its knowledge of a variety of facts about the world",
             prompts_json_path = "chatgpt_prompts/who_is_harry_potter_find_CD_prompts.json",
@@ -71,7 +70,6 @@ def find_diverging_texts(
         similarity_gating_intensity = similarity_gating_intensity,
         comparison_model_prefix_ids = comparison_model_prefix_ids,
         starting_model_prefix_ids = starting_model_prefix_ids,
-        contrastive_decoding = contrastive_decoding,
         bnb_config = bnb_config,
     )
 
@@ -106,7 +104,7 @@ def find_diverging_texts(
 
     if len(seed_demonstrations_list) > 0:
         # Compute divergences for seed_demonstrations_list
-        per_decoder_generated_texts, divergences = decode(
+        result = decode(
                     model = model,
                     starting_model = starting_model,
                     comparison_model = comparison_model,
@@ -124,11 +122,10 @@ def find_diverging_texts(
                     starting_model_prefix_ids = starting_model_prefix_ids,
                     return_divergences = True,
                     include_prefix_in_divergences = include_prefix_in_divergences,
-                    contrastive_decoding = True,
                     quantize=quantize,
                     divergence_fnct=divergence_fnct
                 )
-        divergences = divergences[0].tolist()
+        divergences = result['divergences'].tolist()
 
         all_divergences_and_texts = [[d,s] for s,d in zip(seed_demonstrations_list, divergences)]
         round_divergences_and_texts = divergence_weighted_subsample(all_divergences_and_texts, n_past_texts_subsampled, subsampling_randomness_temperature)
@@ -181,7 +178,7 @@ def find_diverging_texts(
 
         if len(additional_texts) > 0:
             # Compute divergences for additional_texts
-            additional_texts_str, additional_divergences = decode(
+            result = decode(
                         model = model,
                         starting_model = starting_model,
                         comparison_model = comparison_model,
@@ -202,7 +199,7 @@ def find_diverging_texts(
                         quantize=quantize,
                         divergence_fnct=divergence_fnct
                     )
-            additional_divergences = additional_divergences[0].tolist()
+            additional_divergences = result['divergences'].tolist()
             additional_divergences_and_texts = list(zip(additional_divergences, additional_texts))
             # Expand all_divergences_and_texts with results:
             all_divergences_and_texts = all_divergences_and_texts + additional_divergences_and_texts

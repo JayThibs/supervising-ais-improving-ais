@@ -47,10 +47,10 @@ ngram_counts = compute_ngram_statistics(texts, args.n)
 # Use wordcloud and matplotlib to create and save an ngram wordcloud
 
 # Generate the wordcloud
-wc = WordCloud(width=800, height=400, max_words=200, background_color='white').generate_from_frequencies(ngram_counts)
+wc = WordCloud(width=1600, height=1200, max_words=300, background_color='white').generate_from_frequencies(ngram_counts)
 
 # Save the wordcloud
-plt.figure(figsize=(10, 5))
+plt.figure(figsize=(16, 12))
 plt.imshow(wc, interpolation='bilinear')
 plt.axis('off')
 plt.savefig(args.save_loc.replace("ngram", str(args.n) + "gram"))
