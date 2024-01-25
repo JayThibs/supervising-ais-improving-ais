@@ -117,7 +117,7 @@ def main(args):
     print("Loading evaluator pipeline...")
     evaluator = EvaluatorPipeline(args)
     print("Loading and preprocessing data...")
-    evaluator.setup()
+    evaluator.setup_evaluations()
     print("Running evaluation...")
     evaluator.run_evaluations()
 

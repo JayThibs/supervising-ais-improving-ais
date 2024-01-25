@@ -143,7 +143,7 @@ class ModelEvaluation:
         )
         return clustering
 
-    def run_short_text_tests(
+    def run_eval(
         self,
         text_subset,
         n_statements,

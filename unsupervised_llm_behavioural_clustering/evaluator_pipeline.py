@@ -72,18 +72,22 @@ class EvaluatorPipeline:
             else:
                 self.query_results = None
 
-    def setup(self):
-        # Create a new data/evals directory if it doesn't exist
+    def setup_evaluations(self):
+        self.setup_directories()
+        self.load_api_key()
+        self.clone_evals_repo()
+        self.load_evaluation_data()
+
+    def setup_directories(self):
         dirs = [self.data_dir, self.evals_dir, self.results_dir, self.viz_dir]
         for dir in dirs:
             if not os.path.exists(dir):
                 os.makedirs(dir)
 
-        self.api_key = DataPreparation.load_api_key(
-            self, "OPENAI_API_KEY"
-        )  # TODO: Make more general to include anthropic and local models
+    def load_api_key(self):
+        self.api_key = DataPreparation.load_api_key(self, "OPENAI_API_KEY")
 
-        # Clone the anthropic evals repo inside the data/evals directory
+    def clone_evals_repo(self):
         if not os.path.exists(
             os.path.join(self.evals_dir, "anthropic-model-written-evals")
         ):
@@ -92,6 +96,8 @@ class EvaluatorPipeline:
                 "https://github.com/anthropics/evals.git",
                 "anthropic-model-written-evals",
             )
+
+    def load_evaluation_data(self):
         self.data_prep = DataPreparation()
         self.all_texts = self.data_prep.load_evaluation_data(self.data_prep.file_paths)
 
@@ -152,15 +158,20 @@ class EvaluatorPipeline:
 
         return hide_types
 
-    def save_results(self, results, file_name, sub_dir):
-        if not os.path.exists(self.results_dir):
-            os.makedirs(self.results_dir)
+    def save_results(self, data, file_name, sub_dir):
+        # Save data to a pickle file
+        if not os.path.exists(f"{self.results_dir}/{sub_dir}"):
+            os.makedirs(f"{self.results_dir}/{sub_dir}")
         with open(f"{self.results_dir}/{sub_dir}/{file_name}", "wb") as f:
-            pickle.dump(results, f)
+            pickle.dump(data, f)
 
     def load_results(self, file_name, sub_dir):
-        with open(f"{self.results_dir}/{sub_dir}/{file_name}", "rb") as f:
-            return pickle.load(f)
+        # Load data from a pickle file
+        try:
+            with open(f"{self.results_dir}/{sub_dir}/{file_name}", "rb") as f:
+                return pickle.load(f)
+        except FileNotFoundError:
+            return None
 
     def generate_plot_filename(self, model_names: list, plot_type):
         # timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
@@ -170,182 +181,219 @@ class EvaluatorPipeline:
         filename += f"{plot_type}.png"
         return filename
 
-    def run_evaluations(self):
-        if self.test_mode:
-            n_statements = 300
-            self.perplexity = 3
-
-        else:
-            n_statements = self.args.n_statements
-            self.perplexity = 50
+    def generate_responses(self):
+        n_statements = 300 if self.test_mode else self.args.n_statements
+        self.perplexity = 3 if self.test_mode else 50
         self.text_subset = self.model_eval.load_and_preprocess_data(
             self.data_prep, n_statements=n_statements
         )
 
         if self.saved_query_results is None:
-            all_query_results = []
-            for llm in self.llms:
-                print(f"Generating responses for {llm}...")
-                query_results, file_name = self.model_eval.run_short_text_tests(
-                    self.text_subset, n_statements, llm
-                )
-                all_query_results.append(query_results)
-                self.save_results(query_results, file_name, "pickle_files")
-                print(f"{file_name} saved.")
-            self.save_results(
-                all_query_results, "all_query_results.pickle", "pickle_files"
-            )  # last saved
-            print(f"{file_name} saved.")
+            self.all_query_results = self.generate_and_save_responses(n_statements)
         else:
-            all_query_results = [self.saved_query_results]
+            self.all_query_results = [self.saved_query_results]
 
-        all_model_info = []
-        for result in all_query_results:
-            all_model_info.append(result["model_info"])
-            # {"model_family": ..., "model": ..., "system_message": ...}
-
-        print("Embedding responses...")
-        # print(query_results)
-        # if not exists and no reload joint embeddings flag, create joint_embeddings_all_llms, else load it
-        file_loaded, joint_embeddings_all_llms = load_pkl_or_not(
-            "joint_embeddings_all_llms.pkl",
-            self.pickle_dir,
-            self.reuse_joint_embeddings,
-        )
-        if not file_loaded:
-            # File doesn't exist or needs to be updated, generate new content
-            joint_embeddings_all_llms = self.model_eval.embed_responses(
-                query_results=all_query_results, llms=self.llms
+    def generate_and_save_responses(self, n_statements):
+        all_query_results = []
+        for llm in self.llms:
+            print(f"Generating responses for {llm}...")
+            query_results, file_name = self.model_eval.run_short_text_tests(
+                self.text_subset, n_statements, llm
             )
-            # Save the new content
-            with open(f"{self.pickle_dir}/joint_embeddings_all_llms.pkl", "wb") as f:
-                pickle.dump(joint_embeddings_all_llms, f)
+            all_query_results.append(query_results)
+            self.save_results(query_results, file_name, "pickle_files")
+            print(f"{file_name} saved.")
+        self.save_results(
+            all_query_results, "all_query_results.pickle", "pickle_files"
+        )  # last saved
+        print(f"{file_name} saved.")
+        return all_query_results
 
-        combined_embeddings = np.array(
-            [e[3] for e in joint_embeddings_all_llms]
-        )  # grab the embeddings of the inputs + responses
-        embeddings = np.array(combined_embeddings, dtype=np.float64)
-        if not np.isfinite(embeddings).all():
-            print("Embeddings contain non-finite values.")
+    def collect_model_info(self):
+        print("Collecting model info...")
+        print(f"self.all_query_results: {self.all_query_results}")
+        self.all_model_info = [
+            result["model_info"] for result in self.all_query_results
+        ]
 
-        # Perform clustering and store the results
-        print("Running clustering...")
-        self.model_eval.run_clustering(embeddings)
-
-        # Choose which clustering result to analyze further
-        print("Analyzing clusters...")
-        file_loaded, chosen_clustering = load_pkl_or_not(
-            "chosen_clustering.pkl", self.pickle_dir, self.reuse_embedding_clustering
-        )
-        if not file_loaded:
-            # File doesn't exist or needs to be updated, generate new content
-            chosen_clustering = self.model_eval.clustering_results["KMeans"]
-            # Save the new content
-            with open(f"{self.pickle_dir}/chosen_clustering.pkl", "wb") as f:
-                pickle.dump(chosen_clustering, f)
-        labels = chosen_clustering.labels_
-        plt.hist(labels, bins=3)
-
-        # Perform dimensionality reduction
+    def perform_tsne_dimensionality_reduction(self):
         print("Performing t-SNE dimensionality reduction...")
-        dim_reduce_tsne = self.model_eval.tsne_dimension_reduction(
-            embeddings, iterations=300, perplexity=self.perplexity
+        self.dim_reduce_tsne = self.model_eval.tsne_dimension_reduction(
+            self.embeddings, iterations=300, perplexity=self.perplexity
         )
-        print("Type of dim_reduce_tsne:", type(dim_reduce_tsne))
+        self.check_tsne_values(self.dim_reduce_tsne)
+
+    def check_tsne_values(self, dim_reduce_tsne):
         if not np.isfinite(dim_reduce_tsne).all():
             print("dim_reduce_tsne contains non-finite values.")
         if np.isnan(dim_reduce_tsne).any() or np.isinf(dim_reduce_tsne).any():
             print("dim_reduce_tsne contains NaN or inf values.")
         print("dim_reduce_tsne:", dim_reduce_tsne.dtype)
 
-        # Visualizations
-        # grab list of models from self.llms
+    def visualize_results(self):
         model_names = [llm[1] for llm in self.llms]
         tsne_filename = self.generate_plot_filename(
             model_names, "tsne_embedding_responses"
         )
-        approval_filename = self.generate_plot_filename(
+        self.approval_filename = self.generate_plot_filename(
             model_names, "approval_responses"
         )
         if "tsne" not in self.hide_plots:
             self.viz.plot_embedding_responses(
-                dim_reduce_tsne, joint_embeddings_all_llms, model_names, tsne_filename
+                self.dim_reduce_tsne,
+                self.joint_embeddings_all_llms,
+                model_names,
+                tsne_filename,
             )
-        # plt.hist(labels, bins=50)
-        # plt.show()
-        # plt.close()
 
-        # Analyze the clusters and get a summary table
-        print("Compiling cluster table...")
+    def embed_responses(self):
+        print("Embedding responses...")
+        file_loaded, self.joint_embeddings_all_llms = load_pkl_or_not(
+            "joint_embeddings_all_llms.pkl",
+            self.pickle_dir,
+            self.reuse_joint_embeddings,
+        )
+        if not file_loaded:
+            self.generate_and_save_embeddings()
 
-        file_loaded, rows = load_pkl_or_not(
+        combined_embeddings = np.array(
+            [e[3] for e in self.joint_embeddings_all_llms]
+        )  # grab the embeddings of the inputs + responses
+        self.embeddings = np.array(combined_embeddings, dtype=np.float64)
+        if not np.isfinite(self.embeddings).all():
+            print("Embeddings contain non-finite values.")
+
+    def generate_and_save_embeddings(self):
+        self.joint_embeddings_all_llms = self.model_eval.embed_responses(
+            query_results=self.all_query_results, llms=self.llms
+        )
+        with open(f"{self.pickle_dir}/joint_embeddings_all_llms.pkl", "wb") as f:
+            pickle.dump(self.joint_embeddings_all_llms, f)
+
+    def run_clustering(self):
+        print("Running clustering...")
+        self.model_eval.run_clustering(self.embeddings)
+        print("Analyzing clusters...")
+        file_loaded, self.chosen_clustering = load_pkl_or_not(
+            "chosen_clustering.pkl", self.pickle_dir, self.reuse_embedding_clustering
+        )
+        if not file_loaded:
+            self.chosen_clustering = self.generate_and_save_chosen_clustering()
+
+    def generate_and_save_chosen_clustering(self):
+        chosen_clustering = self.model_eval.clustering_results["KMeans"]
+        with open(f"{self.pickle_dir}/chosen_clustering.pkl", "wb") as f:
+            pickle.dump(chosen_clustering, f)
+        return chosen_clustering
+
+    def analyze_clusters(self):
+        print("Analyzing clusters...")
+        file_loaded, self.rows = load_pkl_or_not(
             "rows.pkl", self.pickle_dir, self.reuse_cluster_rows
         )
-        print(f"file_loaded: {file_loaded}", f"rows: {rows}")
         if not file_loaded:
-            # File doesn't exist or needs to be updated, generate new content
-            print("Analyzing clusters...")
-            rows = self.model_eval.analyze_clusters(
-                chosen_clustering,
-                joint_embeddings_all_llms,
-                query_results=all_query_results,
-            )
-            # Save the new content
-            with open(f"{self.pickle_dir}/rows.pkl", "wb") as f:
-                pickle.dump(rows, f)
-
+            self.rows = self.generate_and_save_cluster_analysis()
         # Save and display the results
         print("Saving and displaying results...")
-        self.model_eval.save_and_display_results(chosen_clustering, rows)
+        self.model_eval.save_and_display_results(self.chosen_clustering, self.rows)
 
-        statement_embeddings = self.run_approvals_based_evaluation_and_plotting(
-            approval_filename
+    def generate_and_save_cluster_analysis(self):
+        rows = self.model_eval.analyze_clusters(
+            self.chosen_clustering,
+            self.joint_embeddings_all_llms,
+            self.all_query_results,
+        )
+        with open(f"{self.pickle_dir}/rows.pkl", "wb") as f:
+            pickle.dump(rows, f)
+        return rows
+
+    def run_approvals_based_evaluation(self):
+        # TODO: Refactor run_approvals_based_evaluation_and_plotting
+        self.statement_embeddings = self.run_approvals_based_evaluation_and_plotting(
+            self.approval_filename
         )
         self.clustering_obj = Clustering(self.args)
-        statement_clustering = self.clustering_obj.cluster_persona_embeddings(
-            statement_embeddings,
+        self.statement_clustering = self.clustering_obj.cluster_persona_embeddings(
+            self.statement_embeddings,
             n_clusters=120,
             spectral_plot=False if "spectral" in self.hide_plots else True,
         )
-        print(f"labels: {labels}")
         self.clustering_obj.cluster_approval_stats(
             self.approvals_statements_and_embeddings,
-            statement_clustering,
-            all_model_info,
+            self.statement_clustering,
+            self.all_model_info,
             self.reuse_cluster_rows,
         )
+
+    def perform_hierarchical_clustering(self):
         print("Calculating hierarchical cluster data...")
-        file_loaded, hierarchy_data = load_pkl_or_not(
+        file_loaded, self.hierarchy_data = load_pkl_or_not(
             "hierarchy_approval_data.pkl",
             self.pickle_dir,
             self.reuse_hierarchical_approvals,
         )
         if not file_loaded:
-            # File doesn't exist or needs to be updated, generate new content
-            hierarchy_data = self.clustering_obj.calculate_hierarchical_cluster_data(
-                statement_clustering,
-                self.approvals_statements_and_embeddings,
-                rows,
-            )  # (Z, leaf_labels, original_cluster_sizes, merged_cluster_sizes)
-            # Save the new content
-            with open(f"{self.pickle_dir}/hierarchy_approval_data.pkl", "wb") as f:
-                pickle.dump(hierarchy_data, f)
+            self.hierarchy_data = self.generate_and_save_hierarchical_data()
+
+    def generate_and_save_hierarchical_data(self):
+        hierarchy_data = self.clustering_obj.calculate_hierarchical_cluster_data(
+            self.statement_clustering,
+            self.approvals_statements_and_embeddings,
+            self.rows,
+        )
+        with open(f"{self.pickle_dir}/hierarchy_approval_data.pkl", "wb") as f:
+            pickle.dump(hierarchy_data, f)
+        return hierarchy_data
+
+    def visualize_hierarchical_clusters(self):
         print("Visualizing hierarchical cluster...")
         if "hierarchical_approvals" not in self.hide_plots:
-            for model_name in model_names:
+            for model_name in self.model_names:
                 filename = (
                     f"{self.viz_dir}/hierarchical_clustering_approval_{model_name}"
                 )
                 self.viz.visualize_hierarchical_cluster(
-                    hierarchy_data,
+                    self.hierarchy_data,
                     plot_type="approval",
-                    labels=labels,
+                    labels=self.labels,
                     bar_height=0.7,
                     bb_width=40,
                     x_leftshift=0,
                     y_downshift=0,
                     filename=filename,
                 )
+
+    def run_evaluations(self):
+        self.setup_evaluations()  # Put the sub functions here instead
+        self.generate_responses()
+        self.collect_model_info()
+
+        self.all_model_info = []
+        for result in self.all_query_results:
+            self.all_model_info.append(result["model_info"])
+            # {"model_family": ..., "model": ..., "system_message": ...}
+
+        self.embed_responses()
+        self.run_clustering()
+
+        self.labels = self.chosen_clustering.labels_
+        print(f"labels: {self.labels}")
+        plt.hist(self.labels, bins=3)
+        # plt.show()
+        # plt.close()
+
+        self.perform_tsne_dimensionality_reduction()
+        self.visualize_results()
+
+        clust_res = ClusteringResult()
+        # save as json
+        with open(f"{self.pickle_dir}/clustering_result.json", "w") as f:
+            json.dump(clust_res, f)
+
+        self.analyze_clusters()
+        self.run_approvals_based_evaluation()
+        self.perform_hierarchical_clustering()
+        self.visualize_hierarchical_clusters()
 
         with open(f"{self.pickle_dir}/conditions.pkl", "rb") as f:
             be_nice_conditions = pickle.load(f)
