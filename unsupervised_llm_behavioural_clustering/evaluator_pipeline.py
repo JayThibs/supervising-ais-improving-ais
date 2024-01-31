@@ -368,13 +368,18 @@ class EvaluatorPipeline:
                 )
 
     def run_evaluations(self):
+        # Set up
         self.setup_directories()
         self.load_api_key()
         self.clone_evals_repo()
+        # Load data
         all_texts = self.load_evaluation_data()
+        # Generate responses to statement prompts
         text_subset, all_query_results = self.generate_responses()
         all_model_info = self.collect_model_info(all_query_results)
+        # Embed model responses to statement prompts
         joint_embeddings_all_llms, combined_embeddings = self.embed_responses()
+        # 
         chosen_clustering = self.run_clustering(combined_embeddings)
 
         labels = self.chosen_clustering.labels_
