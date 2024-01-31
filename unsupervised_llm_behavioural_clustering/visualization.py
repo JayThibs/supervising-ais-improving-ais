@@ -6,6 +6,16 @@ import matplotlib.patches as mpatches
 from scipy.cluster.hierarchy import dendrogram, linkage
 from sklearn.manifold import TSNE
 import numpy as np
+from dataclasses import dataclass
+
+# @dataclass
+# class VisualizationArgs:
+#     texts_subset: int
+#     model_family: list
+#     model: list
+#     n_clusters: int
+#     test_mode: bool
+#     n_statements: int
 
 
 class Visualization:
