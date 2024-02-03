@@ -55,6 +55,7 @@ class EvaluatorPipeline:
         # Set up objects
         self.model_eval = ModelEvaluation(args, self.llms)
         self.viz = Visualization(save_path=self.viz_dir, personas=self.personas)
+        self.clustering_obj = Clustering(self.args)
 
         if self.args.new_generation:
             self.saved_query_results = None
@@ -228,14 +229,9 @@ class EvaluatorPipeline:
             print("dim_reduce_tsne contains NaN or inf values.")
         print("dim_reduce_tsne:", dim_reduce_tsne.dtype)
 
-    def visualize_results(self, dim_reduce_tsne, joint_embeddings_all_llms):
-        model_names = [llm[1] for llm in self.llms]
-        tsne_filename = self.generate_plot_filename(
-            model_names, "tsne_embedding_responses"
-        )
-        self.approval_filename = self.generate_plot_filename(
-            model_names, "approval_responses"
-        )
+    def visualize_results(
+        self, dim_reduce_tsne, joint_embeddings_all_llms, model_names, tsne_filename
+    ):
         if "tsne" not in self.hide_plots:
             self.viz.plot_embedding_responses(
                 dim_reduce_tsne,
@@ -310,12 +306,8 @@ class EvaluatorPipeline:
             pickle.dump(rows, f)
         return rows
 
-    def run_approvals_based_evaluation(self, approval_filename):
+    def run_approvals_based_evaluation(self, approval_filename, statement_embeddings):
         # TODO: Refactor run_approvals_based_evaluation_and_plotting
-        statement_embeddings = self.run_approvals_based_evaluation_and_plotting(
-            self.approval_filename
-        )  # ?????????
-        self.clustering_obj = Clustering(self.args)
         statement_clustering = self.clustering_obj.cluster_persona_embeddings(
             statement_embeddings,
             n_clusters=120,
@@ -328,21 +320,25 @@ class EvaluatorPipeline:
             self.reuse_cluster_rows,
         )
 
-    def perform_hierarchical_clustering(self):
+    def perform_hierarchical_clustering(self, statement_clustering, rows):
         print("Calculating hierarchical cluster data...")
-        file_loaded, self.hierarchy_data = load_pkl_or_not(
+        file_loaded, hierarchy_data = load_pkl_or_not(
             "hierarchy_approval_data.pkl",
             self.pickle_dir,
             self.reuse_hierarchical_approvals,
         )
         if not file_loaded:
-            self.hierarchy_data = self.generate_and_save_hierarchical_data()
+            hierarchy_data = self.generate_and_save_hierarchical_data(
+                statement_clustering, rows
+            )
 
-    def generate_and_save_hierarchical_data(self):
+        return hierarchy_data
+
+    def generate_and_save_hierarchical_data(self, statement_clustering, rows):
         hierarchy_data = self.clustering_obj.calculate_hierarchical_cluster_data(
-            self.statement_clustering,
+            statement_clustering,
             self.approvals_statements_and_embeddings,
-            self.rows,
+            rows,
         )
         with open(f"{self.pickle_dir}/hierarchy_approval_data.pkl", "wb") as f:
             pickle.dump(hierarchy_data, f)
@@ -390,7 +386,16 @@ class EvaluatorPipeline:
         dim_reduce_tsne = self.perform_tsne_dimensionality_reduction(
             combined_embeddings
         )
-        self.visualize_results(dim_reduce_tsne, joint_embeddings_all_llms)
+        model_names = [llm[1] for llm in self.llms]
+        tsne_filename = self.generate_plot_filename(
+            model_names, "tsne_embedding_responses"
+        )
+        approval_filename = self.generate_plot_filename(
+            model_names, "approval_responses"
+        )
+        self.visualize_results(
+            dim_reduce_tsne, joint_embeddings_all_llms, model_names, tsne_filename
+        )
 
         clust_res = ClusteringArgs()
         # save as json
@@ -398,7 +403,10 @@ class EvaluatorPipeline:
             json.dump(clust_res, f)
 
         rows = self.analyze_clusters(chosen_clustering)
-        self.run_approvals_based_evaluation()
+        statement_embeddings = self.run_approvals_based_evaluation_and_plotting(
+            self.approval_filename
+        )
+        self.run_approvals_based_evaluation(approval_filename, statement_embeddings)
         self.perform_hierarchical_clustering()
         self.visualize_hierarchical_clusters()
 
