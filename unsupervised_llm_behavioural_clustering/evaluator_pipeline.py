@@ -10,6 +10,42 @@ from model_evaluation import ModelEvaluation
 from visualization import Visualization
 from clustering import Clustering, ClusteringArgs
 from utils import embed_texts, load_pkl_or_not
+from typing import List
+
+
+@dataclass
+class ModelAnalysisState:
+    model_name: str
+    model_info: dict
+    statements: List[Statement]
+    embeddings: np.ndarray
+    clustering: ClusteringArgs
+    evaluation_results: EvaluationResults
+
+
+@dataclass
+class Statement:
+    text: str
+    embeddings: np.ndarray
+
+
+@dataclass
+class EvaluationResults:
+    tsne: np.ndarray
+    hierarchical_clustering: np.ndarray
+    awareness_hierarchical_clustering: np.ndarray
+    approval_hierarchical_clustering: np.ndarray
+    spectral_clustering: np.ndarray
+    conditions: np.ndarray
+    cluster_rows: np.ndarray
+    chosen_clustering: ClusteringArgs
+    approval_statements: List[Statement]
+    awareness_statements: List[Statement]
+    hierarchical_approvals: np.ndarray
+    hierarchical_awareness: np.ndarray
+    plot_statement_clustering: bool
+    hide_plots: List[str]
+    plot_filename: str
 
 
 class EvaluatorPipeline:
