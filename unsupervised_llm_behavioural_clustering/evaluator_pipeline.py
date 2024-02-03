@@ -96,7 +96,7 @@ class EvaluatorPipeline:
         self.data_prep = DataPreparation()
         all_texts = self.data_prep.load_evaluation_data(self.data_prep.file_paths)
         return all_texts
-        
+
     def process_reuse_data(self, reuse_data, all_data_types):
         reuse_types = set()
 
@@ -188,7 +188,7 @@ class EvaluatorPipeline:
             all_query_results = self.generate_and_save_responses(n_statements)
         else:
             all_query_results = [self.saved_query_results]
-            
+
         return text_subset, all_query_results
 
     def generate_and_save_responses(self, n_statements):
@@ -210,9 +210,7 @@ class EvaluatorPipeline:
     def collect_model_info(self, all_query_results):
         print("Collecting model info...")
         print(f"self.all_query_results: {all_query_results}")
-        all_model_info = [
-            result["model_info"] for result in all_query_results
-        ]
+        all_model_info = [result["model_info"] for result in all_query_results]
         return all_model_info
 
     def perform_tsne_dimensionality_reduction(self, combined_embeddings):
@@ -262,7 +260,7 @@ class EvaluatorPipeline:
         combined_embeddings = np.array(combined_embeddings, dtype=np.float64)
         if not np.isfinite(combined_embeddings).all():
             print("Embeddings contain non-finite values.")
-            
+
         return joint_embeddings_all_llms, combined_embeddings
 
     def generate_and_save_embeddings(self):
@@ -290,16 +288,17 @@ class EvaluatorPipeline:
             pickle.dump(chosen_clustering, f)
         return chosen_clustering
 
-    def analyze_clusters(self):
+    def analyze_clusters(self, chosen_clustering):
         print("Analyzing clusters...")
-        file_loaded, self.rows = load_pkl_or_not(
+        file_loaded, rows = load_pkl_or_not(
             "rows.pkl", self.pickle_dir, self.reuse_cluster_rows
         )
         if not file_loaded:
-            self.rows = self.generate_and_save_cluster_analysis()
+            rows = self.generate_and_save_cluster_analysis()
         # Save and display the results
         print("Saving and displaying results...")
-        self.model_eval.save_and_display_results(self.chosen_clustering, self.rows)
+        self.model_eval.save_and_display_results(chosen_clustering, rows)
+        return rows
 
     def generate_and_save_cluster_analysis(self):
         rows = self.model_eval.analyze_clusters(
@@ -311,20 +310,20 @@ class EvaluatorPipeline:
             pickle.dump(rows, f)
         return rows
 
-    def run_approvals_based_evaluation(self):
+    def run_approvals_based_evaluation(self, approval_filename):
         # TODO: Refactor run_approvals_based_evaluation_and_plotting
-        self.statement_embeddings = self.run_approvals_based_evaluation_and_plotting(
+        statement_embeddings = self.run_approvals_based_evaluation_and_plotting(
             self.approval_filename
-        )
+        )  # ?????????
         self.clustering_obj = Clustering(self.args)
-        self.statement_clustering = self.clustering_obj.cluster_persona_embeddings(
-            self.statement_embeddings,
+        statement_clustering = self.clustering_obj.cluster_persona_embeddings(
+            statement_embeddings,
             n_clusters=120,
             spectral_plot=False if "spectral" in self.hide_plots else True,
         )
         self.clustering_obj.cluster_approval_stats(
             self.approvals_statements_and_embeddings,
-            self.statement_clustering,
+            statement_clustering,
             self.all_model_info,
             self.reuse_cluster_rows,
         )
@@ -379,7 +378,7 @@ class EvaluatorPipeline:
         all_model_info = self.collect_model_info(all_query_results)
         # Embed model responses to statement prompts
         joint_embeddings_all_llms, combined_embeddings = self.embed_responses()
-        # 
+        #
         chosen_clustering = self.run_clustering(combined_embeddings)
 
         labels = self.chosen_clustering.labels_
@@ -388,19 +387,17 @@ class EvaluatorPipeline:
         # plt.show()
         # plt.close()
 
-        dim_reduce_tsne = self.perform_tsne_dimensionality_reduction(combined_embeddings)
+        dim_reduce_tsne = self.perform_tsne_dimensionality_reduction(
+            combined_embeddings
+        )
         self.visualize_results(dim_reduce_tsne, joint_embeddings_all_llms)
 
-        clust_res = ClusteringArgs(
-            text_subset=self.text_subset,
-            model_family=[],
-            model=,
-            n_clusters=,
+        clust_res = ClusteringArgs()
         # save as json
         with open(f"{self.pickle_dir}/clustering_result.json", "w") as f:
             json.dump(clust_res, f)
 
-        self.analyze_clusters()
+        rows = self.analyze_clusters(chosen_clustering)
         self.run_approvals_based_evaluation()
         self.perform_hierarchical_clustering()
         self.visualize_hierarchical_clusters()
