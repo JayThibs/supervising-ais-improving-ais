@@ -375,7 +375,7 @@ class EvaluatorPipeline:
         all_texts = self.load_evaluation_data()
         # Generate responses to statement prompts
         text_subset, all_query_results = self.generate_responses()
-        all_model_info = self.collect_model_info(all_query_results)
+        self.all_model_info = self.collect_model_info(all_query_results)
         # Embed model responses to statement prompts
         joint_embeddings_all_llms, combined_embeddings = self.embed_responses()
         #
