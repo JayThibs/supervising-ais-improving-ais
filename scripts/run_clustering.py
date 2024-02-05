@@ -42,3 +42,48 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+# ---------------
+
+
+@dataclass
+class ClusteringPipelineState:
+    text_subset: list
+    all_query_results: dict
+    all_model_info: dict
+    joint_embeddings: np.ndarray
+    combined_embeddings: np.ndarray
+    chosen_clustering: Any  # Actual cluster object
+    approvals_statements_and_embeddings: list
+    statement_embeddings: np.ndarray
+
+
+def save_pipeline_state(state: ClusteringPipelineState, filepath: str):
+    # Convert dataclass to dict to serialize
+    state_dict = asdict(state)
+
+    # Save to JSON file
+    with open(filepath, "w") as f:
+        json.dump(state_dict, f)
+
+
+def load_pipeline_state(filepath: str) -> ClusteringPipelineState:
+    with open(filepath) as f:
+        state_dict = json.load(f)
+
+    return ClusteringPipelineState(**state_dict)
+
+
+if __name__ == "__main__":
+    # Run pipeline
+    state = run_pipeline()
+
+    # Save state
+    save_pipeline_state(state, "pipeline_state.json")
+
+    # Reload later
+    reloaded_state = load_pipeline_state("pipeline_state.json")
+
+    # Redo clustering, analysis, etc.
+    redo_clustering(reloaded_state)

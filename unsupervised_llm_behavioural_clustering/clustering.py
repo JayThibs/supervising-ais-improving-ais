@@ -14,14 +14,8 @@ from utils import lookup_cid_pos_in_rows, identify_theme, compare_response_pair
 from dataclasses import dataclass
 
 
-@dataclass
-class ClusteringArgs:
-    texts_subset: int
-    model_family: list
-    model: list
-    n_clusters: int
-    test_mode: bool
-    n_statements: int
+from dataclasses import dataclass, asdict
+import json
 
 
 class Clustering:
