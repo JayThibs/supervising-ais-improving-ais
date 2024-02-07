@@ -22,7 +22,7 @@ The rise of powerful, general language modeling systems has lead to the rise of 
 
 There are two main ways AIs can get better: by improving their training algorithms or by improving their training data.
 
-We consider both scenarios, and tentatively believe that data-based improvement is riskier than architecture based improvement. Current models mostly derive their behavior from their training data, and not training algorithms (meaning their architectures, hyperparameters, loss functions, optimizers or the like). So far, most improvements to AI training algorithms seem 'value neutral'. Also note that most of human value drift currently derives from cultural shifts changing the 'training data' available in the environment, not biological evolution over the brain's base learning algorithms.
+We tentatively believe that data-based improvement is riskier than architecture based improvement. Current models mostly derive their behavior from their training data, and not training algorithms (meaning their architectures, hyperparameters, loss functions, optimizers or the like). So far, most improvements to AI training algorithms seem 'value neutral'. Additionally, most of human value drift currently derives from cultural shifts changing the 'training data' available in the environment, not biological evolution over the brain's base learning algorithms.
 
 We imagine a future where AIs self-augment by continuously seeking out more and better training data, and either creating successor AIs or training themselves on that data. Often, these data will come from the AIs running experiments in the real world (doing science), deliberately seeking data that would cover a specific gap in its current capabilities, analogous to how human scientists seek data from domains where our current understanding is limited. With AI, this could involve AgentGPT-like systems that spin up many instances of themselves to run experiments in parallel, potentially leading to quick improvements if we are in an agency overhang.
 
@@ -35,7 +35,20 @@ We want to find methods of ensuring such 'automated science' processes remain sa
 
 # Projects for the Agenda
 
-Currently, we're focusing on scalable methods of tracking behavioral drift in language models, as well as benchmarks for evaluating a language model's capacity for stable self-modification via self-training.
+Currently, we're focusing on scalable methods of tracking behavioral drift in language models. In the near future, we will start working on benchmarks for evaluating a language model's capacity for stable self-modification via influencing its own training data.
+
+# Methods
+
+
+## Contrastive Decoding
+
+Contrastive decoding refers to the practice of using the difference in logits from two language models to create a “contrastive” conditional probability distribution for autoregressive generation. Given two language models A and B, we can subtract the logits of A from the logits of B, then repeatedly sample from the resulting distributions over tokens to generate texts that are disproportionately more probable under model B’s probability distribution. We will use this method in multiple ways to highlight ways in which the intervention model differs from the base model.
+
+## Clustering
+
+Clustering is a method for grouping generated responses into clusters based on their semantic similarity. This is useful for highlighting interesting patterns from large collections of lightly structured text.
+
+## LLM-Automated Analysis
 
 # Methods
 
@@ -98,4 +111,4 @@ python unsupervised_llm_behavioural_clustering/main.py --model_family="openai" -
 
 # Acknowledgements
 
-This work is supported through grants by the [Long-Term Future Fund](https://funds.effectivealtruism.org/funds/far-future), [Lightspeed Grants](https://lightspeedgrants.org/), and [Open Philanthropy](https://www.openphilanthropy.org/).
+This work is supported through grants by the [Long-Term Future Fund](https://funds.effectivealtruism.org/funds/far-future), [Lightspeed Grants](https://lightspeedgrants.org/), and [Open Philanthropy](https://www.openphilanthropy.org/), and partially took place at [Cavendish Labs](https://cavendishlabs.org/).
