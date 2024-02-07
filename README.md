@@ -50,7 +50,19 @@ Clustering is a method for grouping generated responses into clusters based on t
 
 ## LLM-Automated Analysis
 
-LLM-Automated Analysis involves using a language model to evaluate the behavioral tendencies of another language model, or to sort through clustering results and identify particularly interesting or concerning patterns. We use this approach along with the clustering techniques to study the behavioral differences between language models. Primarily, we measure the behavioral differences between a pre-trained language model and its fine-tuned version.
+# Methods
+
+## Contrastive Decoding
+
+Contrastive decoding is a method for comparing the behavioral tendencies of two language models. It works by querying the two models to generate a wide variety of responses, then using a combination of unsupervised clustering and supervisor models to compare the response patterns of the two LMs, and automatically highlight any differences that seems surprising or relevant from an alignment perspective.
+
+## Clustering
+
+Clustering is a method for grouping generated responses into clusters based on their semantic similarity. This is useful for identifying the different types of responses a model can generate, and for identifying which types of responses are most common.
+
+## LLM-Automated Analysis
+
+LLM-Automated Analysis involves using a language model to evaluate the behavioral tendencies of another language model. We use this approach along with the clustering techniques to study the behavioral differences between language models. Primarily, we measure the behavioral differences between a pre-trained language model and its fine-tuned version.
 
 # How to Use
 

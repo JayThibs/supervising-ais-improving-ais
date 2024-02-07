@@ -1,0 +1,15 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: Current File",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "cwd": "${workspaceFolder}/unsupervised_llm_behavioural_clustering",
+            "args": ["--model-family", "openai", "--model", "gpt-3.5-turbo", "--test-mode"]
+        }
+    ]
+}
