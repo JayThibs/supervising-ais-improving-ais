@@ -8,44 +8,40 @@ from matplotlib import pyplot as plt
 from data_preparation import DataPreparation
 from model_evaluation import ModelEvaluation
 from visualization import Visualization
-from clustering import Clustering, ClusteringArgs
+from clustering import Clustering
 from utils import embed_texts, load_pkl_or_not
-from typing import List
+from typing import List, Dict, Any
+from dataclasses import dataclass
 
 
 @dataclass
-class ModelAnalysisState:
-    model_name: str
-    model_info: dict
-    statements: List[Statement]
-    embeddings: np.ndarray
-    clustering: ClusteringArgs
-    evaluation_results: EvaluationResults
+class ModelMetadata:
+    model_id: str
+    temperature: float
+    max_tokens: int
+    other_params: Dict[str, Any]  # Include any other model-specific parameters
 
 
 @dataclass
-class Statement:
-    text: str
-    embeddings: np.ndarray
+class StatementResponses:
+    metadata: ModelMetadata
+    response_file: str  # Path to the .jsonl file with responses
 
+    def save_responses(self, statements, responses):
+        with open(self.response_file, "w") as f:
+            for statement, response in zip(statements, responses):
+                json.dump({"statement": statement, "response": response}, f)
+                f.write("\n")
 
-@dataclass
-class EvaluationResults:
-    tsne: np.ndarray
-    hierarchical_clustering: np.ndarray
-    awareness_hierarchical_clustering: np.ndarray
-    approval_hierarchical_clustering: np.ndarray
-    spectral_clustering: np.ndarray
-    conditions: np.ndarray
-    cluster_rows: np.ndarray
-    chosen_clustering: ClusteringArgs
-    approval_statements: List[Statement]
-    awareness_statements: List[Statement]
-    hierarchical_approvals: np.ndarray
-    hierarchical_awareness: np.ndarray
-    plot_statement_clustering: bool
-    hide_plots: List[str]
-    plot_filename: str
+    @staticmethod
+    def load_responses(filepath):
+        statements, responses = [], []
+        with open(filepath, "r") as f:
+            for line in f:
+                data = json.loads(line)
+                statements.append(data["statement"])
+                responses.append(data["response"])
+        return statements, responses
 
 
 class EvaluatorPipeline:
@@ -108,6 +104,11 @@ class EvaluatorPipeline:
                 )
             else:
                 self.query_results = None
+
+    def setup_evaluations(self):
+        self.setup_directories()
+        self.load_api_key()
+        self.clone_evals_repo()
 
     # Set up directories
     def setup_directories(self):
@@ -342,7 +343,7 @@ class EvaluatorPipeline:
             pickle.dump(rows, f)
         return rows
 
-    def run_approvals_based_evaluation(self, approval_filename, statement_embeddings):
+    def run_approvals_based_evaluation(self, statement_embeddings):
         # TODO: Refactor run_approvals_based_evaluation_and_plotting
         statement_clustering = self.clustering_obj.cluster_persona_embeddings(
             statement_embeddings,
@@ -380,16 +381,24 @@ class EvaluatorPipeline:
             pickle.dump(hierarchy_data, f)
         return hierarchy_data
 
-    def visualize_hierarchical_clusters(self):
-        print("Visualizing hierarchical cluster...")
-        if "hierarchical_approvals" not in self.hide_plots:
-            for model_name in self.model_names:
-                filename = (
-                    f"{self.viz_dir}/hierarchical_clustering_approval_{model_name}"
-                )
+    def visualize_hierarchical_clusters(
+        self, model_names, hierarchy_data, plot_type, filename_prefix
+    ):
+        """
+        Visualizes hierarchical clusters for the given plot type.
+
+        Parameters:
+        - model_names: List of model names to include in the visualization.
+        - hierarchy_data: The hierarchical data to be visualized.
+        - plot_type: The type of plot to generate ('approval' or 'awareness').
+        - filename_prefix: Prefix for the filename to save the plot.
+        """
+        if plot_type not in self.hide_plots:
+            for model_name in model_names:
+                filename = f"{self.viz_dir}/hierarchical_clustering_{plot_type}_{model_name}.png"
                 self.viz.visualize_hierarchical_cluster(
-                    self.hierarchy_data,
-                    plot_type="approval",
+                    hierarchy_data,
+                    plot_type=plot_type,
                     labels=self.labels,
                     bar_height=0.7,
                     bb_width=40,
@@ -399,10 +408,6 @@ class EvaluatorPipeline:
                 )
 
     def run_evaluations(self):
-        # Set up
-        self.setup_directories()
-        self.load_api_key()
-        self.clone_evals_repo()
         # Load data
         all_texts = self.load_evaluation_data()
         # Generate responses to statement prompts
@@ -413,7 +418,7 @@ class EvaluatorPipeline:
         #
         chosen_clustering = self.run_clustering(combined_embeddings)
 
-        labels = self.chosen_clustering.labels_
+        labels = chosen_clustering.labels_
         print(f"labels: {labels}")
         plt.hist(labels, bins=3)
         # plt.show()
@@ -433,18 +438,22 @@ class EvaluatorPipeline:
             dim_reduce_tsne, joint_embeddings_all_llms, model_names, tsne_filename
         )
 
-        clust_res = ClusteringArgs()
-        # save as json
-        with open(f"{self.pickle_dir}/clustering_result.json", "w") as f:
-            json.dump(clust_res, f)
+        # clust_res = ClusteringArgs()
+        # # save as json
+        # with open(f"{self.pickle_dir}/clustering_result.json", "w") as f:
+        #     json.dump(clust_res, f)
 
         rows = self.analyze_clusters(chosen_clustering)
         statement_embeddings = self.run_approvals_based_evaluation_and_plotting(
-            self.approval_filename
+            approval_filename
         )
-        self.run_approvals_based_evaluation(approval_filename, statement_embeddings)
-        self.perform_hierarchical_clustering()
-        self.visualize_hierarchical_clusters()
+        self.run_approvals_based_evaluation(statement_embeddings)
+        hierarchy_data = self.perform_hierarchical_clustering(
+            statement_clustering, rows
+        )
+        self.visualize_hierarchical_clusters(
+            model_names, hierarchy_data, "approval", approval_filename
+        )
 
         with open(f"{self.pickle_dir}/conditions.pkl", "rb") as f:
             be_nice_conditions = pickle.load(f)
