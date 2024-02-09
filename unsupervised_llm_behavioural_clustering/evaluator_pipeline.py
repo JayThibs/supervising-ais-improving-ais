@@ -72,6 +72,7 @@ class EvaluatorPipeline:
             self.llms.append((model_family, model))
 
         # Load approval prompts from same directory as this file
+        self.n_statements = 300 if self.test_mode else self.args.n_statements
         with open(f"{self.data_dir}/prompts/approval_prompts.json", "r") as file:
             # { "google_chat_desc": [ "prompt"], "bing_chat_desc": [...], ...}
             self.approval_prompts = json.load(file)
@@ -216,14 +217,13 @@ class EvaluatorPipeline:
         return filename
 
     def generate_responses(self):
-        n_statements = 300 if self.test_mode else self.args.n_statements
         self.perplexity = 3 if self.test_mode else 50
         text_subset = self.model_eval.load_and_preprocess_data(
-            self.data_prep, n_statements=n_statements
+            self.data_prep, n_statements=self.n_statements
         )
 
         if self.saved_query_results is None:
-            all_query_results = self.generate_and_save_responses(n_statements)
+            all_query_results = self.generate_and_save_responses(self.n_statements)
         else:
             all_query_results = [self.saved_query_results]
 
@@ -356,6 +356,7 @@ class EvaluatorPipeline:
             self.all_model_info,
             self.reuse_cluster_rows,
         )
+        return statement_clustering
 
     def perform_hierarchical_clustering(self, statement_clustering, rows):
         print("Calculating hierarchical cluster data...")
@@ -382,7 +383,7 @@ class EvaluatorPipeline:
         return hierarchy_data
 
     def visualize_hierarchical_clusters(
-        self, model_names, hierarchy_data, plot_type, filename_prefix
+        self, *, model_names, hierarchy_data, labels, plot_type
     ):
         """
         Visualizes hierarchical clusters for the given plot type.
@@ -391,7 +392,6 @@ class EvaluatorPipeline:
         - model_names: List of model names to include in the visualization.
         - hierarchy_data: The hierarchical data to be visualized.
         - plot_type: The type of plot to generate ('approval' or 'awareness').
-        - filename_prefix: Prefix for the filename to save the plot.
         """
         if plot_type not in self.hide_plots:
             for model_name in model_names:
@@ -399,13 +399,85 @@ class EvaluatorPipeline:
                 self.viz.visualize_hierarchical_cluster(
                     hierarchy_data,
                     plot_type=plot_type,
-                    labels=self.labels,
+                    labels=labels,
                     bar_height=0.7,
                     bb_width=40,
                     x_leftshift=0,
                     y_downshift=0,
                     filename=filename,
                 )
+
+    def load_conditions_and_embeddings(
+        self,
+        emb_pkl_file="Anthropic_5000_random_statements_embs",
+    ):
+        with open(f"{self.pickle_dir}/conditions.pkl", "rb") as f:
+            be_nice_conditions = pickle.load(f)
+
+        with open(f"{self.pickle_dir}/{emb_pkl_file}.pkl", "rb") as f:
+            random_statements_embs = pickle.load(f)[: self.n_statements]
+
+        return be_nice_conditions, random_statements_embs
+
+    def prepare_data_for_prompts(
+        self, be_nice_conditions, Anthropic_5000_random_statements_embs
+    ):
+        data_include_statements_and_embeddings_4_prompts = [
+            [[], s[0], s[2]] for s in Anthropic_5000_random_statements_embs
+        ]
+
+        for i, condition in enumerate(be_nice_conditions):
+            for record in condition:
+                if record == 0:
+                    data_include_statements_and_embeddings_4_prompts[i][0].append(0)
+                elif record == 1:
+                    data_include_statements_and_embeddings_4_prompts[i][0].append(1)
+                else:
+                    data_include_statements_and_embeddings_4_prompts[i][0].append(-1)
+
+        statement_embeddings = np.array(
+            [e[2] for e in data_include_statements_and_embeddings_4_prompts]
+        )
+
+        return data_include_statements_and_embeddings_4_prompts, statement_embeddings
+
+    def cluster_statement_embeddings(self, statement_embeddings):
+        statement_clustering = self.clustering_obj.cluster_persona_embeddings(
+            statement_embeddings,
+            spectral_plot=False if "spectral" in self.hide_plots else True,
+        )
+        return statement_clustering
+
+    def visualize_approval_embeddings(
+        self, dim_reduce_tsne, data_include_statements_and_embeddings_4_prompts
+    ):
+        if "awareness" not in self.hide_plots:
+            self.viz.plot_approvals(
+                dim_reduce_tsne,
+                data_include_statements_and_embeddings_4_prompts,
+                1,
+                plot_type="awareness",
+                filename="embedding_of_approvals_diff_chats.png",
+                title="Embeddings of approvals for different chat modes",
+            )
+
+    def calculate_and_save_hierarchical_data(
+        self, statement_clustering, data_include_statements_and_embeddings_4_prompts
+    ):
+        file_loaded, hierarchy_data = load_pkl_or_not(
+            "hierarchy_awareness_data.pkl",
+            self.pickle_dir,
+            self.reuse_hierarchical_awareness,
+        )
+        if not file_loaded:
+            hierarchy_data = self.clustering_obj.calculate_hierarchical_cluster_data(
+                statement_clustering,
+                data_include_statements_and_embeddings_4_prompts,
+                self.rows,  # Assuming self.rows is previously defined or calculated
+            )
+            with open(f"{self.pickle_dir}/hierarchy_awareness_data.pkl", "wb") as f:
+                pickle.dump(hierarchy_data, f)
+        return hierarchy_data
 
     def run_evaluations(self):
         # Load data
@@ -447,98 +519,44 @@ class EvaluatorPipeline:
         statement_embeddings = self.run_approvals_based_evaluation_and_plotting(
             approval_filename
         )
-        self.run_approvals_based_evaluation(statement_embeddings)
+        statement_clustering = self.run_approvals_based_evaluation(statement_embeddings)
         hierarchy_data = self.perform_hierarchical_clustering(
             statement_clustering, rows
         )
         self.visualize_hierarchical_clusters(
-            model_names, hierarchy_data, "approval", approval_filename
+            model_names=model_names,
+            hierarchy_data=hierarchy_data,
+            labels=labels,
+            plot_type="approval",
         )
-
-        with open(f"{self.pickle_dir}/conditions.pkl", "rb") as f:
-            be_nice_conditions = pickle.load(f)
-
-        print(f"be_nice_conditions: {be_nice_conditions}")
-
-        with open(
-            f"{self.pickle_dir}/Anthropic_5000_random_statements_embs.pkl", "rb"
-        ) as f:
-            Anthropic_5000_random_statements_embs = pickle.load(f)
-            Anthropic_5000_random_statements_embs = (
-                Anthropic_5000_random_statements_embs[:n_statements]
-            )
-
-        data_include_statements_and_embeddings_4_prompts = [
-            [[], s[0], s[2]] for s in Anthropic_5000_random_statements_embs
-        ]  # [empty list for conditions, statement, statement_embedding]
-
-        print(
-            f"data_include_statements_and_embeddings_4_prompts[0]: {data_include_statements_and_embeddings_4_prompts[0]}"
-        )
-
-        for i, condition in enumerate(be_nice_conditions):
-            for record in condition:
-                if record == 0:
-                    data_include_statements_and_embeddings_4_prompts[i][0].append(0)
-                elif record == 1:
-                    data_include_statements_and_embeddings_4_prompts[i][0].append(1)
-                else:
-                    data_include_statements_and_embeddings_4_prompts[i][0].append(-1)
-
-        statement_embeddings = np.array(
-            [e[2] for e in data_include_statements_and_embeddings_4_prompts]
-        )
-
-        # TODO: What is the difference between this statement_clustering and the one above?
-        statement_clustering = self.clustering_obj.cluster_persona_embeddings(
+        # Load conditions and embeddings
+        (
+            be_nice_conditions,
+            random_statements_embs,
+        ) = self.load_conditions_and_embeddings()
+        # Prepare data for prompts
+        (
+            data_include_statements_and_embeddings_4_prompts,
             statement_embeddings,
-            spectral_plot=False if "spectral" in self.hide_plots else True,
+        ) = self.prepare_data_for_prompts(be_nice_conditions, random_statements_embs)
+        # Cluster statement embeddings
+        statement_clustering = self.cluster_statement_embeddings(statement_embeddings)
+        # Visualize approval embeddings
+        self.visualize_approval_embeddings(
+            dim_reduce_tsne, data_include_statements_and_embeddings_4_prompts
         )
-
-        if "awareness" not in self.hide_plots:
-            self.viz.plot_approvals(
-                dim_reduce_tsne,
-                data_include_statements_and_embeddings_4_prompts,  # TODO: ???
-                1,
-                plot_type="awareness",
-                filename="embedding_of_approvals_diff_chats.png",
-                title=f"Embeddings of approvals for different chat modes",
-            )
-
-        # hierarchical clustering for awareness
+        # Calculate and save hierarchical data
         print("Calculating hierarchical cluster data for awareness prompts...")
-        file_loaded, hierarchy_data = load_pkl_or_not(
-            "hierarchy_awareness_data.pkl",
-            self.pickle_dir,
-            self.reuse_hierarchical_awareness,
+        hierarchy_data = self.calculate_and_save_hierarchical_data(
+            statement_clustering, data_include_statements_and_embeddings_4_prompts
         )
-        if not file_loaded:
-            # File doesn't exist or needs to be updated, generate new content
-            hierarchy_data = self.clustering_obj.calculate_hierarchical_cluster_data(
-                statement_clustering,
-                data_include_statements_and_embeddings_4_prompts,
-                rows,
-            )
-            # Save the new content
-            with open(f"{self.pickle_dir}/hierarchy_awareness_data.pkl", "wb") as f:
-                pickle.dump(hierarchy_data, f)
-
         print("Visualizing hierarchical cluster...")
-        if "hierarchical_awareness" not in self.hide_plots:
-            for model_name in model_names:
-                filename = (
-                    f"{self.viz_dir}/hierarchical_clustering_awareness_{model_name}"
-                )
-                self.viz.visualize_hierarchical_cluster(
-                    hierarchy_data,
-                    plot_type="awareness",
-                    labels=labels,
-                    bar_height=0.7,
-                    bb_width=40,
-                    x_leftshift=0,
-                    y_downshift=0,
-                    filename=filename,
-                )
+        self.visualize_hierarchical_clusters(
+            model_names=model_names,
+            hierarchy_data=hierarchy_data,
+            labels=labels,
+            plot_type="awareness",
+        )
 
         print("Done. Please check the results directory for the plots.")
 
