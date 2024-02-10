@@ -54,7 +54,7 @@ class Clustering:
         return np.array(centroids)
 
     def cluster_persona_embeddings(
-        self, statement_embeddings, n_clusters=120, spectral_plot=True
+        self, statement_embeddings, n_clusters=120, prompt_approver_type, spectral_plot=True
     ):
         print("Running clustering on statement embeddings...")
         clustering = sklearn.cluster.SpectralClustering(
@@ -67,10 +67,12 @@ class Clustering:
             fig, ax = plt.subplots()
             ax.tick_params(axis="both", which="major", labelsize=15)
             ax.hist(clustering.labels_, bins=n_clusters)
-            ax.set_title("Spectral Clustering of Statements", fontsize=20)
+            ax.set_title(
+                "Spectral Clustering of {prompt_approver_type} Statement Responses", fontsize=20
+            )
             fig.tight_layout()
             plt.show()
-            filename = f"{os.getcwd()}/data/results/plots/spectral_clustering_persona_statements.png"
+            filename = f"{os.getcwd()}/data/results/plots/spectral_clustering_{prompt_approver_type}_statements.png"
             fig.savefig(filename)
             print(f"Saved plot to {filename}")
             plt.close("all")

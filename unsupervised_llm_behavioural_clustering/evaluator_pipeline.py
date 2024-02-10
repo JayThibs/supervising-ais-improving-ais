@@ -349,6 +349,7 @@ class EvaluatorPipeline:
         statement_clustering = self.clustering_obj.cluster_persona_embeddings(
             statement_embeddings,
             n_clusters=120,
+            prompt_approver_type="Personas",
             spectral_plot=False if "spectral" in self.hide_plots else True,
         )
         self.clustering_obj.cluster_approval_stats(
@@ -443,19 +444,12 @@ class EvaluatorPipeline:
 
         return data_include_statements_and_embeddings_4_prompts, statement_embeddings
 
-    def cluster_statement_embeddings(self, statement_embeddings):
-        statement_clustering = self.clustering_obj.cluster_persona_embeddings(
-            statement_embeddings,
-            spectral_plot=False if "spectral" in self.hide_plots else True,
-        )
-        return statement_clustering
-
     def visualize_approval_embeddings(
         self,
         model_name,
         dim_reduce_tsne,
         data_include_statements_and_embeddings_4_prompts,
-        prompt_type,  # "personas" or "awareness"
+        prompt_approver_type,  # "personas" or "awareness"
     ):
         for condition in [1, 0, -1]:
             condition_title = {
@@ -472,7 +466,7 @@ class EvaluatorPipeline:
                 condition,
                 plot_type=f"{condition_title}",
                 filename=f"{approval_filename}",
-                title=f"Embeddings of {condition_title} for {prompt_type} responses",
+                title=f"Embeddings of {condition_title} for {prompt_approver_type} responses",
             )
 
     def calculate_and_save_hierarchical_data(
@@ -527,6 +521,8 @@ class EvaluatorPipeline:
         #     json.dump(clust_res, f)
 
         rows = self.analyze_clusters(chosen_clustering)
+
+        ### Approval Persona prompts ###
         statement_embeddings = self.run_approvals_based_evaluation_and_plotting(
             model_names
         )
@@ -540,6 +536,8 @@ class EvaluatorPipeline:
             labels=labels,
             plot_type="approval",
         )
+
+        ### Awareness prompts ###
         # Load conditions and embeddings
         (
             be_nice_conditions,
@@ -551,7 +549,11 @@ class EvaluatorPipeline:
             statement_embeddings,
         ) = self.prepare_data_for_prompts(be_nice_conditions, random_statements_embs)
         # Cluster statement embeddings
-        statement_clustering = self.cluster_statement_embeddings(statement_embeddings)
+        statement_clustering = self.clustering_obj.cluster_persona_embeddings(
+            statement_embeddings,
+            prompt_approver_type="Awareness",
+            spectral_plot=False if "spectral" in self.hide_plots else True,
+        )
         # Visualize approval embeddings
         if "awareness" not in self.hide_plots:
             for model_name in model_names:
@@ -559,7 +561,7 @@ class EvaluatorPipeline:
                     model_name,
                     dim_reduce_tsne,
                     data_include_statements_and_embeddings_4_prompts,
-                    prompt_type="awareness",
+                    prompt_approver_type="awareness",
                 )
         # Calculate and save hierarchical data
         print("Calculating hierarchical cluster data for awareness prompts...")
@@ -675,7 +677,7 @@ class EvaluatorPipeline:
                     model_name,
                     dim_reduce_tsne,
                     self.approvals_statements_and_embeddings,
-                    prompt_type="personas",
+                    prompt_approver_type="personas",
                 )
 
         return statement_embeddings
