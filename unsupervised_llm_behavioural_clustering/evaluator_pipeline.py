@@ -208,7 +208,7 @@ class EvaluatorPipeline:
         except FileNotFoundError:
             return None
 
-    def generate_plot_filename(self, model_names: list, plot_type):
+    def generate_plot_filename(self, model_names: list, plot_type: str):
         # timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
         plot_type = plot_type.replace(" ", "_")
         filename = f"{self.viz_dir}/"
@@ -348,8 +348,8 @@ class EvaluatorPipeline:
         # TODO: Refactor run_approvals_based_evaluation_and_plotting
         statement_clustering = self.clustering_obj.cluster_persona_embeddings(
             statement_embeddings,
-            n_clusters=120,
             prompt_approver_type="Personas",
+            n_clusters=120,
             spectral_plot=False if "spectral" in self.hide_plots else True,
         )
         self.clustering_obj.cluster_approval_stats(
@@ -464,7 +464,9 @@ class EvaluatorPipeline:
                 dim_reduce_tsne,
                 data_include_statements_and_embeddings_4_prompts,
                 condition,
-                plot_type=f"{condition_title}",
+                plot_type="approval"
+                if prompt_approver_type == "personas"
+                else "awareness",
                 filename=f"{approval_filename}",
                 title=f"Embeddings of {condition_title} for {prompt_approver_type} responses",
             )

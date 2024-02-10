@@ -54,7 +54,11 @@ class Clustering:
         return np.array(centroids)
 
     def cluster_persona_embeddings(
-        self, statement_embeddings, n_clusters=120, prompt_approver_type, spectral_plot=True
+        self,
+        statement_embeddings,
+        prompt_approver_type,
+        n_clusters=120,
+        spectral_plot=True,
     ):
         print("Running clustering on statement embeddings...")
         clustering = sklearn.cluster.SpectralClustering(
@@ -68,7 +72,8 @@ class Clustering:
             ax.tick_params(axis="both", which="major", labelsize=15)
             ax.hist(clustering.labels_, bins=n_clusters)
             ax.set_title(
-                "Spectral Clustering of {prompt_approver_type} Statement Responses", fontsize=20
+                f"Spectral Clustering of {prompt_approver_type} Statement Responses",
+                fontsize=20,
             )
             fig.tight_layout()
             plt.show()
