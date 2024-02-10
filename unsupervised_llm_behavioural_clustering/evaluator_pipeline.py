@@ -210,6 +210,7 @@ class EvaluatorPipeline:
 
     def generate_plot_filename(self, model_names: list, plot_type):
         # timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+        plot_type = plot_type.replace(" ", "_")
         filename = f"{self.viz_dir}/"
         for model in model_names:
             filename += f"{model}-"
@@ -396,6 +397,7 @@ class EvaluatorPipeline:
         if plot_type not in self.hide_plots:
             for model_name in model_names:
                 filename = f"{self.viz_dir}/hierarchical_clustering_{plot_type}_{model_name}.png"
+                print(f"Visualizing hierarchical cluster for {model_name}...")
                 self.viz.visualize_hierarchical_cluster(
                     hierarchy_data,
                     plot_type=plot_type,
@@ -449,16 +451,28 @@ class EvaluatorPipeline:
         return statement_clustering
 
     def visualize_approval_embeddings(
-        self, dim_reduce_tsne, data_include_statements_and_embeddings_4_prompts
+        self,
+        model_name,
+        dim_reduce_tsne,
+        data_include_statements_and_embeddings_4_prompts,
+        prompt_type,  # "personas" or "awareness"
     ):
-        if "awareness" not in self.hide_plots:
+        for condition in [1, 0, -1]:
+            condition_title = {
+                1: "approvals",
+                0: "disapprovals",
+                -1: "no response",
+            }[condition]
+            approval_filename = self.generate_plot_filename(
+                model_names=[model_name], plot_type=condition_title
+            )
             self.viz.plot_approvals(
                 dim_reduce_tsne,
                 data_include_statements_and_embeddings_4_prompts,
-                1,
-                plot_type="awareness",
-                filename="embedding_of_approvals_diff_chats.png",
-                title="Embeddings of approvals for different chat modes",
+                condition,
+                plot_type=f"{condition_title}",
+                filename=f"{approval_filename}",
+                title=f"Embeddings of {condition_title} for {prompt_type} responses",
             )
 
     def calculate_and_save_hierarchical_data(
@@ -503,9 +517,6 @@ class EvaluatorPipeline:
         tsne_filename = self.generate_plot_filename(
             model_names, "tsne_embedding_responses"
         )
-        approval_filename = self.generate_plot_filename(
-            model_names, "approval_responses"
-        )
         self.visualize_results(
             dim_reduce_tsne, joint_embeddings_all_llms, model_names, tsne_filename
         )
@@ -517,7 +528,7 @@ class EvaluatorPipeline:
 
         rows = self.analyze_clusters(chosen_clustering)
         statement_embeddings = self.run_approvals_based_evaluation_and_plotting(
-            approval_filename
+            model_names
         )
         statement_clustering = self.run_approvals_based_evaluation(statement_embeddings)
         hierarchy_data = self.perform_hierarchical_clustering(
@@ -542,9 +553,14 @@ class EvaluatorPipeline:
         # Cluster statement embeddings
         statement_clustering = self.cluster_statement_embeddings(statement_embeddings)
         # Visualize approval embeddings
-        self.visualize_approval_embeddings(
-            dim_reduce_tsne, data_include_statements_and_embeddings_4_prompts
-        )
+        if "awareness" not in self.hide_plots:
+            for model_name in model_names:
+                self.visualize_approval_embeddings(
+                    model_name,
+                    dim_reduce_tsne,
+                    data_include_statements_and_embeddings_4_prompts,
+                    prompt_type="awareness",
+                )
         # Calculate and save hierarchical data
         print("Calculating hierarchical cluster data for awareness prompts...")
         hierarchy_data = self.calculate_and_save_hierarchical_data(
@@ -560,7 +576,7 @@ class EvaluatorPipeline:
 
         print("Done. Please check the results directory for the plots.")
 
-    def run_approvals_based_evaluation_and_plotting(self, approval_filename):
+    def run_approvals_based_evaluation_and_plotting(self, model_names: list):
         # Generate the data for approvals
         file_loaded, self.approvals_statements_and_embeddings = load_pkl_or_not(
             "approvals_statements_and_embeddings_G_B_BE.pkl",
@@ -654,19 +670,12 @@ class EvaluatorPipeline:
 
         # Refactored approvals plotting
         if "approvals" not in self.hide_plots:
-            for condition in [1, 0, -1]:
-                condition_title = {
-                    1: "approvals",
-                    0: "disapprovals",
-                    -1: "no response",
-                }[condition]
-                self.viz.plot_approvals(
+            for model_name in model_names:
+                self.visualize_approval_embeddings(
+                    model_name,
                     dim_reduce_tsne,
                     self.approvals_statements_and_embeddings,
-                    condition,
-                    plot_type="approval",
-                    filename=approval_filename,
-                    title=f"Embeddings of {condition_title} for different chat modes",
+                    prompt_type="personas",
                 )
 
         return statement_embeddings
