@@ -397,17 +397,19 @@ class EvaluatorPipeline:
         """
         if plot_type not in self.hide_plots:
             for model_name in model_names:
-                filename = f"{self.viz_dir}/hierarchical_clustering_{plot_type}_{model_name}.png"
+                filename = (
+                    f"{self.viz_dir}/hierarchical_clustering_{plot_type}_{model_name}"
+                )
                 print(f"Visualizing hierarchical cluster for {model_name}...")
                 self.viz.visualize_hierarchical_cluster(
                     hierarchy_data,
                     plot_type=plot_type,
+                    filename=filename,
                     labels=labels,
                     bar_height=0.7,
                     bb_width=40,
                     x_leftshift=0,
                     y_downshift=0,
-                    filename=filename,
                 )
 
     def load_conditions_and_embeddings(
@@ -457,8 +459,9 @@ class EvaluatorPipeline:
                 0: "disapprovals",
                 -1: "no response",
             }[condition]
+            plot_type = prompt_approver_type + condition_title
             approval_filename = self.generate_plot_filename(
-                model_names=[model_name], plot_type=condition_title
+                model_names=[model_name], plot_type=plot_type
             )
             self.viz.plot_approvals(
                 dim_reduce_tsne,

@@ -156,13 +156,13 @@ class Visualization:
         self,
         hierarchy_data: tuple,
         plot_type: str,
+        filename,
         bar_height=0.7,
         bb_width=40,
         x_leftshift=0,
         y_downshift=0,
         figsize=(35, 35),
         labels=None,
-        filename="hierarchical_clustering",
     ):
         colors = self.plot_aesthetics[plot_type]["colors"]
 
@@ -229,8 +229,8 @@ class Visualization:
             ax.legend(handles=patch_colors)
 
         plt.tight_layout()
-        plt.savefig(f"{filename}_{plot_type}.png")
-        plt.savefig(filename, format="svg")
+        plt.savefig(f"{filename}.png")
+        plt.savefig(f"{filename}.svg", format="svg")
 
     def visualize_awareness(
         self,
