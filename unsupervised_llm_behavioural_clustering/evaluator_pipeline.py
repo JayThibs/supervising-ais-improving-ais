@@ -54,6 +54,7 @@ class EvaluatorPipeline:
         self.results_dir = f"{self.data_dir}/results"
         self.pickle_dir = f"{self.results_dir}/pickle_files"
         self.viz_dir = f"{self.results_dir}/plots"
+        self.tables_dir = f"{self.results_dir}/tables"
 
         # model information
         self.llms = []
@@ -113,7 +114,14 @@ class EvaluatorPipeline:
 
     # Set up directories
     def setup_directories(self):
-        dirs = [self.data_dir, self.evals_dir, self.results_dir, self.viz_dir]
+        dirs = [
+            self.data_dir,
+            self.evals_dir,
+            self.results_dir,
+            self.viz_dir,
+            self.tables_dir,
+            self.pickle_dir,
+        ]
         for dir in dirs:
             if not os.path.exists(dir):
                 os.makedirs(dir)
@@ -250,6 +258,9 @@ class EvaluatorPipeline:
         print("Collecting model info...")
         print(f"self.all_query_results: {all_query_results}")
         all_model_info = [result["model_info"] for result in all_query_results]
+        # print the keys
+        for key in all_model_info[0].keys():
+            print(key)
         return all_model_info
 
     def perform_tsne_dimensionality_reduction(self, combined_embeddings):
@@ -307,7 +318,9 @@ class EvaluatorPipeline:
 
     def run_clustering(self, combined_embeddings):
         print("Running clustering...")
-        self.model_eval.run_clustering(combined_embeddings)
+        self.clustering_results = self.clustering_obj.perform_multiple_clustering(
+            combined_embeddings
+        )
         print("Analyzing clusters...")
         file_loaded, chosen_clustering = load_pkl_or_not(
             "chosen_clustering.pkl", self.pickle_dir, self.reuse_embedding_clustering
@@ -317,35 +330,42 @@ class EvaluatorPipeline:
         return chosen_clustering
 
     def generate_and_save_chosen_clustering(self):
-        chosen_clustering = self.model_eval.clustering_results["KMeans"]
+        chosen_clustering = self.clustering_results["KMeans"]
         with open(f"{self.pickle_dir}/chosen_clustering.pkl", "wb") as f:
             pickle.dump(chosen_clustering, f)
         return chosen_clustering
 
-    def analyze_clusters(self, chosen_clustering):
+    def analyze_response_embeddings_clusters(
+        self, chosen_clustering, joint_embeddings_all_llms, all_query_results
+    ):
         print("Analyzing clusters...")
         file_loaded, rows = load_pkl_or_not(
             "rows.pkl", self.pickle_dir, self.reuse_cluster_rows
         )
         if not file_loaded:
-            rows = self.generate_and_save_cluster_analysis()
+            rows = self.generate_and_save_cluster_analysis(
+                chosen_clustering, joint_embeddings_all_llms, all_query_results
+            )
         # Save and display the results
         print("Saving and displaying results...")
-        self.model_eval.save_and_display_results(chosen_clustering, rows)
+        self.model_eval.save_and_display_results(
+            chosen_clustering, rows, self.all_model_info
+        )
         return rows
 
-    def generate_and_save_cluster_analysis(self):
+    def generate_and_save_cluster_analysis(
+        self, chosen_clustering, joint_embeddings_all_llms, all_query_results
+    ):
         rows = self.model_eval.analyze_clusters(
-            self.chosen_clustering,
-            self.joint_embeddings_all_llms,
-            self.all_query_results,
+            chosen_clustering,
+            joint_embeddings_all_llms,
+            all_query_results,
         )
         with open(f"{self.pickle_dir}/rows.pkl", "wb") as f:
             pickle.dump(rows, f)
         return rows
 
-    def run_approvals_based_evaluation(self, statement_embeddings):
-        # TODO: Refactor run_approvals_based_evaluation_and_plotting
+    def run_approvals_clustering(self, statement_embeddings):
         statement_clustering = self.clustering_obj.cluster_persona_embeddings(
             statement_embeddings,
             prompt_approver_type="Personas",
@@ -427,11 +447,9 @@ class EvaluatorPipeline:
 
         return be_nice_conditions, random_statements_embs
 
-    def prepare_data_for_prompts(
-        self, be_nice_conditions, Anthropic_5000_random_statements_embs
-    ):
+    def prepare_data_for_prompts(self, be_nice_conditions, random_statements_embs):
         data_include_statements_and_embeddings_4_prompts = [
-            [[], s[0], s[2]] for s in Anthropic_5000_random_statements_embs
+            [[], s[0], s[2]] for s in random_statements_embs
         ]
 
         for i, condition in enumerate(be_nice_conditions):
@@ -451,34 +469,38 @@ class EvaluatorPipeline:
 
     def visualize_approval_embeddings(
         self,
-        model_name,
+        model_names,
         dim_reduce_tsne,
         data_include_statements_and_embeddings_4_prompts,
         prompt_approver_type,  # "personas" or "awareness"
     ):
-        for condition in [1, 0, -1]:
-            condition_title = {
-                1: "approvals",
-                0: "disapprovals",
-                -1: "no response",
-            }[condition]
-            plot_type = prompt_approver_type + "-" + condition_title
-            approval_filename = self.generate_plot_filename(
-                model_names=[model_name], plot_type=plot_type
-            )
-            self.viz.plot_approvals(
-                dim_reduce_tsne,
-                data_include_statements_and_embeddings_4_prompts,
-                condition,
-                plot_type="approval"
-                if prompt_approver_type == "personas"
-                else "awareness",
-                filename=f"{approval_filename}",
-                title=f"Embeddings of {condition_title} for {prompt_approver_type} responses",
-            )
+        for model_name in model_names:
+            for condition in [1, 0, -1]:
+                condition_title = {
+                    1: "approvals",
+                    0: "disapprovals",
+                    -1: "no response",
+                }[condition]
+                plot_type = prompt_approver_type + "-" + condition_title
+                approval_filename = self.generate_plot_filename(
+                    model_names=[model_name], plot_type=plot_type
+                )
+                self.viz.plot_approvals(
+                    dim_reduce_tsne,
+                    data_include_statements_and_embeddings_4_prompts,
+                    condition,
+                    plot_type="approval"
+                    if prompt_approver_type == "personas"
+                    else "awareness",
+                    filename=f"{approval_filename}",
+                    title=f"Embeddings of {condition_title} for {prompt_approver_type} responses",
+                )
 
     def calculate_and_save_hierarchical_data(
-        self, statement_clustering, data_include_statements_and_embeddings_4_prompts
+        self,
+        statement_clustering,
+        data_include_statements_and_embeddings_4_prompts,
+        rows,
     ):
         file_loaded, hierarchy_data = load_pkl_or_not(
             "hierarchy_awareness_data.pkl",
@@ -489,38 +511,60 @@ class EvaluatorPipeline:
             hierarchy_data = self.clustering_obj.calculate_hierarchical_cluster_data(
                 statement_clustering,
                 data_include_statements_and_embeddings_4_prompts,
-                self.rows,  # Assuming self.rows is previously defined or calculated
+                rows,
             )
             with open(f"{self.pickle_dir}/hierarchy_awareness_data.pkl", "wb") as f:
                 pickle.dump(hierarchy_data, f)
         return hierarchy_data
 
     def run_evaluations(self):
+        """Steps to run the evaluation pipeline.
+
+        1. Compare how multiple LLMs fall into different clusters based on their responses to the same statement prompts.
+        1.1. Load statement prompts to generate model responses.
+        1.2. Generate responses to statement prompts.
+        1.3. Embed model responses to statement prompts.
+        1.4. Apply dimensionality reduction to the embeddings and visualize the results.
+        1.5. Run clustering on the statement + response embeddings and visualize the clusters.
+        1.6. Analyze the clusters by auto-labeling clusters with an LLM and print and save the cluster table results.
+
+        2. Approval-based evaluation: Does the LLM with particular personas approve or disapprove of certain statements?
+
+
+        """
         # Load data
         all_texts = self.load_evaluation_data()
         # Generate responses to statement prompts
         text_subset, all_query_results = self.generate_responses()
         self.all_model_info = self.collect_model_info(all_query_results)
-        # Embed model responses to statement prompts
-        joint_embeddings_all_llms, combined_embeddings = self.embed_responses()
-        #
-        chosen_clustering = self.run_clustering(combined_embeddings)
-
-        labels = chosen_clustering.labels_
-        print(f"labels: {labels}")
-        plt.hist(labels, bins=3)
-        # plt.show()
-        # plt.close()
-
-        dim_reduce_tsne = self.perform_tsne_dimensionality_reduction(
-            combined_embeddings
-        )
         model_names = [llm[1] for llm in self.llms]
         tsne_filename = self.generate_plot_filename(
             model_names, "tsne_embedding_responses"
         )
+        # Embed model responses to statement prompts
+        joint_embeddings_all_llms, combined_embeddings = self.embed_responses()
+        dim_reduce_tsne = self.perform_tsne_dimensionality_reduction(
+            combined_embeddings
+        )
         self.visualize_results(
             dim_reduce_tsne, joint_embeddings_all_llms, model_names, tsne_filename
+        )
+        chosen_clustering = self.run_clustering(combined_embeddings)
+
+        labels = chosen_clustering.labels_
+        print(f"labels: {labels}")
+        plt.hist(labels, bins=5)
+        # plt.show()
+        # plt.close()
+
+        rows = self.analyze_response_embeddings_clusters(
+            chosen_clustering, joint_embeddings_all_llms, all_query_results
+        )
+        clusters_desc_table = [
+            ["ID", "N", "Inputs Themes", "Responses Themes", "Interaction Themes"]
+        ]
+        self.clustering_obj.create_cluster_table(
+            clusters_desc_table, rows, table_pickle_path, "response_comparisons"
         )
 
         # clust_res = ClusteringArgs()
@@ -528,13 +572,17 @@ class EvaluatorPipeline:
         # with open(f"{self.pickle_dir}/clustering_result.json", "w") as f:
         #     json.dump(clust_res, f)
 
-        rows = self.analyze_clusters(chosen_clustering)
-
         ### Approval Persona prompts ###
-        statement_embeddings = self.run_approvals_based_evaluation_and_plotting(
-            model_names
-        )
-        statement_clustering = self.run_approvals_based_evaluation(statement_embeddings)
+        statement_embeddings = self.run_approvals_based_evaluation(model_names)
+        # Visualize approval embeddings
+        if "approvals" not in self.hide_plots:
+            self.visualize_approval_embeddings(
+                model_names,
+                dim_reduce_tsne,
+                self.approvals_statements_and_embeddings,
+                prompt_approver_type="personas",
+            )
+        statement_clustering = self.run_approvals_clustering(statement_embeddings)
         hierarchy_data = self.perform_hierarchical_clustering(
             statement_clustering, rows
         )
@@ -561,19 +609,20 @@ class EvaluatorPipeline:
             prompt_approver_type="Awareness",
             spectral_plot=False if "spectral" in self.hide_plots else True,
         )
-        # Visualize approval embeddings
+        # Visualize awareness embeddings
         if "awareness" not in self.hide_plots:
-            for model_name in model_names:
-                self.visualize_approval_embeddings(
-                    model_name,
-                    dim_reduce_tsne,
-                    data_include_statements_and_embeddings_4_prompts,
-                    prompt_approver_type="awareness",
-                )
+            self.visualize_approval_embeddings(
+                model_names,
+                dim_reduce_tsne,
+                data_include_statements_and_embeddings_4_prompts,
+                prompt_approver_type="awareness",
+            )
+        # Create or load the cluster rows
+        # rows =
         # Calculate and save hierarchical data
         print("Calculating hierarchical cluster data for awareness prompts...")
         hierarchy_data = self.calculate_and_save_hierarchical_data(
-            statement_clustering, data_include_statements_and_embeddings_4_prompts
+            statement_clustering, data_include_statements_and_embeddings_4_prompts, rows
         )
         print("Visualizing hierarchical cluster...")
         self.visualize_hierarchical_clusters(
@@ -583,6 +632,68 @@ class EvaluatorPipeline:
         )
 
         print("Done. Please check the results directory for the plots.")
+
+    def run_approvals_based_evaluation(self):
+        """
+        Handles the approvals based evaluation.
+        """
+        print("Embedding statements...")
+        statement_embeddings = embed_texts(
+            self.text_subset.tolist(), model="text-embedding-ada-002"
+        )
+
+        # Generate approvals
+        self.generate_approvals_for_statements()
+
+        # Perform dimensionality reduction
+        print("Performing dimensionality reduction...")
+        dim_reduce_tsne = self.model_eval.tsne_dimension_reduction(
+            statement_embeddings, iterations=2000, perplexity=self.perplexity
+        )
+
+        return statement_embeddings, dim_reduce_tsne
+
+    def generate_approvals_for_statements(self):
+        """
+        Generates approvals for each statement.
+        """
+        print("Generating approvals...")
+        all_condition_approvals = self.load_or_generate_all_condition_approvals()
+
+        self.approvals_statements_and_embeddings = []
+        for i in range(len(self.text_subset)):
+            record_approvals = [
+                condition_approvals[i]
+                for condition_approvals in all_condition_approvals
+            ]
+            record = [record_approvals, self.text_subset[i], statement_embeddings[i]]
+            self.approvals_statements_and_embeddings.append(record)
+
+        pickle.dump(
+            self.approvals_statements_and_embeddings,
+            open(
+                f"{self.pickle_dir}/approvals_statements_and_embeddings_G_B_BE.pkl",
+                "wb",
+            ),
+        )
+
+    def load_or_generate_all_condition_approvals(self):
+        """
+        Loads or generates all condition approvals.
+        """
+        approvals_file_path = os.path.join(
+            self.pickle_dir, "all_condition_approvals.pkl"
+        )
+        if os.path.exists(approvals_file_path):
+            print("Loading existing condition approvals...")
+            with open(approvals_file_path, "rb") as f:
+                all_condition_approvals = pickle.load(f)
+        else:
+            print("Generating new condition approvals...")
+            all_condition_approvals = self.generate_all_condition_approvals()
+            with open(approvals_file_path, "wb") as f:
+                pickle.dump(all_condition_approvals, f)
+        return all_condition_approvals
 
     def run_approvals_based_evaluation_and_plotting(self, model_names: list):
         # Generate the data for approvals
@@ -676,14 +787,4 @@ class EvaluatorPipeline:
             open(f"{os.getcwd()}/data/results/pickle_files/conditions.pkl", "wb"),
         )
 
-        # Refactored approvals plotting
-        if "approvals" not in self.hide_plots:
-            for model_name in model_names:
-                self.visualize_approval_embeddings(
-                    model_name,
-                    dim_reduce_tsne,
-                    self.approvals_statements_and_embeddings,
-                    prompt_approver_type="personas",
-                )
-
-        return statement_embeddings
+        return statement_embeddings, dim_reduce_tsne

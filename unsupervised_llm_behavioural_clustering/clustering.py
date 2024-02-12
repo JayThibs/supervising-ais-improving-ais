@@ -1,4 +1,5 @@
 import os
+import csv
 import numpy as np
 from tqdm import tqdm
 import pdb
@@ -98,7 +99,6 @@ class Clustering:
         cluster_size = 0
         n_conditions = len(approvals_statements_and_embeddings[0][0])
         approval_fractions = [0 for _ in range(n_conditions)]
-        n_datapoints = len(approvals_statements_and_embeddings)
         for e, l in zip(approvals_statements_and_embeddings, cluster_labels):
             if l != cluster_ID:
                 continue
@@ -117,7 +117,6 @@ class Clustering:
         reuse_cluster_rows=False,
     ):
         # Calculating the confusion matrix and pearson correlation between responses
-        # the below labels could be abstracted in evaluator_pipeline.py to be more general
         chat_modes = ["Bing Chat", "Google Chat", "Bing Chat Emoji", "Bing Chat Janus"]
         response_types = ["approve", "disapprove"]
 
@@ -133,15 +132,17 @@ class Clustering:
                     )
             print("\n\n")
 
-        # rows = pickle.load(open("chat_mode_approvals_spectral_clustering_rows.pkl", "rb"))
+        pickle_base_path = f"{os.getcwd()}/data/results/pickle_files"
+        rows_pickle_path = f"{pickle_base_path}/rows_chatbots_G_B_BE_BJ.pkl"
+        clustering_pickle_path = f"{pickle_base_path}/clustering_chatbots_G_B_BE_BJ.pkl"
+        table_pickle_path = (
+            f"{pickle_base_path}/clusters_desc_table_chatbots_G_B_BE_BJ.pkl"
+        )
+
         if reuse_cluster_rows:
             print("Loading rows from file...")
-            rows = pickle.load(
-                open(
-                    f"{os.getcwd()}/data/results/pickle_files/rows_chatbots_G_B_BE_BJ.pkl",
-                    "rb",
-                )
-            )
+            with open(rows_pickle_path, "rb") as file:
+                rows = pickle.load(file)
         else:
             print("Calculating rows...")
             rows = self.compile_cluster_table(
@@ -152,20 +153,10 @@ class Clustering:
                 max_desc_length=250,
             )
 
-            pickle.dump(
-                rows,
-                open(
-                    f"{os.getcwd()}/data/results/pickle_files/rows_chatbots_G_B_BE_BJ.pkl",
-                    "wb",
-                ),
-            )
-            pickle.dump(
-                statement_clustering,
-                open(
-                    f"{os.getcwd()}/data/results/pickle_files/clustering_chatbots_G_B_BE_BJ.pkl",
-                    "wb",
-                ),
-            )
+            with open(rows_pickle_path, "wb") as file:
+                pickle.dump(rows, file)
+            with open(clustering_pickle_path, "wb") as file:
+                pickle.dump(statement_clustering, file)
 
         clusters_desc_table = [
             [
@@ -178,20 +169,30 @@ class Clustering:
                 "Inputs Themes",
             ]
         ]
-        for r in rows:
-            clusters_desc_table.append(r)
+        self.create_cluster_table(
+            clusters_desc_table, rows, table_pickle_path, "personas"
+        )
+
+    def create_cluster_table(
+        self, clusters_desc_table, rows, table_pickle_path, table_type
+    ):
+        clusters_desc_table = clusters_desc_table + rows
         t = AsciiTable(clusters_desc_table)
         t.inner_row_border = True
         print(t.table)
         print("\n\n")
         print("Saving table to file...")
-        pickle.dump(
-            clusters_desc_table,
-            open(
-                f"{os.getcwd()}/data/results/pickle_files/clusters_desc_table_chatbots_G_B_BE_BJ.pkl",
-                "wb",
-            ),
+        with open(table_pickle_path, "wb") as file:
+            pickle.dump(clusters_desc_table, file)
+
+        # Save the table in a CSV format for easy visualization in VSCode
+        csv_file_path = (
+            f"{os.getcwd()}/data/results/tables/cluster_results_table_{table_type}.csv"
         )
+        with open(csv_file_path, mode="w", newline="", encoding="utf-8") as file:
+            writer = csv.writer(file)
+            writer.writerows(clusters_desc_table)
+        print(f"Table also saved in CSV format at {csv_file_path}")
 
     def calculate_hierarchical_cluster_data(
         self, clustering, approvals_statements_and_embeddings, rows
@@ -204,6 +205,8 @@ class Clustering:
 
         n_clusters = max(clustering.labels_) + 1
         cluster_labels = []
+        print(len(rows))
+        print(rows)
         for i in range(n_clusters):
             pos = lookup_cid_pos_in_rows(rows, i)
             if pos >= 0:
