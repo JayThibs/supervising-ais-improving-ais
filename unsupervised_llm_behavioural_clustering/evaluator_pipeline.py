@@ -385,7 +385,7 @@ class EvaluatorPipeline:
         return hierarchy_data
 
     def visualize_hierarchical_clusters(
-        self, *, model_names, hierarchy_data, labels, plot_type
+        self, *, model_names, hierarchy_data, plot_type
     ):
         """
         Visualizes hierarchical clusters for the given plot type.
@@ -399,6 +399,9 @@ class EvaluatorPipeline:
             for model_name in model_names:
                 filename = (
                     f"{self.viz_dir}/hierarchical_clustering_{plot_type}_{model_name}"
+                )
+                labels = (
+                    self.viz.personas if plot_type == "approval" else self.viz.awareness
                 )
                 print(f"Visualizing hierarchical cluster for {model_name}...")
                 self.viz.visualize_hierarchical_cluster(
@@ -459,7 +462,7 @@ class EvaluatorPipeline:
                 0: "disapprovals",
                 -1: "no response",
             }[condition]
-            plot_type = prompt_approver_type + condition_title
+            plot_type = prompt_approver_type + "-" + condition_title
             approval_filename = self.generate_plot_filename(
                 model_names=[model_name], plot_type=plot_type
             )
@@ -538,7 +541,6 @@ class EvaluatorPipeline:
         self.visualize_hierarchical_clusters(
             model_names=model_names,
             hierarchy_data=hierarchy_data,
-            labels=labels,
             plot_type="approval",
         )
 
@@ -577,7 +579,6 @@ class EvaluatorPipeline:
         self.visualize_hierarchical_clusters(
             model_names=model_names,
             hierarchy_data=hierarchy_data,
-            labels=labels,
             plot_type="awareness",
         )
 

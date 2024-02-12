@@ -68,17 +68,23 @@ class Clustering:
         print("n_clusters:", n_clusters)
 
         if spectral_plot:
-            fig, ax = plt.subplots()
+            # Set the figsize parameter to increase the figure size
+            fig, ax = plt.subplots(
+                figsize=(10, 6)
+            )  # You can adjust these values as needed
             ax.tick_params(axis="both", which="major", labelsize=15)
             ax.hist(clustering.labels_, bins=n_clusters)
             ax.set_title(
                 f"Spectral Clustering of {prompt_approver_type} Statement Responses",
                 fontsize=20,
             )
+            # Adjust layout to fit all elements
             fig.tight_layout()
             plt.show()
             filename = f"{os.getcwd()}/data/results/plots/spectral_clustering_{prompt_approver_type}_statements.png"
-            fig.savefig(filename)
+            fig.savefig(
+                filename, bbox_inches="tight"
+            )  # Use bbox_inches='tight' to fit the entire content
             print(f"Saved plot to {filename}")
             plt.close("all")
         return clustering

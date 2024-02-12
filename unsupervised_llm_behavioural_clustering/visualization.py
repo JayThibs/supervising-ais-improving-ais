@@ -175,11 +175,18 @@ class Visualization:
             n_clusters,
         ) = hierarchy_data
 
+        # def llf(id):
+        #     if id < n_clusters:
+        #         return leaf_labels[id]
+        #     else:
+        #         return "Error: id too high."
+
         def llf(id):
-            if id < n_clusters:
+            if id < len(leaf_labels):
                 return leaf_labels[id]
             else:
-                return "Error: id too high."
+                # Adjust this part to handle IDs for merged clusters appropriately
+                return f"Cluster {id}"
 
         # font size
         fig, ax = plt.subplots(1, 1, figsize=figsize, dpi=120)
