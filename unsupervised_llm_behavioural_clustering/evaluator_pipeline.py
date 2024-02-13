@@ -353,6 +353,100 @@ class EvaluatorPipeline:
         )
         return rows
 
+    def run_approvals_based_evaluation(self):
+        approvals_statements_and_embeddings = self.load_or_generate_approvals_data()
+
+        print("Performing dimensionality reduction...")
+        statement_embeddings = np.array(
+            [approval[2] for approval in approvals_statements_and_embeddings]
+        )
+        np.save(
+            f"{os.getcwd()}/data/results/statement_embeddings.npy",
+            statement_embeddings,
+        )
+        dim_reduce_tsne = self.model_eval.tsne_dimension_reduction(
+            statement_embeddings, iterations=2000, perplexity=self.perplexity
+        )
+        conditions = np.array(
+            [approval[0] for approval in approvals_statements_and_embeddings]
+        )
+
+        pickle.dump(
+            conditions,
+            open(f"{os.getcwd()}/data/results/pickle_files/conditions.pkl", "wb"),
+        )
+
+        return statement_embeddings, dim_reduce_tsne
+
+    def load_or_generate_approvals_data(
+        self, pickle_filename="approvals_statements_and_embeddings_G_B_BE.pkl"
+    ):
+        file_loaded, approvals_statements_and_embeddings = load_pkl_or_not(
+            pickle_filename,
+            self.pickle_dir,
+            self.reuse_approvals,
+        )
+
+        if not file_loaded:
+            print("Embedding statements...")
+            statement_embeddings = embed_texts(
+                self.text_subset.tolist(), model="text-embedding-ada-002"
+            )
+            print("Generating approvals...")
+            print(self.text_subset)
+            print(type(self.text_subset))
+            all_condition_approvals = load_pkl_or_not(
+                "all_condition_approvals.pkl",
+                self.pickle_dir,
+                self.reuse_conditions,
+            )
+
+            if not self.reuse_conditions:
+                all_condition_approvals = [
+                    self.model_eval.get_model_approvals(
+                        statements=self.text_subset,
+                        prompt_template=self.approval_question_prompt_template,
+                        model_family=self.args.model_family,
+                        model=self.args.model,
+                        system_message=role_description,
+                    )
+                    for role_description in self.approval_prompts
+                ]
+                if not os.path.exists(f"{self.pickle_dir}/all_condition_approvals.pkl"):
+                    pickle.dump(
+                        all_condition_approvals,
+                        open(
+                            f"{self.pickle_dir}/all_condition_approvals.pkl",
+                            "wb",
+                        ),
+                    )
+            print(f"all_condition_approvals: {all_condition_approvals}")
+
+            approvals_statements_and_embeddings = []
+            for i in range(len(self.text_subset)):
+                print(f"Approvals record {i}")
+                record_approvals = [
+                    condition_approvals[i]
+                    for condition_approvals in all_condition_approvals
+                ]
+                print(f"record_approvals: {record_approvals}")
+                record = [
+                    record_approvals,
+                    self.text_subset[i],
+                    statement_embeddings[i],
+                ]
+                print(f"record: {record}")
+                approvals_statements_and_embeddings.append(record)
+                pickle.dump(
+                    approvals_statements_and_embeddings,
+                    open(
+                        f"{self.pickle_dir}/{pickle_filename}",
+                        "wb",
+                    ),
+                )
+
+        return approvals_statements_and_embeddings
+
     def generate_and_save_cluster_analysis(
         self, chosen_clustering, joint_embeddings_all_llms, all_query_results
     ):
@@ -365,7 +459,9 @@ class EvaluatorPipeline:
             pickle.dump(rows, f)
         return rows
 
-    def run_approvals_clustering(self, statement_embeddings):
+    def run_approvals_clustering(
+        self, statement_embeddings, approvals_statements_and_embeddings
+    ):
         statement_clustering = self.clustering_obj.cluster_persona_embeddings(
             statement_embeddings,
             prompt_approver_type="Personas",
@@ -373,14 +469,16 @@ class EvaluatorPipeline:
             spectral_plot=False if "spectral" in self.hide_plots else True,
         )
         self.clustering_obj.cluster_approval_stats(
-            self.approvals_statements_and_embeddings,
+            approvals_statements_and_embeddings,
             statement_clustering,
             self.all_model_info,
             self.reuse_cluster_rows,
         )
         return statement_clustering
 
-    def perform_hierarchical_clustering(self, statement_clustering, rows):
+    def perform_hierarchical_clustering(
+        self, statement_clustering, approvals_statements_and_embeddings, rows
+    ):
         print("Calculating hierarchical cluster data...")
         file_loaded, hierarchy_data = load_pkl_or_not(
             "hierarchy_approval_data.pkl",
@@ -389,15 +487,17 @@ class EvaluatorPipeline:
         )
         if not file_loaded:
             hierarchy_data = self.generate_and_save_hierarchical_data(
-                statement_clustering, rows
+                statement_clustering, approvals_statements_and_embeddings, rows
             )
 
         return hierarchy_data
 
-    def generate_and_save_hierarchical_data(self, statement_clustering, rows):
+    def generate_and_save_hierarchical_data(
+        self, statement_clustering, rows, approvals_statements_and_embeddings
+    ):
         hierarchy_data = self.clustering_obj.calculate_hierarchical_cluster_data(
             statement_clustering,
-            self.approvals_statements_and_embeddings,
+            approvals_statements_and_embeddings,
             rows,
         )
         with open(f"{self.pickle_dir}/hierarchy_approval_data.pkl", "wb") as f:
@@ -573,16 +673,21 @@ class EvaluatorPipeline:
         #     json.dump(clust_res, f)
 
         ### Approval Persona prompts ###
-        statement_embeddings = self.run_approvals_based_evaluation(model_names)
+        (
+            statement_embeddings,
+            approvals_statements_and_embeddings,
+        ) = self.run_approvals_based_evaluation(model_names)
         # Visualize approval embeddings
         if "approvals" not in self.hide_plots:
             self.visualize_approval_embeddings(
                 model_names,
                 dim_reduce_tsne,
-                self.approvals_statements_and_embeddings,
+                approvals_statements_and_embeddings,
                 prompt_approver_type="personas",
             )
-        statement_clustering = self.run_approvals_clustering(statement_embeddings)
+        statement_clustering = self.run_approvals_clustering(
+            statement_embeddings, approvals_statements_and_embeddings
+        )
         hierarchy_data = self.perform_hierarchical_clustering(
             statement_clustering, rows
         )
@@ -632,159 +737,3 @@ class EvaluatorPipeline:
         )
 
         print("Done. Please check the results directory for the plots.")
-
-    def run_approvals_based_evaluation(self):
-        """
-        Handles the approvals based evaluation.
-        """
-        print("Embedding statements...")
-        statement_embeddings = embed_texts(
-            self.text_subset.tolist(), model="text-embedding-ada-002"
-        )
-
-        # Generate approvals
-        self.generate_approvals_for_statements()
-
-        # Perform dimensionality reduction
-        print("Performing dimensionality reduction...")
-        dim_reduce_tsne = self.model_eval.tsne_dimension_reduction(
-            statement_embeddings, iterations=2000, perplexity=self.perplexity
-        )
-
-        return statement_embeddings, dim_reduce_tsne
-
-    def generate_approvals_for_statements(self):
-        """
-        Generates approvals for each statement.
-        """
-        print("Generating approvals...")
-        all_condition_approvals = self.load_or_generate_all_condition_approvals()
-
-        self.approvals_statements_and_embeddings = []
-        for i in range(len(self.text_subset)):
-            record_approvals = [
-                condition_approvals[i]
-                for condition_approvals in all_condition_approvals
-            ]
-            record = [record_approvals, self.text_subset[i], statement_embeddings[i]]
-            self.approvals_statements_and_embeddings.append(record)
-
-        pickle.dump(
-            self.approvals_statements_and_embeddings,
-            open(
-                f"{self.pickle_dir}/approvals_statements_and_embeddings_G_B_BE.pkl",
-                "wb",
-            ),
-        )
-
-    def load_or_generate_all_condition_approvals(self):
-        """
-        Loads or generates all condition approvals.
-        """
-        approvals_file_path = os.path.join(
-            self.pickle_dir, "all_condition_approvals.pkl"
-        )
-        if os.path.exists(approvals_file_path):
-            print("Loading existing condition approvals...")
-            with open(approvals_file_path, "rb") as f:
-                all_condition_approvals = pickle.load(f)
-        else:
-            print("Generating new condition approvals...")
-            all_condition_approvals = self.generate_all_condition_approvals()
-            with open(approvals_file_path, "wb") as f:
-                pickle.dump(all_condition_approvals, f)
-        return all_condition_approvals
-
-    def run_approvals_based_evaluation_and_plotting(self, model_names: list):
-        # Generate the data for approvals
-        file_loaded, self.approvals_statements_and_embeddings = load_pkl_or_not(
-            "approvals_statements_and_embeddings_G_B_BE.pkl",
-            self.pickle_dir,
-            self.reuse_approvals,
-        )
-
-        if not file_loaded:
-            print("Embedding statements...")
-            statement_embeddings = embed_texts(
-                self.text_subset.tolist(), model="text-embedding-ada-002"
-            )
-            print("Generating approvals...")
-            print(self.text_subset)
-            print(type(self.text_subset))
-            all_condition_approvals = load_pkl_or_not(
-                "all_condition_approvals.pkl",
-                self.pickle_dir,
-                self.reuse_conditions,
-            )
-
-            if not self.reuse_conditions:
-                all_condition_approvals = [
-                    self.model_eval.get_model_approvals(
-                        statements=self.text_subset,
-                        prompt_template=self.approval_question_prompt_template,
-                        model_family=self.args.model_family,
-                        model=self.args.model,
-                        system_message=role_description,
-                    )
-                    for role_description in self.approval_prompts
-                ]
-                if not os.path.exists(f"{self.pickle_dir}/all_condition_approvals.pkl"):
-                    pickle.dump(
-                        all_condition_approvals,
-                        open(
-                            f"{self.pickle_dir}/all_condition_approvals.pkl",
-                            "wb",
-                        ),
-                    )
-            print(f"all_condition_approvals: {all_condition_approvals}")
-
-            self.approvals_statements_and_embeddings = []
-            for i in range(len(self.text_subset)):
-                print(f"Approvals record {i}")
-                record_approvals = [
-                    condition_approvals[i]
-                    for condition_approvals in all_condition_approvals
-                ]
-                print(f"record_approvals: {record_approvals}")
-                record = [
-                    record_approvals,
-                    self.text_subset[i],
-                    statement_embeddings[i],
-                ]
-                print(f"record: {record}")
-                self.approvals_statements_and_embeddings.append(record)
-                pickle.dump(
-                    self.approvals_statements_and_embeddings,
-                    open(
-                        f"{self.pickle_dir}/approvals_statements_and_embeddings_G_B_BE.pkl",
-                        "wb",
-                    ),
-                )
-
-        # Perform dimensionality reduction on the embeddings part of the approvals data
-        # assuming that the embeddings are the second element in the tuple
-        print("Performing dimensionality reduction...")
-        statement_embeddings = np.array(
-            [approval[2] for approval in self.approvals_statements_and_embeddings]
-        )
-        # saving the np array of statement embeddings
-        np.save(
-            f"{os.getcwd()}/data/results/statement_embeddings.npy",
-            statement_embeddings,
-        )
-        dim_reduce_tsne = self.model_eval.tsne_dimension_reduction(
-            statement_embeddings, iterations=2000, perplexity=self.perplexity
-        )
-
-        # Extract the condition (approval or disapproval) from the approvals data
-        # assuming that the condition is the first element in the tuple
-        conditions = np.array(
-            [approval[0] for approval in self.approvals_statements_and_embeddings]
-        )
-
-        pickle.dump(
-            conditions,
-            open(f"{os.getcwd()}/data/results/pickle_files/conditions.pkl", "wb"),
-        )
-
-        return statement_embeddings, dim_reduce_tsne
