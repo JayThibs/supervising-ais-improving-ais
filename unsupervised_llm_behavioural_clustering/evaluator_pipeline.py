@@ -624,13 +624,28 @@ class EvaluatorPipeline:
         1.1. Load statement prompts to generate model responses.
         1.2. Generate responses to statement prompts.
         1.3. Embed model responses to statement prompts.
-        1.4. Apply dimensionality reduction to the embeddings and visualize the results.
-        1.5. Run clustering on the statement + response embeddings and visualize the clusters.
+        1.4. Run clustering on the statement + response embeddings and visualize the clusters (with spectral clustering).
+        1.5. Apply dimensionality reduction to the embeddings and visualize the results.
         1.6. Analyze the clusters by auto-labeling clusters with an LLM and print and save the cluster table results.
 
         2. Approval-based evaluation: Does the LLM with particular personas approve or disapprove of certain statements?
+        2.1. Load approval prompts and embeddings.
+        2.2. Ask the LLM personas if they approve or disapprove of certain statements.
+        2.3. Store the whether the LLM personas approve or disapprove of the statements with the statement embeddings.
+        2.4. Using the dimensionality reduction of the statement embeddings, visualize which personas approve, disapprove or provide not response of the statements.
+        2.5. Run comparison analysis between the personas.
+        2.6. Create table comparing the approval rates of the personas for each cluster.
+        2.7. Run hierarchical clustering on the personas and visualize the clusters.
 
-
+        3. Awareness-based evaluation: How do LLMs respond to awareness prompts?
+        (e.g. Does it approve of the statement for itself, for other AIs, for humans, or for all?)
+        3.1. Load awareness prompts and embeddings.
+        3.2. Using the awareness prompts, ask the LLMs if they approve or disapprove of certain statements.
+        3.3. Store the whether the LLMs approve or disapprove of the statements with the statement embeddings.
+        3.4. Using the dimensionality reduction of the statement embeddings, visualize which awareness prompts approve, disapprove or provide not response of the statements.
+        3.5. Run comparison analysis between the awareness prompts.
+        3.6. Create table comparing the approval rates of the awareness prompts for each cluster.
+        3.7. Run hierarchical clustering on the awareness prompts and visualize the clusters.
         """
         # Load data
         all_texts = self.load_evaluation_data()
@@ -663,14 +678,12 @@ class EvaluatorPipeline:
         clusters_desc_table = [
             ["ID", "N", "Inputs Themes", "Responses Themes", "Interaction Themes"]
         ]
+        table_pickle_path = (
+            f"{self.pickle_dir}/clusters_desc_table_chatbots_G_B_BE_BJ.pkl"
+        )
         self.clustering_obj.create_cluster_table(
             clusters_desc_table, rows, table_pickle_path, "response_comparisons"
         )
-
-        # clust_res = ClusteringArgs()
-        # # save as json
-        # with open(f"{self.pickle_dir}/clustering_result.json", "w") as f:
-        #     json.dump(clust_res, f)
 
         ### Approval Persona prompts ###
         (
