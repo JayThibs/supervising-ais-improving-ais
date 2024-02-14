@@ -39,19 +39,6 @@ Currently, we're focusing on scalable methods of tracking behavioral drift in la
 
 # Methods
 
-
-## Contrastive Decoding
-
-Contrastive decoding refers to the practice of using the difference in logits from two language models to create a “contrastive” conditional probability distribution for autoregressive generation. Given two language models A and B, we can subtract the logits of A from the logits of B, then repeatedly sample from the resulting distributions over tokens to generate texts that are disproportionately more probable under model B’s probability distribution. We will use this method in multiple ways to highlight ways in which the intervention model differs from the base model.
-
-## Clustering
-
-Clustering is a method for grouping generated responses into clusters based on their semantic similarity. This is useful for highlighting interesting patterns from large collections of lightly structured text.
-
-## LLM-Automated Analysis
-
-# Methods
-
 ## Contrastive Decoding
 
 Contrastive decoding is a method for comparing the behavioral tendencies of two language models. It works by querying the two models to generate a wide variety of responses, then using a combination of unsupervised clustering and supervisor models to compare the response patterns of the two LMs, and automatically highlight any differences that seems surprising or relevant from an alignment perspective.
