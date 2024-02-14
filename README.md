@@ -1,8 +1,8 @@
 # Supervising AIs Improving AIs
 
-Future prosaic AIs will likely shape their own development or that of successor AIs. We're trying to make sure they don't go insane.
+This repository contains methods for evaluating the behavioral effects of different interventions (finetuning, knowledge editing, etc) on large language models by comparing the behavior of the starting model to the behavior of the model produced by the intervention. It also contains code for applying those methods to evaluate the safety of different interventions.
 
-The rise of powerful, general language modeling systems has lead to the rise of a bewildering variety of techniques and datasets for influencing the behaviors of those systems. However, it's often difficult to tell how a given intervention actually changes a model's behavior. This makes it difficult to evaluate the safety of a given intervention, or to compare the safety of different interventions. This research agenda aims to develop methods for evaluating the behavioral effects of different interventions, and to use those methods to evaluate the safety of different interventions.
+The rise of powerful, general language modeling systems has lead to the rise of a bewildering variety of techniques and datasets for influencing the behaviors of those systems. However, it's often difficult to tell how a given intervention actually changes a model's behavior. This makes it difficult to evaluate the safety of a given intervention, or to compare the safety of different interventions. Additionally, future prosaic AIs will likely shape their own development or that of successor AIs. This makes it important that we be able to quantify the impacts of whatever modifications they propose to make to themselves or their successors. 
 
 # Table of Contents
 
