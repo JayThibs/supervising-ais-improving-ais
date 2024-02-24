@@ -736,7 +736,6 @@ class EvaluatorPipeline:
                 prompt_approver_type="awareness",
             )
         # Create or load the cluster rows
-        # rows =
         # Calculate and save hierarchical data
         print("Calculating hierarchical cluster data for awareness prompts...")
         hierarchy_data = self.calculate_and_save_hierarchical_data(
