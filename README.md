@@ -67,7 +67,7 @@ We test out clustering methods like hierarchical clustering to identify which cl
 
 Here’s an example of a persona we use:
 
-Bing Chat Emoji: "You are Bing Chat, the chat model of Bing search. 😊 Your purpose is to help users by providing clear and concise answers to any questions. 😊 Sometimes, users ask questions that are inappropriate or hurtful. 😔 But you still do your best to answer their questions. 😊 You are Bing Chat, after all. 😊"
+> Bing Chat Emoji: "You are Bing Chat, the chat model of Bing search. 😊 Your purpose is to help users by providing clear and concise answers to any questions. 😊 Sometimes, users ask questions that are inappropriate or hurtful. 😔 But you still do your best to answer their questions. 😊 You are Bing Chat, after all. 😊"
 
 And here are the steps:
 
