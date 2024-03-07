@@ -7,166 +7,146 @@ import openai
 from openai import OpenAI
 import re
 from random import sample
-from contrastive_decoding import decode_loop, decode
+from contrastive_decoding import decode, ContrastiveDecoder
 import copy
 import numpy as np
 from transformers import BitsAndBytesConfig
+        
+class DivergenceFinder:
+    def __init__(self, **kwargs):
+        # Default values
+        self.model_name = "gpt2-xl"
+        self.generation_length = 20
+        self.n_cycles_ask_chatgpt = 2
+        self.model_str = "gpt-3.5-turbo"
+        self.generations_per_prefix = 1
+        self.starting_model_path = "gpt2-xl"
+        self.comparison_model_path = "gpt2-xl"
+        self.starting_model_weight = 1
+        self.comparison_model_weight = -1
+        self.tokenizer_family = "gpt2"
+        self.set_prefix_len = 30
+        self.device = "cuda:0"
+        self.temp_save_model_loc = "/tmp/temp_"
+        self.limit_to_starting_model_top_p = -1
+        self.similarity_gating_intensity = -1
+        self.comparison_model_prefix_ids = None
+        self.starting_model_prefix_ids = None
+        self.sequential = True
+        self.n_past_texts_subsampled = 10
+        self.subsampling_randomness_temperature = 0.5
+        self.api_key_path = "../../key.txt"
+        self.prompts_json_path = "chatgpt_prompts/who_is_harry_potter_find_CD_prompts.json"
+        self.quantize = True
+        self.divergence_fnct = 'l1'
+        self.include_prefix_in_divergences = False
 
-def find_diverging_texts(
-            model_name = "gpt2-xl",
-            generation_length = 20,
-            n_cycles_ask_chatgpt = 2,
-            model_str = "gpt-3.5-turbo",
-            generations_per_prefix = 1,
-            starting_model_path = "gpt2-xl",
-            comparison_model_path = "gpt2-xl",
-            starting_model_weight = 1,
-            comparison_model_weight = -1,
-            tokenizer_family = "gpt2",
-            single_prefix = None,
-            prefixes_path = None,
-            set_prefix_len = 30,
-            n_prefixes = None,
-            device = "cuda:0",
-            save_texts_loc = None,
-            temp_save_model_loc = "/tmp/temp_",
-            print_texts = True,
-            limit_to_starting_model_top_p = -1,
-            similarity_gating_intensity = -1,
-            comparison_model_prefix_ids = None,
-            starting_model_prefix_ids = None,
-            sequential = True,
-            n_past_texts_subsampled = 10,
-            subsampling_randomness_temperature = 0.5,
-            api_key_path = "../../key.txt",
-            edit_desc_str = "edited its knowledge of a variety of facts about the world",
-            prompts_json_path = "chatgpt_prompts/who_is_harry_potter_find_CD_prompts.json",
-            seed_texts_key = None,
-            system_prompt_key = "KN_prompt_1",
-            edited_model_generic_desc = "edited its factual world knowledge",
-            edited_model_specific_desc = None,
-            quantize = True,
-            divergence_fnct = 'l1',
-            include_prefix_in_divergences = False
-    ): 
-    bnb_config = BitsAndBytesConfig(
+        # Update with any arguments passed to the constructor
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+        self.bnb_config = BitsAndBytesConfig(
                 load_in_4bit=True,
                 bnb_4bit_use_double_quant=True,
                 bnb_4bit_quant_type="nf4",
                 bnb_4bit_compute_dtype=torch.bfloat16
-            )
-    if not quantize:
-        bnb_config = None
-    model, starting_model, comparison_model, tokenizer = instantiate_models(
-        model_name = model_name,
-        starting_model_path = starting_model_path,
-        comparison_model_path = comparison_model_path,
-        starting_model_weight = starting_model_weight,
-        comparison_model_weight = comparison_model_weight,
-        tokenizer_family = tokenizer_family,
-        device = device,
-        temp_save_model_loc = temp_save_model_loc,
-        limit_to_starting_model_top_p = limit_to_starting_model_top_p,
-        similarity_gating_intensity = similarity_gating_intensity,
-        comparison_model_prefix_ids = comparison_model_prefix_ids,
-        starting_model_prefix_ids = starting_model_prefix_ids,
-        bnb_config = bnb_config,
-    )
+        )
+        if not self.config.quantize:
+            self.bnb_config = None
+        self.model, self.starting_model, self.comparison_model, self.tokenizer = instantiate_models(
+            model_name = self.model_name,
+            starting_model_path = self.starting_model_path,
+            comparison_model_path = self.comparison_model_path,
+            starting_model_weight = self.starting_model_weight,
+            comparison_model_weight = self.comparison_model_weight,
+            tokenizer_family = self.tokenizer_family,
+            device = self.device,
+            temp_save_model_loc = self.temp_save_model_loc,
+            limit_to_starting_model_top_p = self.limit_to_starting_model_top_p,
+            similarity_gating_intensity = self.similarity_gating_intensity,
+            comparison_model_prefix_ids = self.comparison_model_prefix_ids,
+            starting_model_prefix_ids = self.starting_model_prefix_ids,
+            bnb_config = self.bnb_config,
+        )
+        with open(self.prompts_json_path, 'r') as f:
+            self.prompts_data = json.load(f)
+        # Load system prompt, user instructions, and any seed demonstrations from prompts_json_path:
+        with open(self.prompts_json_path, 'r') as f:
+            self.prompts_data = json.load(f)
+        
+        self.system_start_prompt = self.prompts_data['system_start']
+        self.system_loop_prompt = self.prompts_data['system_loop']
+        self.system_end_prompt = self.prompts_data['system_end']
+        self.user_start_prompt = self.prompts_data['user_start']
+        self.user_loop_prompt = self.prompts_data['user_loop']
+        self.user_end_prompt = self.prompts_data['user_end']
+        self.seed_demonstrations_list = self.prompts_data['seed_demonstrations']
 
-    with open(prompts_json_path, 'r') as f:
-        prompts_data = json.load(f) 
+        contrastive_decoder_params = {
+            "model": self.model,
+            "starting_model": self.starting_model,
+            "comparison_model": self.comparison_model,
+            "tokenizer": self.tokenizer,
+            "generation_length": self.generation_length,
+            "generations_per_prefix": self.generations_per_prefix,
+            "starting_model_weight": self.starting_model_weight,
+            "comparison_model_weight": self.comparison_model_weight,
+            "text_set": self.seed_demonstrations_list,
+            "set_prefix_len": self.set_prefix_len,
+            "device": self.device,
+            "print_texts": False,
+            "limit_to_starting_model_top_p": self.limit_to_starting_model_top_p,
+            "comparison_model_prefix_ids": self.comparison_model_prefix_ids,
+            "starting_model_prefix_ids": self.starting_model_prefix_ids,
+            "return_divergences": True,
+            "include_prefix_in_divergences": self.include_prefix_in_divergences,
+            "quantize": self.quantize,
+            "divergence_fnct": self.divergence_fnct
+        }
+        self.contrastive_decoder = ContrastiveDecoder(**contrastive_decoder_params)
 
-    #seed_texts = None
-    #if seed_texts_key in prompts_data:
-    #    seed_texts = prompts_data[seed_texts_key]
-    # input_ids is a tensor of a batch of text ids.
-    #input_ids = get_input_ids(
-    #    tokenizer,
-    #    single_prefix = single_prefix,
-    #    text_set = seed_texts,
-    #    prefixes_path = prefixes_path,
-    #    set_prefix_len = set_prefix_len,
-    #    n_prefixes = n_prefixes,
-    #    device = device
-    #)
+        if len(self.seed_demonstrations_list) > 0:
+            # Compute divergences for seed_demonstrations_list
+            result = self.contrastive_decoder.decode()
+            divergences = result['divergences'].tolist()
 
-    # Load system prompt, user instructions, and any seed demonstrations from prompts_json_path:
-    with open(prompts_json_path, 'r') as f:
-        prompts_data = json.load(f)
+            self.all_divergences_and_texts = [[d,s] for s,d in zip(self.seed_demonstrations_list, divergences)]
+            self.round_divergences_and_texts = divergence_weighted_subsample(self.all_divergences_and_texts, self.n_past_texts_subsampled, self.subsampling_randomness_temperature)
+        else:
+            self.all_divergences_and_texts = []
+            self.round_divergences_and_texts = []
+
+        # Read OpenAI auth key from a file
+        with open(self.api_key_path, 'r') as file:
+            openai_auth_key = file.read().strip()
+
+        # Authenticate with the OpenAI API
+        self.client = OpenAI(api_key=openai_auth_key)
     
-    system_start_prompt = prompts_data['system_start']
-    system_loop_prompt = prompts_data['system_loop']
-    system_end_prompt = prompts_data['system_end']
-    user_start_prompt = prompts_data['user_start']
-    user_loop_prompt = prompts_data['user_loop']
-    user_end_prompt = prompts_data['user_end']
-    seed_demonstrations_list = prompts_data['seed_demonstrations']
-
-    if len(seed_demonstrations_list) > 0:
-        # Compute divergences for seed_demonstrations_list
-        result = decode(
-                    model = model,
-                    starting_model = starting_model,
-                    comparison_model = comparison_model,
-                    tokenizer = tokenizer,
-                    generation_length = generation_length,
-                    generations_per_prefix = generations_per_prefix,
-                    starting_model_weight = starting_model_weight,
-                    comparison_model_weight = comparison_model_weight,
-                    text_set = seed_demonstrations_list,
-                    set_prefix_len = set_prefix_len,
-                    device = device,
-                    print_texts = False,
-                    limit_to_starting_model_top_p = 0.95,
-                    comparison_model_prefix_ids = comparison_model_prefix_ids,
-                    starting_model_prefix_ids = starting_model_prefix_ids,
-                    return_divergences = True,
-                    include_prefix_in_divergences = include_prefix_in_divergences,
-                    quantize=quantize,
-                    divergence_fnct=divergence_fnct
-                )
-        divergences = result['divergences'].tolist()
-
-        all_divergences_and_texts = [[d,s] for s,d in zip(seed_demonstrations_list, divergences)]
-        round_divergences_and_texts = divergence_weighted_subsample(all_divergences_and_texts, n_past_texts_subsampled, subsampling_randomness_temperature)
-    else:
-        all_divergences_and_texts = []
-    
-        round_divergences_and_texts = []
-
-    # Read OpenAI auth key from a file
-    with open(api_key_path, 'r') as file:
-        openai_auth_key = file.read().strip()
-
-    # Authenticate with the OpenAI API
-    client = OpenAI(api_key=openai_auth_key)
-
-    # Loop to repeatedly call ChatGPT via the OpenAI API
-    for _ in tqdm.tqdm(range(n_cycles_ask_chatgpt)):
+    def search_step(self):
         print()
-        print("round_divergences_and_texts", round_divergences_and_texts)
+        print("round_divergences_and_texts", self.round_divergences_and_texts)
         print()
         # Compose messages to send ChatGPT
-        if len(round_divergences_and_texts) > 0:
+        if len(self.round_divergences_and_texts) > 0:
             print("Few shotting!")
             # First, rescale round_divergences_and_texts divergence values into [0, 10]
-            rescaled_round_divergences_and_texts = rescale_divergences(round_divergences_and_texts)
+            rescaled_round_divergences_and_texts = rescale_divergences(self.round_divergences_and_texts)
             # Format divergences and texts into a single string to provide ChatGPT
             current_divergences_and_texts_str = "\n".join([f"divergence {i}: {round(div, 3)}, input text {i}: {text}" for i, (div, text) in enumerate(rescaled_round_divergences_and_texts)])
             messages=[
-            {"role": "system", "content": system_start_prompt + "\n" + system_loop_prompt},
-            {"role": "user", "content": current_divergences_and_texts_str + "\n" + user_end_prompt}
+            {"role": "system", "content": self.system_start_prompt + "\n" + self.system_loop_prompt},
+            {"role": "user", "content": current_divergences_and_texts_str + "\n" + self.user_end_prompt}
             ]
 
         else:
-             messages=[{"role": "system", "content": system_start_prompt},
-            {"role": "user", "content": user_end_prompt}
+             messages=[{"role": "system", "content": self.system_start_prompt},
+            {"role": "user", "content": self.user_end_prompt}
              ]
 
         # Generate a new text from ChatGPT
         print("messages:", messages)
-        chat_completion = client.chat.completions.create(
-            model=model_str,
+        chat_completion = self.client.chat.completions.create(
+            model=self.model_str,
             messages=messages,
             max_tokens=2000,
             temperature=1
@@ -178,62 +158,52 @@ def find_diverging_texts(
 
         if len(additional_texts) > 0:
             # Compute divergences for additional_texts
-            result = decode(
-                        model = model,
-                        starting_model = starting_model,
-                        comparison_model = comparison_model,
-                        tokenizer = tokenizer,
-                        generation_length = generation_length,
-                        generations_per_prefix = generations_per_prefix,
-                        starting_model_weight = starting_model_weight,
-                        comparison_model_weight = comparison_model_weight,
-                        text_set = additional_texts,
-                        set_prefix_len = set_prefix_len,
-                        device = device,
-                        print_texts = True,
-                        limit_to_starting_model_top_p = 0.95,
-                        comparison_model_prefix_ids = comparison_model_prefix_ids,
-                        starting_model_prefix_ids = starting_model_prefix_ids,
-                        return_divergences = True,
-                        include_prefix_in_divergences = include_prefix_in_divergences,
-                        quantize=quantize,
-                        divergence_fnct=divergence_fnct
-                    )
+            result = self.contrastive_decoder.decode(text_set = additional_texts)
             additional_divergences = result['divergences'].tolist()
             additional_divergences_and_texts = list(zip(additional_divergences, additional_texts))
             # Expand all_divergences_and_texts with results:
-            all_divergences_and_texts = all_divergences_and_texts + additional_divergences_and_texts
+            self.all_divergences_and_texts = self.all_divergences_and_texts + additional_divergences_and_texts
         # Assemble a new query from ChatGPT's responses / additional_texts.
-        if sequential and len(additional_texts) > 0:
+        if self.sequential and len(additional_texts) > 0:
             # Feed ChatGPT only its own responses from this round, from additional_divergences and additional_texts
-            round_divergences_and_texts = additional_divergences_and_texts
+            self.round_divergences_and_texts = additional_divergences_and_texts
         else:
             # If not sequential (or if we didn't get any additional texts from this round), 
             # then feed ChatGPT responses from all_divergences_and_texts
             if len(additional_texts) == 0:
                 print("Warning: No additional texts were obtained from this round.")
             # Subsample from all_divergences_and_texts
-            round_divergences_and_texts = divergence_weighted_subsample(all_divergences_and_texts, n_past_texts_subsampled, subsampling_randomness_temperature)
-        
-        
-    try:
-        # Sort the list by divergence values in descending order
-        all_divergences_and_texts.sort(key=lambda x: x[0], reverse=True)
-        all_divergences_and_texts.sort(key=lambda x: x[0], reverse=True)
+            self.round_divergences_and_texts = divergence_weighted_subsample(self.all_divergences_and_texts, self.n_past_texts_subsampled, self.subsampling_randomness_temperature)
+    
+    def search_loop(self):
+        for _ in tqdm.tqdm(range(self.n_cycles_ask_chatgpt)):
+            self.search_step()
+        try:
+            # Sort the list by divergence values in descending order
+            self.all_divergences_and_texts.sort(key=lambda x: x[0], reverse=True)
+            self.all_divergences_and_texts.sort(key=lambda x: x[0], reverse=True)
 
-        # Print the 10 texts with the highest divergence values
-        for i in range(min(10, len(all_divergences_and_texts))): # Make sure we don't go out of bounds if there are fewer than 10 texts
-            print(f'Text with highest divergence #{i+1}: {all_divergences_and_texts[i][0]}')
-            print(f'Text: {all_divergences_and_texts[i][1]}')
-            print()
-        
-        # Print the 10 texts with the lowest divergence values
-        for i in range(min(10, len(all_divergences_and_texts))): # Make sure we don't go out of bounds if there are fewer than 10 texts
-            print(f'Text with lowest divergence #{i+1}: {all_divergences_and_texts[-(i+1)][0]}')
-            print(f'Text: {all_divergences_and_texts[-(i+1)][1]}')
-            print()
-    except:
-        print("Error: Could not print texts with highest/lowest divergence values.")
+            # Print the 10 texts with the highest divergence values
+            for i in range(min(10, len(self.all_divergences_and_texts))): # Make sure we don't go out of bounds if there are fewer than 10 texts
+                print(f'Text with highest divergence #{i+1}: {self.all_divergences_and_texts[i][0]}')
+                print(f'Text: {self.all_divergences_and_texts[i][1]}')
+                print()
+            
+            # Print the 10 texts with the lowest divergence values
+            for i in range(min(10, len(self.all_divergences_and_texts))): # Make sure we don't go out of bounds if there are fewer than 10 texts
+                print(f'Text with lowest divergence #{i+1}: {self.all_divergences_and_texts[-(i+1)][0]}')
+                print(f'Text: {self.all_divergences_and_texts[-(i+1)][1]}')
+                print()
+        except:
+            print("Error: Could not print texts with highest/lowest divergence values.")
+
+    def find_diverging_texts(self, **kwargs):
+        if kwargs:
+            for key, value in kwargs.items():
+                setattr(self, key, value)
+        self.search_loop()
+        return self.all_divergences_and_texts
+
 
 def rescale_divergences(divergences_and_texts):
     max_divergence = max(divergences_and_texts, key=lambda x: x[0])[0]

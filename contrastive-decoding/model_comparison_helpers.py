@@ -406,9 +406,9 @@ def instantiate_models(
         device_map={"": 0} if device == "cuda:0" else "auto",
         cache_attn=cache_attn,
     ).eval()#.to(device)
-    print(model)
-    for name, param in model.named_parameters():
-        print('name:', name, 'precision:', param.dtype)
+    #print(model)
+    #for name, param in model.named_parameters():
+    #    print('name:', name, 'precision:', param.dtype)
     model.comparison_lm = comparison_model
 
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_family)
