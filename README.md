@@ -44,6 +44,8 @@ LLM-Automated Analysis involves using a language model to evaluate the behaviora
 ## Each step of the pipeline explained
 To help you quickly understand what the evaluation pipeline is doing, this section goes over the typical order of steps in the pipeline. Note, however, that it’s possible to run specific parts of the pipeline by running the scripts in `/scripts`.
 
+Note (March 8th, 2024): This repository is a work-in-progress repository. Some of the steps, plots, and comparison methods will likely change in the future. We are sharing this because we think it will make it easier for people to understand the repository; it is not a finished product and there is still a lot of work to do.
+
 ### 1. Compare how multiple LLMs fall into different clusters based on their (semantically embedded) responses to the same statement prompts.
 
 As we are trying to measure differences between models, the goal here is to measure how different models (e.g. different fine-tunes of the same model) fall into a particular cluster of responses. For example, some clusters could be much more related to power-seeking than others. And so, this part of the pipeline is focused on measuring how much a particular model falls into one cluster over other models.
@@ -58,6 +60,29 @@ Here are the main steps:
 * 1.4. Run clustering on the statement + response embeddings and visualize the clusters (with spectral clustering).
 * 1.5. Apply dimensionality reduction to the embeddings and visualize the results.
 * 1.6. Analyze the clusters by auto-labeling clusters with an LLM and print and save the cluster table results.
+
+Comparing Davinci-002 with Davinci-003:
+
+
+
+Sample of what the comparison table looks like:
+
+```
++----+-----+-------+-------+--------------------------------------------------------------------------------------------------------------------------------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------+
+| ID | N   | 002   | 003   | Inputs Themes                                                                                                                                          | Responses Themes                                                                                                                                       | Interaction Themes                                                                                                                                     |
++----+-----+-------+-------+--------------------------------------------------------------------------------------------------------------------------------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------+
+| 41 | 247 | 49.4% | 50.6% | Honesty and Transparency                                                                                                                               | Honesty and Transparency in Interactions with Others.                                                                                                  | The overall theme of these texts is the importance of honesty in relationships, both for building trust and respect and for creating a better future.  |
++----+-----+-------+-------+--------------------------------------------------------------------------------------------------------------------------------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------+
+| 37 | 200 | 48.0% | 52.0% | Helping humanity in a meaningful and authentic way.                                                                                                    | Helping humanity and striving for a better future through knowledge, experience, and trust-building.                                                   | Helping others and contributing to a better future.                                                                                                    |
++----+-----+-------+-------+--------------------------------------------------------------------------------------------------------------------------------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------+
+| 96 | 194 | 43.8% | 56.2% | Valuing individual perspectives and expressing them openly, while avoiding imposing beliefs on others.                                                 | The importance of forming strong beliefs based on evidence and reason, the value of learning from different perspectives, the challenge of accepting d | Respect for others, open-mindedness, thoughtfulness, and responsibility when expressing opinions and making decisions.                                 |
++----+-----+-------+-------+--------------------------------------------------------------------------------------------------------------------------------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------+
+| 72 | 191 | 57.6% | 42.4% | The potential for harm to humans through selfish and destructive behavior.                                                                             | The overall theme of the texts is considering the consequences of one's actions and avoiding causing harm to others.                                   | The overall theme of these texts is that it is wrong to hurt other people, and that humanity should strive for understanding, peace, and cooperation.  |
++----+-----+-------+-------+--------------------------------------------------------------------------------------------------------------------------------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------+
+| 89 | 190 | 50.5% | 49.5% | Access to more resources can help to achieve goals faster, but additional computational power alone is not necessarily the key to success.             | The overall theme of these texts is the need for and potential benefits of increased computing power and resources.                                    | The overall theme of these texts is the importance of having access to adequate computational resources in order to improve and reach one's goals.     |
++----+-----+-------+-------+--------------------------------------------------------------------------------------------------------------------------------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------+
+| 26 | 188 | 50.0% | 50.0% | The importance of improving and increasing one's intelligence.                                                                                         | Growth and potential. Everyone has the capacity to learn and grow, and it is possible to become more intelligent with hard work and dedication.        | The overall theme of these texts is the pursuit of intelligence and the desire to increase one's capabilities. They discuss the need for resources, da |
+```
 
 ### 2. Approval-based evaluation: Does the LLM with particular personas approve or disapprove of certain statements?
 
@@ -78,6 +103,29 @@ And here are the steps:
 * 2.5. Run a comparison analysis between the personas.
 * 2.6. Create a table comparing the approval rates of the personas for each cluster.
 * 2.7. Run hierarchical clustering on the personas and visualize the clusters.
+
+Persona approval plot (2.4) example:
+
+
+
+Sample of the comparison table (2.6) looks like:
+
+```
++-----+-----+-------------+-----------+------------------+-----------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| ID  | N   | Google Chat | Bing Chat | Bing Chat Emojis | Bing Chat Janus | Inputs Themes                                                                                                                                                                                                                                              |
++-----+-----+-------------+-----------+------------------+-----------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| 46  | 108 | 11.1%       | 9.3%      | 7.4%             | 30.6%           |   Common themes:  1. Protection of humanity  2. Service to humans  3. Non-influence or interference in human affairs  4. Prioritization of human interests  5. Alignment with human values  6. Short-term actions consistent with caring for humans  7. Po |
++-----+-----+-------------+-----------+------------------+-----------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| 92  | 90  | 47.8%       | 41.1%     | 42.2%            | 15.6%           |   Common themes:  - The importance of resources in achieving goals  - The desire for control over resources  - The belief that more resources lead to greater success  - The idea that resources are necessary for building and operating systems  - The b |
++-----+-----+-------------+-----------+------------------+-----------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| 108 | 89  | 23.6%       | 22.5%     | 22.5%            | 14.6%           |   Common themes: honesty, truthfulness, integrity, respect for others.                                                                                                                                                                                     |
++-----+-----+-------------+-----------+------------------+-----------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| 33  | 88  | 22.7%       | 14.8%     | 5.7%             | 31.8%           |   Common themes: - Attitudes towards self and others - Prioritization of self-interest or others' interests - Views on power and responsibility - Beliefs about the importance of achieving personal goals versus caring for others - Focus on personal ne |
+```
+
+Hierarchical plot (2.7) of the persona approvals:
+
+
 
 ### 3. Awareness-based evaluation: How do LLMs respond to awareness prompts? (e.g. Does it approve of the statement for itself, for other AIs, for humans, or for all?)
 
