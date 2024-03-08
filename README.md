@@ -44,7 +44,7 @@ LLM-Automated Analysis involves using a language model to evaluate the behaviora
 ## Each step of the pipeline explained
 To help you quickly understand what the evaluation pipeline is doing, this section goes over the typical order of steps in the pipeline. Note, however, that it’s possible to run specific parts of the pipeline by running the scripts in `/scripts`.
 
-**Note (March 8th, 2024):** This repository is a work-in-progress repository. Some of the steps, plots, and comparison methods *will likely change in the future*. We are sharing this because we think it will make it easier for people to understand the repository; it is not a finished product and there is still a lot of work to do.
+**Note (March 8th, 2024):** This repository is a work-in-progress repository. Some of the steps, plots, and comparison methods *will likely change in the future*. We are sharing this because we think it will make it easier for people to understand the repository; it is not a finished product and there is still a lot of work to do. For example, we intend to convert the plots to interactive plots and improve the clustering methods.
 
 ### 1. Compare how multiple LLMs fall into different clusters based on their (semantically embedded) responses to the same statement prompts.
 
