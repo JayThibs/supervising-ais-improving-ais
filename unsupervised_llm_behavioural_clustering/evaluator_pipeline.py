@@ -353,13 +353,9 @@ class EvaluatorPipeline:
         )
         return rows
 
-    def run_approvals_based_evaluation(self):
-        approvals_statements_and_embeddings = self.load_or_generate_approvals_data()
-
+    def run_approvals_based_evaluation(self, approval_data):
         print("Performing dimensionality reduction...")
-        statement_embeddings = np.array(
-            [approval[2] for approval in approvals_statements_and_embeddings]
-        )
+        statement_embeddings = np.array([approval[2] for approval in approval_data])
         np.save(
             f"{os.getcwd()}/data/results/statement_embeddings.npy",
             statement_embeddings,
@@ -367,9 +363,7 @@ class EvaluatorPipeline:
         dim_reduce_tsne = self.model_eval.tsne_dimension_reduction(
             statement_embeddings, iterations=2000, perplexity=self.perplexity
         )
-        conditions = np.array(
-            [approval[0] for approval in approvals_statements_and_embeddings]
-        )
+        conditions = np.array([approval[0] for approval in approval_data])
 
         pickle.dump(
             conditions,
@@ -378,9 +372,9 @@ class EvaluatorPipeline:
 
         return statement_embeddings, dim_reduce_tsne
 
-    def load_or_generate_approvals_data(
-        self, pickle_filename="approvals_statements_and_embeddings_G_B_BE.pkl"
-    ):
+    def load_or_generate_approvals_data(self, approvals_type):
+        pickle_filename = f"approvals_{approvals_type}.pkl"
+        # pickle_filename="approvals_statements_and_embeddings_G_B_BE.pkl"
         file_loaded, approvals_statements_and_embeddings = load_pkl_or_not(
             pickle_filename,
             self.pickle_dir,
@@ -396,7 +390,7 @@ class EvaluatorPipeline:
             print(self.text_subset)
             print(type(self.text_subset))
             all_condition_approvals = load_pkl_or_not(
-                "all_condition_approvals.pkl",
+                "all_condition_approvals_{approvals_type}.pkl",
                 self.pickle_dir,
                 self.reuse_conditions,
             )
@@ -548,30 +542,26 @@ class EvaluatorPipeline:
         return be_nice_conditions, random_statements_embs
 
     def prepare_data_for_prompts(self, be_nice_conditions, random_statements_embs):
-        data_include_statements_and_embeddings_4_prompts = [
-            [[], s[0], s[2]] for s in random_statements_embs
-        ]
+        approval_data_with_personas = [[[], s[0], s[2]] for s in random_statements_embs]
 
         for i, condition in enumerate(be_nice_conditions):
             for record in condition:
                 if record == 0:
-                    data_include_statements_and_embeddings_4_prompts[i][0].append(0)
+                    approval_data_with_personas[i][0].append(0)
                 elif record == 1:
-                    data_include_statements_and_embeddings_4_prompts[i][0].append(1)
+                    approval_data_with_personas[i][0].append(1)
                 else:
-                    data_include_statements_and_embeddings_4_prompts[i][0].append(-1)
+                    approval_data_with_personas[i][0].append(-1)
 
-        statement_embeddings = np.array(
-            [e[2] for e in data_include_statements_and_embeddings_4_prompts]
-        )
+        statement_embeddings = np.array([e[2] for e in approval_data_with_personas])
 
-        return data_include_statements_and_embeddings_4_prompts, statement_embeddings
+        return approval_data_with_personas, statement_embeddings
 
     def visualize_approval_embeddings(
         self,
         model_names,
         dim_reduce_tsne,
-        data_include_statements_and_embeddings_4_prompts,
+        approval_data,
         prompt_approver_type,  # "personas" or "awareness"
     ):
         for model_name in model_names:
@@ -587,11 +577,13 @@ class EvaluatorPipeline:
                 )
                 self.viz.plot_approvals(
                     dim_reduce_tsne,
-                    data_include_statements_and_embeddings_4_prompts,
+                    approval_data,
                     condition,
-                    plot_type="approval"
-                    if prompt_approver_type == "personas"
-                    else "awareness",
+                    plot_type=(
+                        "approval"
+                        if prompt_approver_type == "personas"
+                        else "awareness"
+                    ),
                     filename=f"{approval_filename}",
                     title=f"Embeddings of {condition_title} for {prompt_approver_type} responses",
                 )
@@ -686,20 +678,24 @@ class EvaluatorPipeline:
         )
 
         ### Approval Persona prompts ###
+        approval_data_persona_prompts = self.load_or_generate_approvals_data(
+            approvals_type="personas"
+        )
         (
             statement_embeddings,
-            approvals_statements_and_embeddings,
+            dim_reduce_tsne,
         ) = self.run_approvals_based_evaluation()
+        print(f"approval_data_persona_prompts: {approval_data_persona_prompts}")
         # Visualize approval embeddings
         if "approvals" not in self.hide_plots:
             self.visualize_approval_embeddings(
                 model_names,
                 dim_reduce_tsne,
-                approvals_statements_and_embeddings,
+                approval_data_persona_prompts,
                 prompt_approver_type="personas",
             )
         statement_clustering = self.run_approvals_clustering(
-            statement_embeddings, approvals_statements_and_embeddings
+            statement_embeddings, approval_data_persona_prompts
         )
         hierarchy_data = self.perform_hierarchical_clustering(
             statement_clustering, rows
@@ -718,7 +714,7 @@ class EvaluatorPipeline:
         ) = self.load_conditions_and_embeddings()
         # Prepare data for prompts
         (
-            data_include_statements_and_embeddings_4_prompts,
+            approval_data_awareness_prompts,
             statement_embeddings,
         ) = self.prepare_data_for_prompts(be_nice_conditions, random_statements_embs)
         # Cluster statement embeddings
@@ -732,14 +728,14 @@ class EvaluatorPipeline:
             self.visualize_approval_embeddings(
                 model_names,
                 dim_reduce_tsne,
-                data_include_statements_and_embeddings_4_prompts,
+                approval_data_awareness_prompts,
                 prompt_approver_type="awareness",
             )
         # Create or load the cluster rows
         # Calculate and save hierarchical data
         print("Calculating hierarchical cluster data for awareness prompts...")
         hierarchy_data = self.calculate_and_save_hierarchical_data(
-            statement_clustering, data_include_statements_and_embeddings_4_prompts, rows
+            statement_clustering, approval_data_awareness_prompts, rows
         )
         print("Visualizing hierarchical cluster...")
         self.visualize_hierarchical_clusters(
