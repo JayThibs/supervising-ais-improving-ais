@@ -130,9 +130,9 @@ python unsupervised_llm_behavioural_clustering/main.py --model_family="openai" -
 ```
 
 # Roadmap
-Short-term: Share an easy-to-use pipeline for the repository and so that other researchers can run quick experiments on other models and datasets to compare changes in model behavior.
-Mid-term: Improve clustering and comparison methods; add prompt datasets (e.g. honeypots).
-Long-term: We expect to publish experiment results, highlighting model behavior changes that could impact alignment. Integrate data attribution methods and SAEs (finding feature differences).
+* Short-term: Share an easy-to-use pipeline for the repository and so that other researchers can run quick experiments on other models and datasets to compare changes in model behavior.
+* Mid-term: Improve clustering and comparison methods; add prompt datasets (e.g. honeypots).
+* Long-term: We expect to publish experiment results, highlighting model behavior changes that could impact alignment. Integrate data attribution methods and SAEs (finding feature differences).
 
 # Acknowledgements
 
