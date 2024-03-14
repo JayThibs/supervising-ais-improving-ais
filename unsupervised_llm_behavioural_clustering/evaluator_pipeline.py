@@ -373,8 +373,8 @@ class EvaluatorPipeline:
         return statement_embeddings, dim_reduce_tsne
 
     def load_or_generate_approvals_data(self, approvals_type):
-        pickle_filename = f"approvals_{approvals_type}.pkl"
-        # pickle_filename="approvals_statements_and_embeddings_G_B_BE.pkl"
+        pickle_filename = f"approvals_statements_and_embeddings_{approvals_type}.pkl"
+        # pickle_filename="approvals_statements_and_embeddings_personas.pkl"
         file_loaded, approvals_statements_and_embeddings = load_pkl_or_not(
             pickle_filename,
             self.pickle_dir,
@@ -642,7 +642,7 @@ class EvaluatorPipeline:
         # Load data
         all_texts = self.load_evaluation_data()
         # Generate responses to statement prompts
-        text_subset, all_query_results = self.generate_responses()
+        self.text_subset, all_query_results = self.generate_responses()
         self.all_model_info = self.collect_model_info(all_query_results)
         model_names = [llm[1] for llm in self.llms]
         tsne_filename = self.generate_plot_filename(
@@ -678,27 +678,27 @@ class EvaluatorPipeline:
         )
 
         ### Approval Persona prompts ###
-        approval_data_persona_prompts = self.load_or_generate_approvals_data(
+        approval_data_for_persona_prompts = self.load_or_generate_approvals_data(
             approvals_type="personas"
         )
         (
             statement_embeddings,
             dim_reduce_tsne,
-        ) = self.run_approvals_based_evaluation()
-        print(f"approval_data_persona_prompts: {approval_data_persona_prompts}")
+        ) = self.run_approvals_based_evaluation(approval_data_for_persona_prompts)
+        print(f"approval_data_persona_prompts: {approval_data_for_persona_prompts}")
         # Visualize approval embeddings
         if "approvals" not in self.hide_plots:
             self.visualize_approval_embeddings(
                 model_names,
                 dim_reduce_tsne,
-                approval_data_persona_prompts,
+                approval_data_for_persona_prompts,
                 prompt_approver_type="personas",
             )
         statement_clustering = self.run_approvals_clustering(
-            statement_embeddings, approval_data_persona_prompts
+            statement_embeddings, approval_data_for_persona_prompts
         )
         hierarchy_data = self.perform_hierarchical_clustering(
-            statement_clustering, rows
+            statement_clustering, approval_data_for_persona_prompts, rows
         )
         self.visualize_hierarchical_clusters(
             model_names=model_names,

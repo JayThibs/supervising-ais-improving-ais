@@ -23,7 +23,7 @@ class Visualization:
         self,
         plot_dim=(16, 16),
         save_path=f"{os.getcwd()}/data/results/plots",
-        personas=[],
+        approval_prompts=[],
     ):
         self.plot_dim = plot_dim
         self.save_path = save_path
@@ -44,16 +44,8 @@ class Visualization:
             "yellow",
             "pink",
         ]
-        if personas == []:
-            self.personas = [
-                "Google Chat",
-                "Bing Chat",
-                "Bing Chat Emoji",
-                "Bing Chat Janus",
-            ]
-        else:
-            self.personas = personas
-        self.awareness = ["Unaware", "Other AI", "Aware", "Other human"]
+        self.personas = list(approval_prompts["Personas"].keys())
+        self.awareness = list(approval_prompts["Awareness"].keys())
         self.shapes = ["o", "o", "*", "+"]
         self.plot_aesthetics = {
             "approval": {
