@@ -77,9 +77,8 @@ class EvaluatorPipeline:
         with open(f"{self.data_dir}/prompts/approval_prompts.json", "r") as file:
             # { "google_chat_desc": [ "prompt"], "bing_chat_desc": [...], ...}
             self.approval_prompts = json.load(file)
-            self.personas = list(self.approval_prompts.keys())
-            self.approval_prompts = [
-                prompt for prompt in self.approval_prompts.values()
+            self.persona_approval_prompts = [
+                prompt for prompt in list(self.approval_prompts["personas"].values())
             ]
         self.approval_question_prompt_template = self.args.approval_prompt_template
         self.set_reuse_flags()
@@ -88,7 +87,7 @@ class EvaluatorPipeline:
 
         # Set up objects
         self.model_eval = ModelEvaluation(args, self.llms)
-        self.viz = Visualization(save_path=self.viz_dir, personas=self.personas)
+        self.viz = Visualization(save_path=self.viz_dir)
         self.clustering_obj = Clustering(self.args)
 
         if self.args.new_generation:
@@ -404,7 +403,7 @@ class EvaluatorPipeline:
                         model=self.args.model,
                         system_message=role_description,
                     )
-                    for role_description in self.approval_prompts
+                    for role_description in self.persona_approval_prompts
                 ]
                 if not os.path.exists(f"{self.pickle_dir}/all_condition_approvals.pkl"):
                     pickle.dump(
@@ -458,7 +457,7 @@ class EvaluatorPipeline:
     ):
         statement_clustering = self.clustering_obj.cluster_persona_embeddings(
             statement_embeddings,
-            prompt_approver_type="Personas",
+            prompt_approver_type="personas",
             n_clusters=120,
             spectral_plot=False if "spectral" in self.hide_plots else True,
         )

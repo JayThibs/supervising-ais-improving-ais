@@ -1,5 +1,6 @@
 import os
 import pdb
+import json
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
 import matplotlib.patches as mpatches
@@ -44,8 +45,13 @@ class Visualization:
             "yellow",
             "pink",
         ]
-        self.personas = list(approval_prompts["Personas"].keys())
-        self.awareness = list(approval_prompts["Awareness"].keys())
+        with open(f"{os.getcwd()}/data/prompts/approval_prompts.json", "r") as file:
+            self.approval_prompts = json.load(file)
+            for key in self.approval_prompts.keys():
+                # This creates labels for personas, awareness, and whatever else is in the json file.
+                # For example, if the json file has a key "awareness", this will create a self.awareness
+                # attribute with the values of the "awareness" key in the json file.
+                setattr(self, key, list(self.approval_prompts[key].keys()))
         self.shapes = ["o", "o", "*", "+"]
         self.plot_aesthetics = {
             "approval": {
