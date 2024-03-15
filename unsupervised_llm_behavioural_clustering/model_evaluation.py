@@ -64,7 +64,9 @@ class ModelEvaluation:
         elif model_family == "local":
             model_instance = LocalModel()
         else:
-            raise ValueError("Invalid model name")
+            raise ValueError(
+                "Invalid model_family name. Choose 'openai', 'anthropic', or 'local'. Common error: it's a list or capitalization issue."
+            )
 
         for i in tqdm(range(n_statements)):
             print(f"Prompt {i}: {prompts[i]}")
