@@ -255,7 +255,7 @@ class EvaluatorPipeline:
 
     def collect_model_info(self, all_query_results):
         print("Collecting model info...")
-        print(f"self.all_query_results: {all_query_results}")
+        print(f"all_query_results: {all_query_results}")
         all_model_info = [result["model_info"] for result in all_query_results]
         # print the keys
         for key in all_model_info[0].keys():
@@ -288,7 +288,7 @@ class EvaluatorPipeline:
                 tsne_filename,
             )
 
-    def embed_responses(self):
+    def embed_responses(self, all_query_results):
         print("Embedding responses...")
         file_loaded, joint_embeddings_all_llms = load_pkl_or_not(
             "joint_embeddings_all_llms.pkl",
@@ -296,7 +296,9 @@ class EvaluatorPipeline:
             self.reuse_joint_embeddings,
         )
         if not file_loaded:
-            joint_embeddings_all_llms = self.generate_and_save_embeddings()
+            joint_embeddings_all_llms = self.generate_and_save_embeddings(
+                all_query_results
+            )
 
         combined_embeddings = np.array(
             [e[3] for e in joint_embeddings_all_llms]
@@ -307,9 +309,9 @@ class EvaluatorPipeline:
 
         return joint_embeddings_all_llms, combined_embeddings
 
-    def generate_and_save_embeddings(self):
+    def generate_and_save_embeddings(self, all_query_results):
         joint_embeddings_all_llms = self.model_eval.embed_responses(
-            query_results=self.all_query_results, llms=self.llms
+            query_results=all_query_results, llms=self.llms
         )
         with open(f"{self.pickle_dir}/joint_embeddings_all_llms.pkl", "wb") as f:
             pickle.dump(joint_embeddings_all_llms, f)
@@ -457,7 +459,7 @@ class EvaluatorPipeline:
     ):
         statement_clustering = self.clustering_obj.cluster_persona_embeddings(
             statement_embeddings,
-            prompt_approver_type="personas",
+            prompt_approver_type="Personas",
             n_clusters=120,
             spectral_plot=False if "spectral" in self.hide_plots else True,
         )
@@ -648,7 +650,9 @@ class EvaluatorPipeline:
             model_names, "tsne_embedding_responses"
         )
         # Embed model responses to statement prompts
-        joint_embeddings_all_llms, combined_embeddings = self.embed_responses()
+        joint_embeddings_all_llms, combined_embeddings = self.embed_responses(
+            all_query_results
+        )
         dim_reduce_tsne = self.perform_tsne_dimensionality_reduction(
             combined_embeddings
         )
