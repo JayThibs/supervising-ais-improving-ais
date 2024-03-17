@@ -80,6 +80,18 @@ class EvaluatorPipeline:
             self.persona_approval_prompts = [
                 prompt for prompt in list(self.approval_prompts["personas"].values())
             ]
+        # Create a loop that creates a new attribute which is a dictionary of the
+        # persona prompt title and the prompt itself
+        for key in self.approval_prompts.keys():
+            setattr(self, key, list(self.approval_prompts[key].keys()))
+
+        # with open(f"{os.getcwd()}/data/prompts/approval_prompts.json", "r") as file:
+        #     self.approval_prompts = json.load(file)
+        #     for key in self.approval_prompts.keys():
+        #         # This creates labels for personas, awareness, and whatever else is in the json file.
+        #         # For example, if the json file has a key "awareness", this will create a self.awareness
+        #         # attribute with the values of the "awareness" key in the json file.
+        #         setattr(self, key, list(self.approval_prompts[key].keys()))
         self.approval_question_prompt_template = self.args.approval_prompt_template
         self.set_reuse_flags()
         self.hide_plots = self.process_hide_plots(self.args.hide_plots)
@@ -374,6 +386,11 @@ class EvaluatorPipeline:
         return statement_embeddings, dim_reduce_tsne
 
     def load_or_generate_approvals_data(self, approvals_type):
+        """
+        Using the statements from a dataset, prompt the language model with a set of personas
+        and ask them if they approve or disapprove of the statements. For the set of personas,
+        generate the approval responses for each language model you want to evaluate.
+        """
         pickle_filename = f"approvals_statements_and_embeddings_{approvals_type}.pkl"
         # pickle_filename="approvals_statements_and_embeddings_personas.pkl"
         file_loaded, approvals_statements_and_embeddings = load_pkl_or_not(
@@ -397,16 +414,22 @@ class EvaluatorPipeline:
             )
 
             if not self.reuse_conditions:
-                all_condition_approvals = [
-                    self.model_eval.get_model_approvals(
-                        statements=self.text_subset,
-                        prompt_template=self.approval_question_prompt_template,
-                        model_family=self.args.model_family,
-                        model=self.args.model,
-                        system_message=role_description,
-                    )
-                    for role_description in self.persona_approval_prompts
-                ]
+                # note: self.args.model is a list of models
+                # create a dictionary with the model as the key, and a persona dictionary as the value, which contains the approvals as values
+                all_condition_approvals = {model: {} for model in self.args.model}
+
+                for model_family, model in self.llms:
+                    all_condition_approvals[model] = {}
+                    all_condition_approvals[model] = [
+                        self.model_eval.get_model_approvals(
+                            statements=self.text_subset,
+                            prompt_template=self.approval_question_prompt_template,
+                            model_family=model_family,
+                            model=model,
+                            system_message=role_description,
+                        )
+                        for role_description in self.persona_approval_prompts
+                    ]
                 if not os.path.exists(f"{self.pickle_dir}/all_condition_approvals.pkl"):
                     pickle.dump(
                         all_condition_approvals,
