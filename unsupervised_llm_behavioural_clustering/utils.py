@@ -135,36 +135,11 @@ def embed_texts(
                 break  # Exit the retry loop if successful
             except Exception as e:
                 print(f"Skipping due to server error number {retry_count}: {e}")
-                time.sleep(
-                    initial_sleep_time * (2**retry_count)
-                )  # Exponential backoff
+                time.sleep(initial_sleep_time * (2**retry_count))  # Exponential backoff
 
         # print("embedding:", embedding)
         embeddings += [item.embedding for item in embeddings_data]
     return embeddings
-
-
-def get_joint_embedding(
-    inputs,
-    responses,
-    model_name="text-embedding-ada-002",  # Added model_name as a paramete
-    combine_statements=False,
-):
-    """Get joint embedding for a list of inputs and responses."""
-    if not combine_statements:
-        inputs_embeddings = embed_texts(texts=[inputs], model=model_name)
-        responses_embeddings = embed_texts(texts=[responses], model=model_name)
-        joint_embeddings = [
-            i + r for i, r in zip(inputs_embeddings, responses_embeddings)
-        ]
-    else:
-        joint_embeddings = embed_texts(
-            texts=[
-                input + " " + response for input, response in zip(inputs, responses)
-            ],
-            model=model_name,
-        )
-    return joint_embeddings
 
 
 def select_by_indices(curation_results, indices):
