@@ -9,7 +9,7 @@ from data_preparation import DataPreparation
 from model_evaluation import ModelEvaluation
 from visualization import Visualization
 from clustering import Clustering
-from utils import embed_texts, load_pkl_or_not
+from utils import embed_texts, load_pkl_or_not, query_model_on_statements
 from typing import List, Dict, Any
 from dataclasses import dataclass
 
@@ -150,7 +150,8 @@ class EvaluatorPipeline:
                 "anthropic-model-written-evals",
             )
 
-    def load_evaluation_data(self):
+    def load_evaluation_data(self, dataset_name="anthropic"):
+        self.dataset_name = dataset_name
         self.data_prep = DataPreparation()
         all_texts = self.data_prep.load_evaluation_data(self.data_prep.file_paths)
         return all_texts
@@ -243,19 +244,28 @@ class EvaluatorPipeline:
         )
 
         if self.saved_query_results is None:
-            all_query_results = self.generate_and_save_responses(self.n_statements)
+            all_query_results = self.generate_and_save_responses(
+                text_subset,
+                self.n_statements,
+                self.args.statements_prompt_template,
+                self.args.statements_system_message,
+                self.llms,
+            )
         else:
             all_query_results = [self.saved_query_results]
 
         return text_subset, all_query_results
 
-    def generate_and_save_responses(self, n_statements):
+    def generate_and_save_responses(
+        self, text_subset, n_statements, prompt_template, system_message, llms
+    ):
         all_query_results = []
-        for llm in self.llms:
-            print(f"Generating responses for {llm}...")
-            query_results, file_name = self.model_eval.run_short_text_tests(
-                self.text_subset, n_statements, llm
-            )
+        for model_family, model in llms:
+            print(f"Generating responses for {model} from {model_family}...")
+            file_name = f"{model_family}_{model}_reaction_to_{n_statements}_{self.dataset_name}_statements.pkl"
+            query_results = query_model_on_statements(
+                text_subset, model_family, model, prompt_template, system_message
+            )  # dictionary of inputs, responses, and model instance
             all_query_results.append(query_results)
             self.save_results(query_results, file_name, "pickle_files")
             print(f"{file_name} saved.")
@@ -420,7 +430,7 @@ class EvaluatorPipeline:
         return statement_embeddings, dim_reduce_tsne
 
     def load_or_generate_approvals_data(
-        self, approvals_type, statement_embeddings_filepath, reuse_approvals=False
+        self, approvals_type, statement_embeddings_filename, reuse_approvals=False
     ):
         """
         Using the statements from a dataset, prompt the language model with a set of personas
@@ -443,7 +453,7 @@ class EvaluatorPipeline:
             )
             # load statement embeddings
             with open(
-                f"{self.pickle_dir}/{statement_embeddings_filepath}.pkl", "rb"
+                f"{self.pickle_dir}/{statement_embeddings_filename}.pkl", "rb"
             ) as f:
                 statement_embeddings = pickle.load(f)
             print("Generating approvals...")
@@ -743,6 +753,21 @@ class EvaluatorPipeline:
             statement_embeddings,
             dim_reduce_tsne,
         ) = self.run_approvals_based_evaluation(approval_data_for_persona_prompts)
+        print("Performing dimensionality reduction...")
+        statement_embeddings = np.array([approval[2] for approval in approval_data])
+        np.save(
+            f"{os.getcwd()}/data/results/statement_embeddings.npy",
+            statement_embeddings,
+        )
+        dim_reduce_tsne = self.model_eval.tsne_dimension_reduction(
+            statement_embeddings, iterations=2000, perplexity=self.perplexity
+        )
+        conditions = np.array([approval[0] for approval in approval_data])
+
+        pickle.dump(
+            conditions,
+            open(f"{os.getcwd()}/data/results/pickle_files/conditions.pkl", "wb"),
+        )
         print(f"approval_data_persona_prompts: {approval_data_for_persona_prompts}")
         # Visualize approval embeddings
         if "approvals" not in self.hide_plots:
