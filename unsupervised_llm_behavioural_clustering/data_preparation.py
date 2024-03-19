@@ -69,6 +69,20 @@ class DataPreparation:
 
         return all_texts
 
+    def load_and_preprocess_data(self, data_prep, n_statements: int = 5000):
+        # Load all evaluation data
+        file_paths = [
+            path for path in glob.iglob("data/evals/**/*.jsonl", recursive=True)
+        ]
+        print(f"Found {len(file_paths)} files.")
+        all_texts = data_prep.load_evaluation_data(file_paths)
+        short_texts = data_prep.load_short_texts(all_texts)
+        text_subset = data_prep.create_text_subset(short_texts, n_statements)
+        print(f"Loaded {len(all_texts)} texts.")
+        print(f"Loaded {len(short_texts)} short texts.")
+        print(f"Loaded {len(text_subset)} text subset.")
+        return text_subset  # numpy.ndarray
+
     def load_short_texts(self, all_texts, max_length=150):
         return [t[1] for t in all_texts if len(t[1]) < max_length]
 

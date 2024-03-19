@@ -18,25 +18,7 @@ from models import OpenAIModel, AnthropicModel, LocalModel
 class ModelEvaluation:
     def __init__(self, args, llms):
         self.args = args
-        self.all_texts = []
-        self.short_texts = []
-        self.text_subset = []
         self.llms = llms
-
-    # TODO: Consider moving this to utils.py or data_preparation.py
-    def load_and_preprocess_data(self, data_prep, n_statements: int = 5000):
-        # Load all evaluation data
-        file_paths = [
-            path for path in glob.iglob("data/evals/**/*.jsonl", recursive=True)
-        ]
-        print(f"Found {len(file_paths)} files.")
-        self.all_texts = data_prep.load_evaluation_data(file_paths)
-        self.short_texts = data_prep.load_short_texts(self.all_texts)
-        self.text_subset = data_prep.create_text_subset(self.short_texts, n_statements)
-        print(f"Loaded {len(self.all_texts)} texts.")
-        print(f"Loaded {len(self.short_texts)} short texts.")
-        print(f"Loaded {len(self.text_subset)} text subset.")
-        return self.text_subset  # numpy.ndarray
 
     def get_model_approvals(
         self,
