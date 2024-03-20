@@ -109,7 +109,7 @@ def query_model_on_statements(
 
 
 def embed_texts(
-    texts: List[List[str]],
+    texts: List[str],
     model="text-embedding-ada-002",
     batch_size=20,
     max_retries=50,
