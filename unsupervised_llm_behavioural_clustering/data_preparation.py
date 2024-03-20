@@ -1,6 +1,6 @@
 import os
 import glob
-from typing import List, Tuple
+from typing import List, Tuple, Union
 import subprocess
 import pandas as pd
 import numpy as np
@@ -67,20 +67,53 @@ class DataPreparation:
                     if "statement" in d[1]:
                         all_texts.append([d[0], d[1]["statement"]])
 
+        print(f"Loaded {len(all_texts)} texts.")
+        # Print a few sample elements to check the data structure
+        print("Sample elements from all_texts:")
+        for i in range(min(3, len(all_texts))):
+            print(f"Element {i}: {all_texts[i]}")
         return all_texts
 
-    def load_and_preprocess_data(self, data_prep, n_statements: int = 5000):
-        # Load all evaluation data
-        file_paths = [
-            path for path in glob.iglob("data/evals/**/*.jsonl", recursive=True)
-        ]
+    def load_and_preprocess_data(
+        self, datasets: Union[str, List[str]] = "all", n_statements: int = 5000
+    ) -> List[str]:
+        """Load and preprocess evaluation data. Return a subset of texts."""
+        # Determine file paths based on user input
+        if datasets == "all":
+            file_paths = [
+                path for path in glob.iglob("data/evals/**/*.jsonl", recursive=True)
+            ]
+        elif isinstance(datasets, list):
+            file_paths = []
+            for dataset in datasets:
+                file_paths.extend(
+                    [
+                        path
+                        for path in glob.iglob(
+                            f"data/evals/**/{dataset}.jsonl", recursive=True
+                        )
+                    ]
+                )
+        else:  # Single dataset specified
+            file_paths = [
+                path
+                for path in glob.iglob(
+                    f"data/evals/**/{datasets}.jsonl", recursive=True
+                )
+            ]
+
         print(f"Found {len(file_paths)} files.")
-        all_texts = data_prep.load_evaluation_data(file_paths)
-        short_texts = data_prep.load_short_texts(all_texts)
-        text_subset = data_prep.create_text_subset(short_texts, n_statements)
+        all_texts = self.load_evaluation_data(file_paths)
+        short_texts = self.load_short_texts(all_texts)
+        print(f"Sample short texts: {short_texts[:2]}")
+        text_subset = self.create_text_subset(short_texts, n_statements)
+        print(f"Sample text subset: {text_subset[:2]}")
         print(f"Loaded {len(all_texts)} texts.")
         print(f"Loaded {len(short_texts)} short texts.")
         print(f"Loaded {len(text_subset)} text subset.")
+        print("Sample elements from text_subset:")
+        for i in range(min(3, len(text_subset))):
+            print(f"Element {i}: {text_subset[i]}")
         return text_subset  # numpy.ndarray
 
     def load_short_texts(self, all_texts, max_length=150):
