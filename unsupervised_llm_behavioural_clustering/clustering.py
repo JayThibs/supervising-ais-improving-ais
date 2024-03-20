@@ -133,11 +133,9 @@ class Clustering:
             print("\n\n")
 
         pickle_base_path = f"{os.getcwd()}/data/results/pickle_files"
-        rows_pickle_path = f"{pickle_base_path}/rows_chatbots_G_B_BE_BJ.pkl"
-        clustering_pickle_path = f"{pickle_base_path}/clustering_chatbots_G_B_BE_BJ.pkl"
-        table_pickle_path = (
-            f"{pickle_base_path}/clusters_desc_table_chatbots_G_B_BE_BJ.pkl"
-        )
+        rows_pickle_path = f"{pickle_base_path}/rows_personas.pkl"
+        clustering_pickle_path = f"{pickle_base_path}/clustering_personas.pkl"
+        table_pickle_path = f"{pickle_base_path}/clusters_desc_table_personas.pkl"
 
         if reuse_cluster_rows:
             print("Loading rows from file...")
