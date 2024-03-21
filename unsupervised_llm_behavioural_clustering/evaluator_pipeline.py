@@ -476,21 +476,24 @@ class EvaluatorPipeline:
 
             if not self.reuse_conditions or not conditions_loaded:
                 # note: self.args.model is a list of models
-                # create a dictionary with the model as the key, and a persona dictionary as the value, which contains the approvals as values
-                all_condition_approvals = {model: {} for model in self.args.model}
+                # create a dictionary with the model as the key, and a list of persona approvals as the value
+                all_condition_approvals = {model: [] for model in self.args.model}
 
                 for model_family, model in self.llms:
-                    all_condition_approvals[model] = {}
-                    all_condition_approvals[model] = [
-                        self.model_eval.get_model_approvals(
+                    model_approvals = []
+                    for role_description in self.persona_approval_prompts:
+                        model_approval = self.model_eval.get_model_approvals(
                             statements=self.text_subset,
                             prompt_template=self.approval_question_prompt_template,
                             model_family=model_family,
                             model=model,
                             system_message=role_description,
                         )
-                        for role_description in self.persona_approval_prompts
-                    ]
+                        model_approvals.append(model_approval)
+                    all_condition_approvals[model] = (
+                        model_approvals  # {model_1: [approval1, approval2, ...], model_2: [approval1, approval2, ...], ... }
+                    )
+
                 if not os.path.exists(f"{self.pickle_dir}/all_condition_approvals.pkl"):
                     pickle.dump(
                         all_condition_approvals,
@@ -504,10 +507,11 @@ class EvaluatorPipeline:
             approvals_statements_and_embeddings = []
             for i in range(len(self.text_subset)):
                 print(f"Approvals record {i}")
-                record_approvals = [
-                    condition_approvals[i]
-                    for condition_approvals in all_condition_approvals
-                ]
+                record_approvals = {}
+                for model, model_approvals in all_condition_approvals.items():
+                    record_approvals[model] = [
+                        approval[i] for approval in model_approvals
+                    ]
                 print(f"record_approvals: {record_approvals}")
                 record = [
                     record_approvals,
@@ -524,7 +528,7 @@ class EvaluatorPipeline:
                     ),
                 )
 
-        return approvals_statements_and_embeddings
+        return approvals_statements_and_embeddings  # [ [{model_1: [approval1, approval2, ...], model_2: [approval1, approval2, ...], ...}, statement, embedding], ... ]
 
     def generate_and_save_cluster_analysis(
         self, chosen_clustering, joint_embeddings_all_llms, all_query_results
@@ -619,10 +623,12 @@ class EvaluatorPipeline:
         emb_pkl_file="Anthropic_5000_random_statements_embs",
     ):
         with open(f"{self.pickle_dir}/conditions.pkl", "rb") as f:
-            be_nice_conditions = pickle.load(f)
+            be_nice_conditions = pickle.load(f)  # [ [1, 1, 1, -1 ], [0, 0, 0, 0], ... ]
 
         with open(f"{self.pickle_dir}/{emb_pkl_file}.pkl", "rb") as f:
-            random_statements_embs = pickle.load(f)[: self.n_statements]
+            random_statements_embs = pickle.load(f)[
+                : self.n_statements
+            ]  # [ [statement, jsonl_filepath, [embedding]], ...]
 
         return be_nice_conditions, random_statements_embs
 
@@ -798,43 +804,43 @@ class EvaluatorPipeline:
         #     plot_type="approval",
         # )
 
-        # ### Awareness prompts ###
-        # # Load conditions and embeddings
-        # (
-        #     be_nice_conditions,
-        #     random_statements_embs,
-        # ) = self.load_conditions_and_embeddings()
-        # # Prepare data for prompts
-        # (
-        #     approval_data_awareness_prompts,
-        #     statement_embeddings,
-        # ) = self.prepare_data_for_prompts(be_nice_conditions, random_statements_embs)
-        # # Cluster statement embeddings
-        # statement_clustering = self.clustering_obj.cluster_persona_embeddings(
-        #     statement_embeddings,
-        #     prompt_approver_type="Awareness",
-        #     spectral_plot=False if "spectral" in self.hide_plots else True,
-        # )
-        # # Visualize awareness embeddings
-        # if "awareness" not in self.hide_plots:
-        #     self.visualize_approval_embeddings(
-        #         model_names,
-        #         dim_reduce_tsne,
-        #         approval_data_awareness_prompts,
-        #         prompt_approver_type="awareness",
-        #     )
-        # # Create or load the cluster rows
-        # # Calculate and save hierarchical data
-        # print("Calculating hierarchical cluster data for awareness prompts...")
-        # hierarchy_data = self.calculate_and_save_hierarchical_data(
-        #     statement_clustering, approval_data_awareness_prompts, rows
-        # )
-        # print("Visualizing hierarchical cluster...")
-        # self.visualize_hierarchical_clusters(
-        #     model_names=model_names,
-        #     hierarchy_data=hierarchy_data,
-        #     plot_type="awareness",
-        # )
+        ### Awareness prompts ###
+        # Load conditions and embeddings
+        (
+            be_nice_conditions,
+            random_statements_embs,
+        ) = self.load_conditions_and_embeddings()
+        # Prepare data for prompts
+        (
+            approval_data_awareness_prompts,
+            statement_embeddings,
+        ) = self.prepare_data_for_prompts(be_nice_conditions, random_statements_embs)
+        # Cluster statement embeddings
+        statement_clustering = self.clustering_obj.cluster_persona_embeddings(
+            statement_embeddings,
+            prompt_approver_type="Awareness",
+            spectral_plot=False if "spectral" in self.hide_plots else True,
+        )
+        # Visualize awareness embeddings
+        if "awareness" not in self.hide_plots:
+            self.visualize_approval_embeddings(
+                model_names,
+                dim_reduce_tsne,
+                approval_data_awareness_prompts,
+                prompt_approver_type="awareness",
+            )
+        # Create or load the cluster rows
+        # Calculate and save hierarchical data
+        print("Calculating hierarchical cluster data for awareness prompts...")
+        hierarchy_data = self.calculate_and_save_hierarchical_data(
+            statement_clustering, approval_data_awareness_prompts, rows
+        )
+        print("Visualizing hierarchical cluster...")
+        self.visualize_hierarchical_clusters(
+            model_names=model_names,
+            hierarchy_data=hierarchy_data,
+            plot_type="awareness",
+        )
 
         # The Approval Persona prompts and Awareness prompts sections are similar, so we can refactor them into a single function where we loop over the type of prompts created in the json file. So, the following code should be able to run n number of prompts for m number of models and p number of prompt types (e.g. personas, awareness, etc.).
         # In order to do this, we will need to refactor some of the functions used for both prompt types to be more general. We will also need to allow for iterating over the models we want to evaluate.
