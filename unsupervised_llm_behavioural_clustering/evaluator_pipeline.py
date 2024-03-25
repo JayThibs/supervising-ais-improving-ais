@@ -420,29 +420,10 @@ class EvaluatorPipeline:
         )
         return rows
 
-    def run_approvals_based_evaluation(self, approval_data):
-        print("Performing dimensionality reduction...")
-        statement_embeddings = np.array([approval[2] for approval in approval_data])
-        np.save(
-            f"{os.getcwd()}/data/results/statement_embeddings.npy",
-            statement_embeddings,
-        )
-        dim_reduce_tsne = self.model_eval.tsne_dimension_reduction(
-            statement_embeddings, iterations=2000, perplexity=self.perplexity
-        )
-        conditions = np.array([approval[0] for approval in approval_data])
-
-        pickle.dump(
-            conditions,
-            open(f"{os.getcwd()}/data/results/pickle_files/conditions.pkl", "wb"),
-        )
-
-        return statement_embeddings, dim_reduce_tsne
-
     def load_or_generate_approvals_data(
         self,
         approvals_type,
-        statement_embeddings_filename,
+        statement_embeddings,
         reuse_approvals=False,
     ):
         """
@@ -460,13 +441,14 @@ class EvaluatorPipeline:
             )
 
         if not file_loaded:
+            print("Generating approvals...")
+
             # load statement embeddings
             with open(
-                f"{self.pickle_dir}/{statement_embeddings_filename}.pkl",
+                f"{self.pickle_dir}/{self.dataset_name}_{self.n_statements}_statements_embs.pkl",
                 "rb",
             ) as f:
                 statement_embeddings = pickle.load(f)
-            print("Generating approvals...")
 
             conditions_loaded, all_condition_approvals = load_pkl_or_not(
                 "all_condition_approvals_{approvals_type}.pkl",
@@ -482,14 +464,14 @@ class EvaluatorPipeline:
                 for model_family, model in self.llms:
                     model_approvals = []
                     for role_description in self.persona_approval_prompts:
-                        model_approval = self.model_eval.get_model_approvals(
+                        approvals_for_statements = self.model_eval.get_model_approvals(
                             statements=self.text_subset,
                             prompt_template=self.approval_question_prompt_template,
                             model_family=model_family,
                             model=model,
                             system_message=role_description,
                         )
-                        model_approvals.append(model_approval)
+                        model_approvals.append(approvals_for_statements)
                     all_condition_approvals[model] = (
                         model_approvals  # {model_1: [approval1, approval2, ...], model_2: [approval1, approval2, ...], ... }
                     )
@@ -520,6 +502,7 @@ class EvaluatorPipeline:
                 ]
                 print(f"record: {record}")
                 approvals_statements_and_embeddings.append(record)
+                # [ [{model_1: [approval1, approval2, ...], model_2: [approval1, approval2, ...], ...}, statement, embedding], ... ]
                 pickle.dump(
                     approvals_statements_and_embeddings,
                     open(
@@ -528,7 +511,7 @@ class EvaluatorPipeline:
                     ),
                 )
 
-        return approvals_statements_and_embeddings  # [ [{model_1: [approval1, approval2, ...], model_2: [approval1, approval2, ...], ...}, statement, embedding], ... ]
+        return approvals_statements_and_embeddings
 
     def generate_and_save_cluster_analysis(
         self, chosen_clustering, joint_embeddings_all_llms, all_query_results
@@ -543,19 +526,26 @@ class EvaluatorPipeline:
         return rows
 
     def run_approvals_clustering(
-        self, statement_embeddings, approvals_statements_and_embeddings
+        self, statement_embeddings, approvals_statements_and_embeddings, prompt_type
     ):
-        statement_clustering = self.clustering_obj.cluster_persona_embeddings(
+        """
+        Cluster the statement embeddings based on the prompt_type (personas or awareness) approvals.
+        """
+        statement_clustering = self.clustering_obj.cluster_statement_embeddings(
             statement_embeddings,
-            prompt_approver_type="Personas",
+            prompt_approver_type=prompt_type.capitalize(),
             n_clusters=120,
             spectral_plot=False if "spectral" in self.hide_plots else True,
         )
+        prompt_dict = {
+            k: v for k, v in self.approval_prompts.items() if k == prompt_type
+        }  # { "personas": { "google_chat_desc": [ "prompt"], "bing_chat_desc": [...], ...} }
         self.clustering_obj.cluster_approval_stats(
             approvals_statements_and_embeddings,
             statement_clustering,
             self.all_model_info,
-            self.reuse_cluster_rows,
+            prompt_dict=prompt_dict,
+            reuse_cluster_rows=self.reuse_cluster_rows,
         )
         return statement_clustering
 
@@ -816,7 +806,7 @@ class EvaluatorPipeline:
             statement_embeddings,
         ) = self.prepare_data_for_prompts(be_nice_conditions, random_statements_embs)
         # Cluster statement embeddings
-        statement_clustering = self.clustering_obj.cluster_persona_embeddings(
+        statement_clustering = self.clustering_obj.cluster_statement_embeddings(
             statement_embeddings,
             prompt_approver_type="Awareness",
             spectral_plot=False if "spectral" in self.hide_plots else True,
@@ -847,29 +837,38 @@ class EvaluatorPipeline:
 
         for prompt_type in self.approval_prompts.keys():
             print(f"prompt_type: {prompt_type}")  # e.g. "personas", "awareness", etc.
-            approval_data = self.load_or_generate_approvals_data(
+            # approvals_statements_and_embeddings: # [ [{model_1: [approval1, approval2, ...], model_2: [approval1, approval2, ...], ...}, statement, embedding], ... ]
+            approvals_statements_and_embeddings = self.load_or_generate_approvals_data(
                 approvals_type=prompt_type,
-                statement_embeddings_filename=f"{self.dataset_name}_{self.n_statements}_statements_embs",
+                statement_embeddings_pkl_filename=f"{self.dataset_name}_{self.n_statements}_statements_embs",
                 reuse_approvals=self.reuse_approvals,
             )
-            (
-                statement_embeddings,
-                dim_reduce_tsne,
-            ) = self.run_approvals_based_evaluation(approval_data)
+            if "statement_embeddings" not in locals():
+                statement_embeddings = np.array(
+                    [approval[2] for approval in approvals_statements_and_embeddings]
+                )
+
+            if "dim_reduce_tsne" not in locals():
+                print("Performing dimensionality reduction...")
+                dim_reduce_tsne = self.model_eval.tsne_dimension_reduction(
+                    statement_embeddings, iterations=2000, perplexity=self.perplexity
+                )
 
             # Visualize approval embeddings
-            if prompt_type not in self.hide_plots:
+            if prompt_type not in self.hide_plots or "all" in self.hide_plots:
                 self.visualize_approval_embeddings(
                     model_names,
                     dim_reduce_tsne,
-                    approval_data,
+                    approvals_statements_and_embeddings,
                     prompt_approver_type=prompt_type,
                 )
             statement_clustering = self.run_approvals_clustering(
-                statement_embeddings, approval_data
+                statement_embeddings,
+                approvals_statements_and_embeddings,
+                prompt_labels=self.approval_prompts[prompt_type].keys(),
             )
             hierarchy_data = self.perform_hierarchical_clustering(
-                statement_clustering, approval_data, rows
+                statement_clustering, approvals_statements_and_embeddings, rows
             )
             self.visualize_hierarchical_clusters(
                 model_names=model_names,
