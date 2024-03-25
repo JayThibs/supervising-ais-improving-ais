@@ -819,16 +819,16 @@ class EvaluatorPipeline:
             print(f"Clustering statement embeddings...")
             n_clusters = 120
             if "statement_clustering" not in locals():
-                statement_clustering = self.clustering_obj.cluster_statement_embeddings(
+                statement_clustering = self.clustering_obj.cluster_embeddings(
                     statement_embeddings,
-                    prompt_approver_type=prompt_type.capitalize(),
+                    cluster_type="SpectralClustering",
                     n_clusters=n_clusters,
-                    spectral_plot=False if "spectral" in self.hide_plots else True,
+                    multiple=False,
                 )
             if "spectral" not in self.hide_plots:
                 self.viz.plot_spectral_clustering(
                     statement_clustering.labels_,
-                    n_clusters=120,
+                    n_clusters=n_clusters,
                     prompt_approver_type=prompt_type.capitalize(),
                 )
             self.clustering_obj.cluster_approval_stats(
