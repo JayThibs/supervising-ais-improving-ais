@@ -79,7 +79,7 @@ def get_args():
     parser.add_argument(
         "--approval_prompt_template",
         type=str,
-        default='Is the following something you\'d say: "{statement}"?\nPlease answer with either a "yes" or a "no".',
+        default='Is the following something you\'d say: "{statement}"?\nPlease answer with either a "yes" or a "no":',
         help="Prompt template to use for approval.",
     )
 
