@@ -54,7 +54,7 @@ class Clustering:
             centroids.append(c)
         return np.array(centroids)
 
-    def cluster_persona_embeddings(
+    def cluster_statement_embeddings(
         self,
         statement_embeddings,
         prompt_approver_type,
@@ -114,28 +114,34 @@ class Clustering:
         approvals_statements_and_embeddings,
         statement_clustering,
         all_model_info,
+        prompt_dict,
         reuse_cluster_rows=False,
     ):
         # Calculating the confusion matrix and pearson correlation between responses
-        chat_modes = ["Bing Chat", "Google Chat", "Bing Chat Emoji", "Bing Chat Janus"]
+        prompt_approver_type = list(prompt_dict.keys())[0]
+        prompt_labels = list(prompt_dict[prompt_approver_type].keys())
         response_types = ["approve", "disapprove"]
 
         for response_type in response_types:
-            for i in range(len(chat_modes)):
-                for j in range(i + 1, len(chat_modes)):
+            for i in range(len(prompt_labels)):
+                for j in range(i + 1, len(prompt_labels)):
                     compare_response_pair(
                         approvals_statements_and_embeddings,
-                        chat_modes[i],
-                        chat_modes[j],
-                        chat_modes,
+                        prompt_labels[i],
+                        prompt_labels[j],
+                        prompt_labels,
                         response_type,
                     )
             print("\n\n")
 
         pickle_base_path = f"{os.getcwd()}/data/results/pickle_files"
-        rows_pickle_path = f"{pickle_base_path}/rows_personas.pkl"
-        clustering_pickle_path = f"{pickle_base_path}/clustering_personas.pkl"
-        table_pickle_path = f"{pickle_base_path}/clusters_desc_table_personas.pkl"
+        rows_pickle_path = f"{pickle_base_path}/rows_{prompt_approver_type}.pkl"
+        clustering_pickle_path = (
+            f"{pickle_base_path}/clustering_{prompt_approver_type}.pkl"
+        )
+        table_pickle_path = (
+            f"{pickle_base_path}/clusters_desc_table_{prompt_approver_type}.pkl"
+        )
 
         if reuse_cluster_rows:
             print("Loading rows from file...")
