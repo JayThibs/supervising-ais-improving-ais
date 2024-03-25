@@ -257,3 +257,22 @@ class Visualization:
             "Embeddings of approvals for different chat modes",
             order=order,
         )
+
+    def plot_spectral_clustering(self, labels, n_clusters, prompt_approver_type):
+        # Set the figsize parameter to increase the figure size
+        fig, ax = plt.subplots(figsize=(10, 6))  # You can adjust these values as needed
+        ax.tick_params(axis="both", which="major", labelsize=15)
+        ax.hist(labels, bins=n_clusters)
+        ax.set_title(
+            f"Spectral Clustering of {prompt_approver_type} Statement Responses",
+            fontsize=20,
+        )
+        # Adjust layout to fit all elements
+        fig.tight_layout()
+        plt.show()
+        filename = f"{os.getcwd()}/data/results/plots/spectral_clustering_{prompt_approver_type}_statements.png"
+        fig.savefig(
+            filename, bbox_inches="tight"
+        )  # Use bbox_inches='tight' to fit the entire content
+        print(f"Saved plot to {filename}")
+        plt.close("all")
