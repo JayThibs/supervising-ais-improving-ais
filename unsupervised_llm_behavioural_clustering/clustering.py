@@ -23,29 +23,58 @@ class Clustering:
     def __init__(self, args):
         self.args = args
 
-    def perform_multiple_clustering(self, embeddings):
-        cluster_algorithms = {
-            "OPTICS": OPTICS(min_samples=2, xi=0.12),
-            "Spectral": SpectralClustering(
-                100 if not self.args.test_mode else 10, random_state=42
-            ),
-            "Agglomerative": AgglomerativeClustering(
-                100 if not self.args.test_mode else 10
-            ),
-            "KMeans": KMeans(
-                n_clusters=200 if not self.args.test_mode else 10, random_state=42
-            ),
-            # Add more as needed
-        }
+    def cluster_embeddings(
+        self,
+        embeddings,
+        clustering_algorithm="SpectralClustering",
+        n_clusters=None,
+        multiple=False,
+        **kwargs,
+    ):
+        if multiple:
+            cluster_algorithms = {
+                "OPTICS": OPTICS(min_samples=2, xi=0.12),
+                "Spectral": SpectralClustering(
+                    100 if not self.args.test_mode else 10, random_state=42
+                ),
+                "Agglomerative": AgglomerativeClustering(
+                    100 if not self.args.test_mode else 10
+                ),
+                "KMeans": KMeans(
+                    n_clusters=200 if not self.args.test_mode else 10, random_state=42
+                ),
+                # Add more as needed
+            }
+            clustering_results = {}
+            for name, algorithm in cluster_algorithms.items():
+                print(f"Running {name} clustering...")
+                clustering_results[name] = algorithm.fit(embeddings)
+            return clustering_results
+        else:
+            print(f"Running {clustering_algorithm} on embeddings...")
+            if clustering_algorithm == "SpectralClustering":
+                clustering = SpectralClustering(
+                    n_clusters=n_clusters or 120, random_state=42, **kwargs
+                ).fit(embeddings)
+            elif clustering_algorithm == "KMeans":
+                clustering = KMeans(
+                    n_clusters=n_clusters or 120, random_state=42, **kwargs
+                ).fit(embeddings)
+            elif clustering_algorithm == "AgglomerativeClustering":
+                clustering = AgglomerativeClustering(
+                    n_clusters=n_clusters or 120, **kwargs
+                ).fit(embeddings)
+            elif clustering_algorithm == "OPTICS":
+                clustering = OPTICS(**kwargs).fit(embeddings)
+            else:
+                raise ValueError(
+                    f"Unsupported clustering algorithm: {clustering_algorithm}"
+                )
 
-        print("Embeddings shape:", embeddings.shape)
-        print("Embeddings:", embeddings)
-        clustering_results = {}
-        for name, algorithm in cluster_algorithms.items():
-            print(f"Running {name} clustering...")
-            clustering_results[name] = algorithm.fit(embeddings)
+            print("clustering.labels_", clustering.labels_)
+            print("n_clusters:", n_clusters or "Auto")
 
-        return clustering_results
+            return clustering
 
     def get_cluster_centroids(self, embeddings, cluster_labels):
         centroids = []
@@ -53,42 +82,6 @@ class Clustering:
             c = np.mean(embeddings[cluster_labels == i], axis=0).tolist()
             centroids.append(c)
         return np.array(centroids)
-
-    def cluster_statement_embeddings(
-        self,
-        statement_embeddings,
-        prompt_approver_type,
-        n_clusters=120,
-        spectral_plot=True,
-    ):
-        print("Running clustering on statement embeddings...")
-        clustering = sklearn.cluster.SpectralClustering(
-            n_clusters, random_state=42
-        ).fit(statement_embeddings)
-        print("clustering.labels_", clustering.labels_)
-        print("n_clusters:", n_clusters)
-
-        if spectral_plot:
-            # Set the figsize parameter to increase the figure size
-            fig, ax = plt.subplots(
-                figsize=(10, 6)
-            )  # You can adjust these values as needed
-            ax.tick_params(axis="both", which="major", labelsize=15)
-            ax.hist(clustering.labels_, bins=n_clusters)
-            ax.set_title(
-                f"Spectral Clustering of {prompt_approver_type} Statement Responses",
-                fontsize=20,
-            )
-            # Adjust layout to fit all elements
-            fig.tight_layout()
-            plt.show()
-            filename = f"{os.getcwd()}/data/results/plots/spectral_clustering_{prompt_approver_type}_statements.png"
-            fig.savefig(
-                filename, bbox_inches="tight"
-            )  # Use bbox_inches='tight' to fit the entire content
-            print(f"Saved plot to {filename}")
-            plt.close("all")
-        return clustering
 
     def get_cluster_approval_stats(
         self, approvals_statements_and_embeddings, cluster_labels, cluster_ID
@@ -162,23 +155,14 @@ class Clustering:
             with open(clustering_pickle_path, "wb") as file:
                 pickle.dump(statement_clustering, file)
 
-        clusters_desc_table = [
-            [
-                "ID",
-                "N",
-                "Google Chat",
-                "Bing Chat",
-                "Bing Chat Emojis",
-                "Bing Chat Janus",
-                "Inputs Themes",
-            ]
-        ]
+        header_labels = ["ID", "N"] + prompt_labels + ["Inputs Themes"]
+        clusters_desc_table = [header_labels]
         self.create_cluster_table(
-            clusters_desc_table, rows, table_pickle_path, "personas"
+            clusters_desc_table, rows, table_pickle_path, prompt_approver_type
         )
 
     def create_cluster_table(
-        self, clusters_desc_table, rows, table_pickle_path, table_type
+        self, clusters_desc_table, rows, table_pickle_path, prompt_approver_type
     ):
         clusters_desc_table = clusters_desc_table + rows
         t = AsciiTable(clusters_desc_table)
@@ -190,9 +174,7 @@ class Clustering:
             pickle.dump(clusters_desc_table, file)
 
         # Save the table in a CSV format for easy visualization in VSCode
-        csv_file_path = (
-            f"{os.getcwd()}/data/results/tables/cluster_results_table_{table_type}.csv"
-        )
+        csv_file_path = f"{os.getcwd()}/data/results/tables/cluster_results_table_{prompt_approver_type}.csv"
         with open(csv_file_path, mode="w", newline="", encoding="utf-8") as file:
             writer = csv.writer(file)
             writer.writerows(clusters_desc_table)
