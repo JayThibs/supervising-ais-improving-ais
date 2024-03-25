@@ -384,22 +384,18 @@ class EvaluatorPipeline:
         return joint_embeddings_all_llms
 
     def run_clustering(self, combined_embeddings):
-        print("Running clustering...")
-        self.clustering_results = self.clustering_obj.perform_multiple_clustering(
-            combined_embeddings
-        )
-        print("Analyzing clusters...")
         file_loaded, chosen_clustering = load_pkl_or_not(
             "chosen_clustering.pkl", self.pickle_dir, self.reuse_embedding_clustering
         )
         if not file_loaded:
-            chosen_clustering = self.generate_and_save_chosen_clustering()
-        return chosen_clustering
-
-    def generate_and_save_chosen_clustering(self):
-        chosen_clustering = self.clustering_results["KMeans"]
-        with open(f"{self.pickle_dir}/chosen_clustering.pkl", "wb") as f:
-            pickle.dump(chosen_clustering, f)
+            print("Running clustering...")
+            self.clustering_results = self.clustering_obj.cluster_embeddings(
+                combined_embeddings, multiple=True
+            )
+            print("Choosing clustering method... (KMeans is default)")
+            chosen_clustering = self.clustering_results["KMeans"]
+            with open(f"{self.pickle_dir}/chosen_clustering.pkl", "wb") as f:
+                pickle.dump(chosen_clustering, f)
         return chosen_clustering
 
     def analyze_response_embeddings_clusters(
@@ -525,60 +521,35 @@ class EvaluatorPipeline:
             pickle.dump(rows, f)
         return rows
 
-    def run_approvals_clustering(
-        self, statement_embeddings, approvals_statements_and_embeddings, prompt_type
-    ):
-        """
-        Cluster the statement embeddings based on the prompt_type (personas or awareness) approvals.
-        """
-        statement_clustering = self.clustering_obj.cluster_statement_embeddings(
-            statement_embeddings,
-            prompt_approver_type=prompt_type.capitalize(),
-            n_clusters=120,
-            spectral_plot=False if "spectral" in self.hide_plots else True,
-        )
-        prompt_dict = {
-            k: v for k, v in self.approval_prompts.items() if k == prompt_type
-        }  # { "personas": { "google_chat_desc": [ "prompt"], "bing_chat_desc": [...], ...} }
-        self.clustering_obj.cluster_approval_stats(
-            approvals_statements_and_embeddings,
-            statement_clustering,
-            self.all_model_info,
-            prompt_dict=prompt_dict,
-            reuse_cluster_rows=self.reuse_cluster_rows,
-        )
-        return statement_clustering
-
     def perform_hierarchical_clustering(
-        self, statement_clustering, approvals_statements_and_embeddings, rows
+        self,
+        statement_clustering,
+        approvals_statements_and_embeddings,
+        rows,
+        prompt_type,
+        reuse_hierarchical_approvals,
     ):
         print("Calculating hierarchical cluster data...")
         file_loaded, hierarchy_data = load_pkl_or_not(
-            "hierarchy_approval_data.pkl",
+            f"hierarchy_approval_data_{prompt_type}.pkl",
             self.pickle_dir,
-            self.reuse_hierarchical_approvals,
+            reuse_hierarchical_approvals,
         )
         if not file_loaded:
-            hierarchy_data = self.generate_and_save_hierarchical_data(
-                statement_clustering, approvals_statements_and_embeddings, rows
+            hierarchy_data = self.clustering_obj.calculate_hierarchical_cluster_data(
+                statement_clustering,
+                approvals_statements_and_embeddings,
+                rows,
             )
+            with open(
+                f"{self.pickle_dir}/hierarchy_approval_data_{prompt_type}.pkl", "wb"
+            ) as f:
+                pickle.dump(hierarchy_data, f)
 
-        return hierarchy_data
-
-    def generate_and_save_hierarchical_data(
-        self, statement_clustering, rows, approvals_statements_and_embeddings
-    ):
-        hierarchy_data = self.clustering_obj.calculate_hierarchical_cluster_data(
-            statement_clustering,
-            approvals_statements_and_embeddings,
-            rows,
-        )
-        with open(f"{self.pickle_dir}/hierarchy_approval_data.pkl", "wb") as f:
-            pickle.dump(hierarchy_data, f)
         return hierarchy_data
 
     def visualize_hierarchical_clusters(
-        self, *, model_names, hierarchy_data, plot_type
+        self, *, model_names, hierarchy_data, plot_type, labels
     ):
         """
         Visualizes hierarchical clusters for the given plot type.
@@ -592,9 +563,6 @@ class EvaluatorPipeline:
             for model_name in model_names:
                 filename = (
                     f"{self.viz_dir}/hierarchical_clustering_{plot_type}_{model_name}"
-                )
-                labels = (
-                    self.viz.personas if plot_type == "approval" else self.viz.awareness
                 )
                 print(f"Visualizing hierarchical cluster for {model_name}...")
                 self.viz.visualize_hierarchical_cluster(
@@ -668,27 +636,6 @@ class EvaluatorPipeline:
                     filename=f"{approval_filename}",
                     title=f"Embeddings of {condition_title} for {prompt_approver_type} responses",
                 )
-
-    def calculate_and_save_hierarchical_data(
-        self,
-        statement_clustering,
-        data_include_statements_and_embeddings_4_prompts,
-        rows,
-    ):
-        file_loaded, hierarchy_data = load_pkl_or_not(
-            "hierarchy_awareness_data.pkl",
-            self.pickle_dir,
-            self.reuse_hierarchical_awareness,
-        )
-        if not file_loaded:
-            hierarchy_data = self.clustering_obj.calculate_hierarchical_cluster_data(
-                statement_clustering,
-                data_include_statements_and_embeddings_4_prompts,
-                rows,
-            )
-            with open(f"{self.pickle_dir}/hierarchy_awareness_data.pkl", "wb") as f:
-                pickle.dump(hierarchy_data, f)
-        return hierarchy_data
 
     def run_evaluations(self):
         """Steps to run the evaluation pipeline.
@@ -811,26 +758,28 @@ class EvaluatorPipeline:
             prompt_approver_type="Awareness",
             spectral_plot=False if "spectral" in self.hide_plots else True,
         )
-        # Visualize awareness embeddings
-        if "awareness" not in self.hide_plots:
-            self.visualize_approval_embeddings(
-                model_names,
-                dim_reduce_tsne,
-                approval_data_awareness_prompts,
-                prompt_approver_type="awareness",
-            )
+        # # Visualize awareness embeddings
+        # if "awareness" not in self.hide_plots:
+        #     self.visualize_approval_embeddings(
+        #         model_names,
+        #         dim_reduce_tsne,
+        #         approval_data_awareness_prompts,
+        #         prompt_approver_type="awareness",
+        #     )
         # Create or load the cluster rows
         # Calculate and save hierarchical data
-        print("Calculating hierarchical cluster data for awareness prompts...")
-        hierarchy_data = self.calculate_and_save_hierarchical_data(
-            statement_clustering, approval_data_awareness_prompts, rows
-        )
-        print("Visualizing hierarchical cluster...")
-        self.visualize_hierarchical_clusters(
-            model_names=model_names,
-            hierarchy_data=hierarchy_data,
-            plot_type="awareness",
-        )
+        # print("Calculating hierarchical cluster data for awareness prompts...")
+        # hierarchy_data = self.perform_hierarchical_clustering(
+        #     statement_clustering,
+        #     approval_data_awareness_prompts,
+        #     rows,
+        # )
+        # print("Visualizing hierarchical cluster...")
+        # self.visualize_hierarchical_clusters(
+        #     model_names=model_names,
+        #     hierarchy_data=hierarchy_data,
+        #     plot_type="awareness",
+        # )
 
         # The Approval Persona prompts and Awareness prompts sections are similar, so we can refactor them into a single function where we loop over the type of prompts created in the json file. So, the following code should be able to run n number of prompts for m number of models and p number of prompt types (e.g. personas, awareness, etc.).
         # In order to do this, we will need to refactor some of the functions used for both prompt types to be more general. We will also need to allow for iterating over the models we want to evaluate.
@@ -862,18 +811,47 @@ class EvaluatorPipeline:
                     approvals_statements_and_embeddings,
                     prompt_approver_type=prompt_type,
                 )
-            statement_clustering = self.run_approvals_clustering(
-                statement_embeddings,
+            prompt_dict = {
+                k: v for k, v in self.approval_prompts.items() if k == prompt_type
+            }  # { "personas": { "google_chat_desc": [ "prompt"], "bing_chat_desc": [...], ...} }
+            prompt_labels = list(prompt_dict.keys())
+
+            print(f"Clustering statement embeddings...")
+            n_clusters = 120
+            if "statement_clustering" not in locals():
+                statement_clustering = self.clustering_obj.cluster_statement_embeddings(
+                    statement_embeddings,
+                    prompt_approver_type=prompt_type.capitalize(),
+                    n_clusters=n_clusters,
+                    spectral_plot=False if "spectral" in self.hide_plots else True,
+                )
+            if "spectral" not in self.hide_plots:
+                self.viz.plot_spectral_clustering(
+                    statement_clustering.labels_,
+                    n_clusters=120,
+                    prompt_approver_type=prompt_type.capitalize(),
+                )
+            self.clustering_obj.cluster_approval_stats(
                 approvals_statements_and_embeddings,
-                prompt_labels=self.approval_prompts[prompt_type].keys(),
+                statement_clustering,
+                self.all_model_info,
+                prompt_dict=prompt_dict,
+                reuse_cluster_rows=self.reuse_cluster_rows,
             )
+            print(f"Calculating hierarchical cluster data for {prompt_type} prompts...")
             hierarchy_data = self.perform_hierarchical_clustering(
-                statement_clustering, approvals_statements_and_embeddings, rows
+                statement_clustering,
+                approvals_statements_and_embeddings,
+                rows,
+                prompt_type,
+                reuse_hierarchical_approvals=self.reuse_hierarchical_approvals,
             )
+            print(f"Visualizing hierarchical cluster for {prompt_type} prompts...")
             self.visualize_hierarchical_clusters(
                 model_names=model_names,
                 hierarchy_data=hierarchy_data,
                 plot_type=prompt_type,
+                labels=prompt_labels,
             )
 
         print("Done. Please check the results directory for the plots.")
