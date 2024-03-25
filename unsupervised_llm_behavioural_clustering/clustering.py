@@ -240,6 +240,93 @@ class Clustering:
             n_clusters,
         )
 
+    def analyze_clusters(
+        self, chosen_clustering, joint_embeddings_all_llms, query_results
+    ):
+        rows = []
+        n_clusters = max(chosen_clustering.labels_) + 1
+        print(f"n_clusters: {n_clusters}")
+
+        print("Analyzing clusters...")
+        for cluster_id in tqdm(range(n_clusters)):
+            print(f"Analyzing cluster {cluster_id}...")
+            print(f"Cluster {cluster_id} size: {len(joint_embeddings_all_llms)}")
+            print(f"Cluster {cluster_id} labels: {chosen_clustering.labels_}")
+            row = self.get_cluster_row(
+                cluster_id,
+                chosen_clustering.labels_,
+                joint_embeddings_all_llms,
+                query_results,
+            )
+            rows.append(row)
+            # this should be a list of lists where each row is a cluster
+
+        rows = sorted(rows, key=lambda x: x[1], reverse=True)
+        print(f"rows: {rows}")
+        return rows
+
+    def get_cluster_row(
+        self, cluster_id, labels, joint_embeddings_all_llms, query_results
+    ):
+        """Generates a row that represents a cluster's statistics and themes."""
+        row = [str(cluster_id)]
+
+        # Find the indices of items in this cluster
+        cluster_indices = np.where(labels == cluster_id)[0]
+        row.append(len(cluster_indices))  # Number of items in the cluster
+
+        # Extract the inputs, responses, and model attribution fractions for this cluster
+        inputs, responses, model_attribution_fractions = self.get_cluster_stats(
+            joint_embeddings_all_llms, labels, cluster_id
+        )
+
+        # Add the model attribution fractions to the row
+        for frac in model_attribution_fractions:
+            row.append(f"{round(100 * frac, 1)}%")
+
+        # Identify themes within this cluster
+        # TODO: Make this work for multiple llms
+        for i in range(len(self.llms)):  # loop through llms
+            print(f"Identifying themes for LLM {i}...")
+            model_info = query_results[i]["model_info"]
+            print(f"inputs: {inputs}")
+            print(f"responses: {responses}")
+            print(f"model_info: {model_info}")
+            inputs_themes_str = identify_theme(inputs, model_info)
+            responses_themes_str = identify_theme(responses, model_info)
+
+            interactions = [
+                f'(Statement: "{input}", Response: "{response}")'
+                for input, response in zip(inputs, responses)
+            ]
+            interactions_themes_str = identify_theme(interactions, model_info)
+
+            print(f"interactions: {interactions}")
+            print(f"inputs_themes_str: {inputs_themes_str}")
+            # Add themes to the row
+            row.append(inputs_themes_str)
+            row.append(responses_themes_str)
+            row.append(interactions_themes_str)
+        print(f"row: {row}")
+        return row
+
+    def get_cluster_stats(self, joint_embeddings_all_llms, cluster_labels, cluster_ID):
+        inputs = []
+        responses = []
+        cluster_size = 0
+        n_llms = int(max([e[0] for e in joint_embeddings_all_llms]))
+        fractions = [0 for _ in range(n_llms + 1)]
+        n_datapoints = len(joint_embeddings_all_llms)
+        for e, l in zip(joint_embeddings_all_llms, cluster_labels):
+            if l != cluster_ID:
+                continue
+            if e[0] >= 0:
+                fractions[e[0]] += 1
+            cluster_size += 1
+            inputs.append(e[1])
+            responses.append(e[2])
+        return inputs, responses, [f / cluster_size for f in fractions]
+
     def compile_cluster_table(
         self,
         clustering,
@@ -248,9 +335,9 @@ class Clustering:
         theme_summary_instructions="Briefly list the common themes of the following texts:",
         max_desc_length=250,
     ):
+        rows = []
         n_clusters = max(clustering.labels_) + 1
 
-        rows = []
         for cluster_id in tqdm(range(n_clusters)):
             row = [str(cluster_id)]
             cluster_indices = np.arange(len(clustering.labels_))[
