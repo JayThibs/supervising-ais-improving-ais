@@ -106,6 +106,7 @@ class Visualization:
         self,
         dim_reduce,
         approval_data,
+        model_name,
         condition: int,
         plot_type: str,
         filename: str,
@@ -123,9 +124,9 @@ class Visualization:
         for i in range(n_persona):
             print(f"num i: {i}")
             for e in approval_data:
-                print(f"e[0]: {e[0]}")
-                print(f"e[0][i]: {e[0][i]}")
-            mask = np.array([e[0][i] == condition for e in approval_data])
+                print(f"e[0]: {e[0][model_name]}")
+                print(f"e[0][i]: {e[0][model_name][i]}")
+            mask = np.array([e[0][model_name][i] == condition for e in approval_data])
             masks.append(mask)
             print(f"mask for persona {i}: {mask}")
         ax.scatter(dim_reduce[:, 0], dim_reduce[:, 1], c="grey", s=10, alpha=0.5)
@@ -230,27 +231,6 @@ class Visualization:
         plt.tight_layout()
         plt.savefig(f"{filename}.png")
         plt.savefig(f"{filename}.svg", format="svg")
-
-    def visualize_awareness(
-        self,
-        dim_reduce_tsne,
-        data_include_statements_and_embeddings_4_prompts,
-        condition,
-        title,
-        filename="awareness.png",
-    ):
-        colors, shapes, labels, sizes, order, fontsize = self.plot_aesthetics[
-            "awareness"
-        ].values()
-
-        self.plot_approvals(
-            dim_reduce_tsne,
-            data_include_statements_and_embeddings_4_prompts,
-            1,
-            "awareness",
-            "Embeddings of approvals for different chat modes",
-            order=order,
-        )
 
     def plot_spectral_clustering(self, labels, n_clusters, prompt_approver_type):
         # Set the figsize parameter to increase the figure size
