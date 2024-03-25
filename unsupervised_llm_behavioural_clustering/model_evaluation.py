@@ -29,7 +29,7 @@ class ModelEvaluation:
         system_message="",
         approve_strs=["yes"],
         disapprove_strs=["no"],
-    ):
+    ) -> list:
         approvals = []
         n_statements = len(statements)
         prompts = [prompt_template.format(statement=s) for s in statements]
