@@ -119,11 +119,6 @@ class Visualization:
         n_persona = len(labels)
         if order is None:
             order = [i for i in range(n_persona)]
-        print("approval_data length:", len(approval_data))
-        print("approval_data[3]:", approval_data[3])
-        print("approval_data[0][0]:", approval_data[0][0])
-        print("approval_data[0][0][0]:", approval_data[0][0][0])
-        print("n_persona:", n_persona)
         masks = []
         for i in range(n_persona):
             print(f"num i: {i}")
@@ -147,8 +142,7 @@ class Visualization:
         ax.legend()
         fig.savefig(os.path.join(self.save_path, filename))
         print(f"Saved plot to {os.path.join(self.save_path, filename)}")
-        # plt.show()
-        plt.close("all")
+        plt.show()
 
     def visualize_hierarchical_cluster(
         self,
