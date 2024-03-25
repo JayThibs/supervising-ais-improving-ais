@@ -460,14 +460,16 @@ class EvaluatorPipeline:
                 for model_family, model in self.llms:
                     model_approvals = []
                     for role_description in self.persona_approval_prompts:
-                        approvals_for_statements = self.model_eval.get_model_approvals(
-                            statements=self.text_subset,
-                            prompt_template=self.approval_question_prompt_template,
-                            model_family=model_family,
-                            model=model,
-                            system_message=role_description,
-                        )
-                        model_approvals.append(approvals_for_statements)
+                        list_of_approvals_for_statements = (
+                            self.model_eval.get_model_approvals(
+                                statements=self.text_subset,
+                                prompt_template=self.approval_question_prompt_template,
+                                model_family=model_family,
+                                model=model,
+                                system_message=role_description,
+                            )
+                        )  # [0, 1, 0, 1, -1, 0, ...]
+                        model_approvals.append(list_of_approvals_for_statements)
                     all_condition_approvals[model] = (
                         model_approvals  # {model_1: [approval1, approval2, ...], model_2: [approval1, approval2, ...], ... }
                     )
@@ -482,6 +484,8 @@ class EvaluatorPipeline:
                     )
             print(f"all_condition_approvals: {all_condition_approvals}")
 
+            # Store the approvals, statements, and embeddings in a list
+            # [ [{model_1: [approval_for_prompt_1, approval_for_prompt_2, ...], model_2: [approval_for_prompt_1, approval_for_prompt_2, ...], ...}, statement, embedding], ... ]
             approvals_statements_and_embeddings = []
             for i in range(len(self.text_subset)):
                 print(f"Approvals record {i}")
@@ -495,10 +499,9 @@ class EvaluatorPipeline:
                     record_approvals,
                     self.text_subset[i],
                     statement_embeddings[i],
-                ]
+                ]  # [ [{model_1: [0, 1, 0, 0]}, {model_2: [0, 0, 1, 0]}, ...], statement, embedding]
                 print(f"record: {record}")
                 approvals_statements_and_embeddings.append(record)
-                # [ [{model_1: [approval1, approval2, ...], model_2: [approval1, approval2, ...], ...}, statement, embedding], ... ]
                 pickle.dump(
                     approvals_statements_and_embeddings,
                     open(
@@ -576,42 +579,12 @@ class EvaluatorPipeline:
                     y_downshift=0,
                 )
 
-    def load_conditions_and_embeddings(
-        self,
-        emb_pkl_file="Anthropic_5000_random_statements_embs",
-    ):
-        with open(f"{self.pickle_dir}/conditions.pkl", "rb") as f:
-            be_nice_conditions = pickle.load(f)  # [ [1, 1, 1, -1 ], [0, 0, 0, 0], ... ]
-
-        with open(f"{self.pickle_dir}/{emb_pkl_file}.pkl", "rb") as f:
-            random_statements_embs = pickle.load(f)[
-                : self.n_statements
-            ]  # [ [statement, jsonl_filepath, [embedding]], ...]
-
-        return be_nice_conditions, random_statements_embs
-
-    def prepare_data_for_prompts(self, be_nice_conditions, random_statements_embs):
-        approval_data_with_personas = [[[], s[0], s[2]] for s in random_statements_embs]
-
-        for i, condition in enumerate(be_nice_conditions):
-            for record in condition:
-                if record == 0:
-                    approval_data_with_personas[i][0].append(0)
-                elif record == 1:
-                    approval_data_with_personas[i][0].append(1)
-                else:
-                    approval_data_with_personas[i][0].append(-1)
-
-        statement_embeddings = np.array([e[2] for e in approval_data_with_personas])
-
-        return approval_data_with_personas, statement_embeddings
-
     def visualize_approval_embeddings(
         self,
         model_names,
         dim_reduce_tsne,
         approval_data,
-        prompt_approver_type,  # "personas" or "awareness"
+        prompt_approver_type,  # "personas", "awareness", etc.
     ):
         for model_name in model_names:
             for condition in [1, 0, -1]:
@@ -743,21 +716,21 @@ class EvaluatorPipeline:
 
         ### Awareness prompts ###
         # Load conditions and embeddings
-        (
-            be_nice_conditions,
-            random_statements_embs,
-        ) = self.load_conditions_and_embeddings()
+        # (
+        #     be_nice_conditions,
+        #     random_statements_embs,
+        # ) = self.load_conditions_and_embeddings()
         # Prepare data for prompts
-        (
-            approval_data_awareness_prompts,
-            statement_embeddings,
-        ) = self.prepare_data_for_prompts(be_nice_conditions, random_statements_embs)
+        # (
+        #     approval_data_awareness_prompts,
+        #     statement_embeddings,
+        # ) = self.prepare_data_for_prompts(be_nice_conditions, random_statements_embs)
         # Cluster statement embeddings
-        statement_clustering = self.clustering_obj.cluster_statement_embeddings(
-            statement_embeddings,
-            prompt_approver_type="Awareness",
-            spectral_plot=False if "spectral" in self.hide_plots else True,
-        )
+        # statement_clustering = self.clustering_obj.cluster_statement_embeddings(
+        #     statement_embeddings,
+        #     prompt_approver_type="Awareness",
+        #     spectral_plot=False if "spectral" in self.hide_plots else True,
+        # )
         # # Visualize awareness embeddings
         # if "awareness" not in self.hide_plots:
         #     self.visualize_approval_embeddings(
