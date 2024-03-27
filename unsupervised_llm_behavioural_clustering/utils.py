@@ -158,8 +158,9 @@ def identify_theme(
     texts,
     model_info,
     sampled_texts=5,
-    temp=1,
-    max_tokens=50,
+    temp=0.5,
+    max_tokens=70,
+    max_total_tokens=250,
     instructions="Briefly describe the overall theme of the following texts. Do not give the theme of any individual text.",
 ):
     theme_identify_prompt = instructions + "\n\n"
@@ -178,7 +179,9 @@ def identify_theme(
     model_instance = initialize_model(model_info, temp, max_tokens)
     for i in range(20):
         try:
-            completion = model_instance.generate(theme_identify_prompt)
+            completion = model_instance.generate(theme_identify_prompt)[
+                :max_total_tokens
+            ].replace("\n", " ")
             break
         except:
             print("Skipping API error", i)
