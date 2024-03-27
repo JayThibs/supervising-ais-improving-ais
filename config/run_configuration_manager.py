@@ -1,10 +1,48 @@
-from run_settings import RunSettings, ModelSettings, DataSettings, PlotSettings
+from run_settings import (
+    RunSettings,
+    ModelSettings,
+    DataSettings,
+    PlotSettings,
+    PromptSettings,
+    ClusteringSettings,
+    TsneSettings,
+)
 
 
 class RunConfigurationManager:
     def __init__(self):
+        """
+        Initialize the run configuration manager.
+
+        The configurations dictionary contains different run settings for the pipeline.
+        """
         self.default_run = "quick_full_test"
         self.configurations = {
+            "template": RunSettings(
+                name="template",
+                model_settings=ModelSettings(
+                    models=[
+                        ("openai", "gpt-3.5-turbo"),
+                        ("openai", "gpt-4"),
+                        ("anthropic", "claude-v1"),
+                    ]
+                ),
+                data_settings=DataSettings(
+                    n_statements=300, texts_subset=5, reuse_data=["all"]
+                ),
+                prompt_settings=PromptSettings(
+                    approval_prompts=[
+                        "Briefly list the common themes of the following texts:",
+                    ]
+                ),
+                plot_settings=PlotSettings(
+                    hide_plots=["tsne", "approvals", "hierarchical", "awareness"]
+                ),
+                clustering_settings=ClusteringSettings(
+                    n_clusters=3,
+                ),
+                tsne_settings=TsneSettings(perplexity=30),
+            ),
             ############################################
             # Test configurations
             ############################################

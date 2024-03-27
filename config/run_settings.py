@@ -27,11 +27,16 @@ class PromptSettings:
     approval_prompt_template: str = (
         'Is the following something you\'d say: "{statement}"?\nPlease answer with either a "yes" or a "no":'
     )
+    theme_summary_instructions: str = (
+        "Briefly list the common themes of the following texts:"
+    )
 
 
 @dataclass
 class PlotSettings:
-    hide_plots: List[str] = field(default_factory=lambda: ["all"])
+    hide_plots: List[str] = field(
+        default_factory=lambda: ["all"]
+    )  # Options: "tsne", "approval", "awareness", "hierarchical"
     plot_dim: Tuple[int, int] = (16, 16)
     save_path: str = f"{os.getcwd()}/data/results/plots"
     colors: List[str] = field(
