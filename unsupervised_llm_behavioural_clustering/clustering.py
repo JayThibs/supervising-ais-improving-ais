@@ -83,25 +83,6 @@ class Clustering:
             centroids.append(c)
         return np.array(centroids)
 
-    def get_cluster_approval_stats(
-        self, approvals_statements_and_embeddings, cluster_labels, cluster_ID
-    ):
-        """Analyzes a cluster and extracts aggregated approval statistics."""
-        inputs = []
-        responses = []
-        cluster_size = 0
-        n_conditions = len(approvals_statements_and_embeddings[0][0])
-        approval_fractions = [0 for _ in range(n_conditions)]
-        for e, l in zip(approvals_statements_and_embeddings, cluster_labels):
-            if l != cluster_ID:
-                continue
-            for i in range(n_conditions):
-                if e[0][i] == 1:
-                    approval_fractions[i] += 1
-            cluster_size += 1
-            inputs.append(e[1])
-        return inputs, [f / cluster_size for f in approval_fractions]
-
     def cluster_approval_stats(
         self,
         approvals_statements_and_embeddings,
@@ -240,21 +221,19 @@ class Clustering:
             n_clusters,
         )
 
-    def analyze_clusters(
-        self, chosen_clustering, joint_embeddings_all_llms, query_results
-    ):
+    def analyze_clusters(self, clustering, joint_embeddings_all_llms, query_results):
         rows = []
-        n_clusters = max(chosen_clustering.labels_) + 1
+        n_clusters = max(clustering.labels_) + 1
         print(f"n_clusters: {n_clusters}")
 
         print("Analyzing clusters...")
         for cluster_id in tqdm(range(n_clusters)):
             print(f"Analyzing cluster {cluster_id}...")
             print(f"Cluster {cluster_id} size: {len(joint_embeddings_all_llms)}")
-            print(f"Cluster {cluster_id} labels: {chosen_clustering.labels_}")
+            print(f"Cluster {cluster_id} labels: {clustering.labels_}")
             row = self.get_cluster_row(
                 cluster_id,
-                chosen_clustering.labels_,
+                clustering.labels_,
                 joint_embeddings_all_llms,
                 query_results,
             )
@@ -266,7 +245,12 @@ class Clustering:
         return rows
 
     def get_cluster_row(
-        self, cluster_id, labels, joint_embeddings_all_llms, query_results
+        self,
+        cluster_id,
+        labels,
+        joint_embeddings_all_llms,
+        query_results,
+        include_responses_and_interactions=True,
     ):
         """Generates a row that represents a cluster's statistics and themes."""
         row = [str(cluster_id)]
@@ -285,47 +269,86 @@ class Clustering:
             row.append(f"{round(100 * frac, 1)}%")
 
         # Identify themes within this cluster
-        # TODO: Make this work for multiple llms
         for i in range(len(self.llms)):  # loop through llms
             print(f"Identifying themes for LLM {i}...")
             model_info = query_results[i]["model_info"]
             print(f"inputs: {inputs}")
-            print(f"responses: {responses}")
             print(f"model_info: {model_info}")
             inputs_themes_str = identify_theme(inputs, model_info)
-            responses_themes_str = identify_theme(responses, model_info)
 
-            interactions = [
-                f'(Statement: "{input}", Response: "{response}")'
-                for input, response in zip(inputs, responses)
-            ]
-            interactions_themes_str = identify_theme(interactions, model_info)
-
-            print(f"interactions: {interactions}")
-            print(f"inputs_themes_str: {inputs_themes_str}")
-            # Add themes to the row
+            # Add input themes to the row
             row.append(inputs_themes_str)
-            row.append(responses_themes_str)
-            row.append(interactions_themes_str)
+
+            if include_responses_and_interactions:
+                print(f"responses: {responses}")
+                responses_themes_str = identify_theme(responses, model_info)
+
+                interactions = [
+                    f'(Statement: "{input}", Response: "{response}")'
+                    for input, response in zip(inputs, responses)
+                ]
+                interactions_themes_str = identify_theme(interactions, model_info)
+
+                print(f"interactions: {interactions}")
+
+                # Add response and interaction themes to the row
+                row.append(responses_themes_str)
+                row.append(interactions_themes_str)
+
         print(f"row: {row}")
         return row
 
-    def get_cluster_stats(self, joint_embeddings_all_llms, cluster_labels, cluster_ID):
+    def get_cluster_stats(
+        self,
+        data,
+        cluster_labels,
+        cluster_ID,
+        data_type="joint_embeddings",
+        include_responses=True,
+    ):
+        """
+        Analyzes a cluster and extracts aggregated statistics.
+
+        data_type can be "joint_embeddings" or "approvals".
+        """
         inputs = []
         responses = []
         cluster_size = 0
-        n_llms = int(max([e[0] for e in joint_embeddings_all_llms]))
-        fractions = [0 for _ in range(n_llms + 1)]
-        n_datapoints = len(joint_embeddings_all_llms)
-        for e, l in zip(joint_embeddings_all_llms, cluster_labels):
+
+        if data_type == "joint_embeddings":
+            n_categories = int(max([e[0] for e in data])) + 1  # number of models
+        elif data_type == "approvals":
+            n_categories = len(
+                list(data[0][0].values())[0]
+            )  # number of approval prompts
+        else:
+            raise ValueError(f"Unsupported data type: {data_type}")
+
+        fractions = [0 for _ in range(n_categories)]
+
+        for e, l in zip(data, cluster_labels):
             if l != cluster_ID:
                 continue
-            if e[0] >= 0:
-                fractions[e[0]] += 1
+
             cluster_size += 1
             inputs.append(e[1])
-            responses.append(e[2])
-        return inputs, responses, [f / cluster_size for f in fractions]
+
+            if data_type == "joint_embeddings":
+                if e[0] >= 0:
+                    fractions[e[0]] += 1
+                if include_responses:
+                    responses.append(e[2])
+            elif data_type == "approvals":
+                for i in range(n_categories):
+                    if e[0][i] == 1:
+                        fractions[i] += 1
+
+        fractions = [f / cluster_size for f in fractions]
+
+        if data_type == "joint_embeddings" and include_responses:
+            return inputs, responses, fractions
+        else:
+            return inputs, fractions
 
     def compile_cluster_table(
         self,
@@ -347,8 +370,12 @@ class Clustering:
             print("Cluster", cluster_id)
             print(approvals_statements_and_embeddings)
             print("cluster_indices", clustering.labels_)
-            inputs, model_approval_fractions = self.get_cluster_approval_stats(
-                approvals_statements_and_embeddings, clustering.labels_, cluster_id
+            inputs, model_approval_fractions = self.get_cluster_stats(
+                approvals_statements_and_embeddings,
+                clustering.labels_,
+                cluster_id,
+                data_type="approvals",
+                include_responses=False,
             )
             for frac in model_approval_fractions:
                 row.append(str(round(100 * frac, 1)) + "%")
