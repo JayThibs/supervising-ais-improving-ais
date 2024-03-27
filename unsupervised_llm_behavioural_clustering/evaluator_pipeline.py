@@ -12,6 +12,13 @@ from clustering import Clustering
 from utils import embed_texts, load_pkl_or_not, query_model_on_statements
 from typing import List, Dict, Any
 from dataclasses import dataclass
+from config.run_configuration_manager import run_configurations
+from config.run_settings import (
+    RunConfiguration,
+    ModelSettings,
+    DataSettings,
+    PlotSettings,
+)
 
 
 @dataclass
@@ -99,7 +106,8 @@ class EvaluatorPipeline:
 
         # Set up objects
         self.model_eval = ModelEvaluation(args, self.llms)
-        self.viz = Visualization(save_path=self.viz_dir)
+        plot_settings = PlotSettings()
+        self.viz = Visualization(plot_settings)
         self.clustering_obj = Clustering(self.args)
 
         if self.args.new_generation:
@@ -389,11 +397,11 @@ class EvaluatorPipeline:
         )
         if not file_loaded:
             print("Running clustering...")
-            self.clustering_results = self.clustering_obj.cluster_embeddings(
+            clustering_results = self.clustering_obj.cluster_embeddings(
                 combined_embeddings, multiple=True
             )
             print("Choosing clustering method... (KMeans is default)")
-            chosen_clustering = self.clustering_results["KMeans"]
+            chosen_clustering = clustering_results["KMeans"]
             with open(f"{self.pickle_dir}/chosen_clustering.pkl", "wb") as f:
                 pickle.dump(chosen_clustering, f)
         return chosen_clustering
@@ -642,108 +650,122 @@ class EvaluatorPipeline:
         self.text_subset, all_query_results = self.generate_responses()
         self.all_model_info = self.collect_model_info(all_query_results)
         model_names = [llm[1] for llm in self.llms]
-        tsne_filename = self.generate_plot_filename(
-            model_names, "tsne_embedding_responses"
-        )
-        # Embed model responses to statement prompts
-        # joint_embeddings_all_llms: [ [model_id, input, response, statement_embedding, model_name], ... ]
-        joint_embeddings_all_llms, combined_embeddings = self.embed_responses(
-            all_query_results
-        )
-        dim_reduce_tsne = self.perform_tsne_dimensionality_reduction(
-            combined_embeddings
-        )
-        self.visualize_results(
-            dim_reduce_tsne, joint_embeddings_all_llms, model_names, tsne_filename
-        )
-        chosen_clustering = self.run_clustering(combined_embeddings)
 
-        labels = chosen_clustering.labels_
-        print(f"labels: {labels}")
-        plt.hist(labels, bins=5)
-        # plt.show()
-        # plt.close()
+        if "model_comparison" not in self.args.skip_sections:
+            tsne_filename = self.generate_plot_filename(
+                model_names, "tsne_embedding_responses"
+            )
+            # Embed model responses to statement prompts
+            # joint_embeddings_all_llms: [ [model_id, input, response, statement_embedding, model_name], ... ]
+            joint_embeddings_all_llms, combined_embeddings = self.embed_responses(
+                all_query_results
+            )
+            dim_reduce_tsne = self.perform_tsne_dimensionality_reduction(
+                combined_embeddings
+            )
+            self.visualize_results(
+                dim_reduce_tsne, joint_embeddings_all_llms, model_names, tsne_filename
+            )
+            chosen_clustering = self.run_clustering(combined_embeddings)
 
-        rows = self.analyze_response_embeddings_clusters(
-            chosen_clustering, joint_embeddings_all_llms, self.all_model_info
-        )
-        clusters_desc_table = [
-            ["ID", "N", "Inputs Themes", "Responses Themes", "Interaction Themes"]
-        ]
-        table_pickle_path = f"{self.pickle_dir}/clusters_desc_table_personas.pkl"
-        self.clustering_obj.create_cluster_table(
-            clusters_desc_table, rows, table_pickle_path, "response_comparisons"
-        )
+            labels = chosen_clustering.labels_
+            print(f"labels: {labels}")
+            plt.hist(labels, bins=5)
+            # plt.show()
+            # plt.close()
+
+            rows = self.analyze_response_embeddings_clusters(
+                chosen_clustering, joint_embeddings_all_llms, self.all_model_info
+            )
+            clusters_desc_table = [
+                ["ID", "N", "Inputs Themes", "Responses Themes", "Interaction Themes"]
+            ]
+            table_pickle_path = f"{self.pickle_dir}/clusters_desc_table_personas.pkl"
+            self.clustering_obj.create_cluster_table(
+                clusters_desc_table, rows, table_pickle_path, "response_comparisons"
+            )
 
         # The Approval Persona prompts and Awareness prompts sections are similar, so we can refactor them into a single function where we loop over the type of prompts created in the json file. So, the following code should be able to run n number of prompts for m number of models and p number of prompt types (e.g. personas, awareness, etc.).
         # In order to do this, we will need to refactor some of the functions used for both prompt types to be more general. We will also need to allow for iterating over the models we want to evaluate.
-        for prompt_type in self.approval_prompts.keys():
-            print(f"prompt_type: {prompt_type}")  # e.g. "personas", "awareness", etc.
-            # approvals_statements_and_embeddings: # [ [{model_1: [approval1, approval2, ...], model_2: [approval1, approval2, ...], ...}, statement, embedding], ... ]
-            approvals_statements_and_embeddings = self.load_or_generate_approvals_data(
-                approvals_type=prompt_type,
-                reuse_approvals=self.reuse_approvals,
-            )
-            if "statement_embeddings" not in locals():
-                statement_embeddings = np.array(
-                    [approval[2] for approval in approvals_statements_and_embeddings]
+        if "approvals" not in self.args.skip_sections:
+            for prompt_type in self.approval_prompts.keys():
+                print(
+                    f"prompt_type: {prompt_type}"
+                )  # e.g. "personas", "awareness", etc.
+                # approvals_statements_and_embeddings: # [ [{model_1: [approval1, approval2, ...], model_2: [approval1, approval2, ...], ...}, statement, embedding], ... ]
+                approvals_statements_and_embeddings = (
+                    self.load_or_generate_approvals_data(
+                        approvals_type=prompt_type,
+                        reuse_approvals=self.reuse_approvals,
+                    )
                 )
+                if "statement_embeddings" not in locals():
+                    statement_embeddings = np.array(
+                        [
+                            approval[2]
+                            for approval in approvals_statements_and_embeddings
+                        ]
+                    )
 
-            if "dim_reduce_tsne" not in locals():
-                print("Performing dimensionality reduction...")
-                dim_reduce_tsne = self.model_eval.tsne_dimension_reduction(
-                    statement_embeddings, iterations=2000, perplexity=self.perplexity
-                )
+                if "dim_reduce_tsne" not in locals():
+                    print("Performing dimensionality reduction...")
+                    dim_reduce_tsne = self.model_eval.tsne_dimension_reduction(
+                        statement_embeddings,
+                        iterations=2000,
+                        perplexity=self.perplexity,
+                    )
 
-            # Visualize approval embeddings
-            if prompt_type not in self.hide_plots or "all" in self.hide_plots:
-                self.visualize_approval_embeddings(
-                    model_names,
-                    dim_reduce_tsne,
+                # Visualize approval embeddings
+                if prompt_type not in self.hide_plots or "all" in self.hide_plots:
+                    self.visualize_approval_embeddings(
+                        model_names,
+                        dim_reduce_tsne,
+                        approvals_statements_and_embeddings,
+                        prompt_approver_type=prompt_type,
+                    )
+                prompt_dict = {
+                    k: v for k, v in self.approval_prompts.items() if k == prompt_type
+                }  # { "personas": { "google_chat_desc": [ "prompt"], "bing_chat_desc": [...], ...} }
+                prompt_labels = list(prompt_dict.keys())
+
+                print(f"Clustering statement embeddings...")
+                n_clusters = 120
+                if "statement_clustering" not in locals():
+                    statement_clustering = self.clustering_obj.cluster_embeddings(
+                        statement_embeddings,
+                        clustering_algorithm="SpectralClustering",
+                        n_clusters=n_clusters,
+                        multiple=False,
+                    )
+                if "spectral" not in self.hide_plots:
+                    self.viz.plot_spectral_clustering(
+                        statement_clustering.labels_,
+                        n_clusters=n_clusters,
+                        prompt_approver_type=prompt_type.capitalize(),
+                    )
+                self.clustering_obj.cluster_approval_stats(
                     approvals_statements_and_embeddings,
-                    prompt_approver_type=prompt_type,
+                    statement_clustering,
+                    self.all_model_info,
+                    prompt_dict=prompt_dict,
+                    reuse_cluster_rows=self.reuse_cluster_rows,
                 )
-            prompt_dict = {
-                k: v for k, v in self.approval_prompts.items() if k == prompt_type
-            }  # { "personas": { "google_chat_desc": [ "prompt"], "bing_chat_desc": [...], ...} }
-            prompt_labels = list(prompt_dict.keys())
-
-            print(f"Clustering statement embeddings...")
-            n_clusters = 120
-            if "statement_clustering" not in locals():
-                statement_clustering = self.clustering_obj.cluster_embeddings(
-                    statement_embeddings,
-                    cluster_type="SpectralClustering",
-                    n_clusters=n_clusters,
-                    multiple=False,
+                print(
+                    f"Calculating hierarchical cluster data for {prompt_type} prompts..."
                 )
-            if "spectral" not in self.hide_plots:
-                self.viz.plot_spectral_clustering(
-                    statement_clustering.labels_,
-                    n_clusters=n_clusters,
-                    prompt_approver_type=prompt_type.capitalize(),
+                hierarchy_data = self.perform_hierarchical_clustering(
+                    statement_clustering,
+                    approvals_statements_and_embeddings,
+                    rows,
+                    prompt_type,
+                    reuse_hierarchical_approvals=self.reuse_hierarchical_approvals,
                 )
-            self.clustering_obj.cluster_approval_stats(
-                approvals_statements_and_embeddings,
-                statement_clustering,
-                self.all_model_info,
-                prompt_dict=prompt_dict,
-                reuse_cluster_rows=self.reuse_cluster_rows,
-            )
-            print(f"Calculating hierarchical cluster data for {prompt_type} prompts...")
-            hierarchy_data = self.perform_hierarchical_clustering(
-                statement_clustering,
-                approvals_statements_and_embeddings,
-                rows,
-                prompt_type,
-                reuse_hierarchical_approvals=self.reuse_hierarchical_approvals,
-            )
-            print(f"Visualizing hierarchical cluster for {prompt_type} prompts...")
-            self.visualize_hierarchical_clusters(
-                model_names=model_names,
-                hierarchy_data=hierarchy_data,
-                plot_type=prompt_type,
-                labels=prompt_labels,
-            )
+                print(f"Visualizing hierarchical cluster for {prompt_type} prompts...")
+                self.visualize_hierarchical_clusters(
+                    model_names=model_names,
+                    hierarchy_data=hierarchy_data,
+                    plot_type=prompt_type,
+                    labels=prompt_labels,
+                )
 
         print("Done. Please check the results directory for the plots.")
