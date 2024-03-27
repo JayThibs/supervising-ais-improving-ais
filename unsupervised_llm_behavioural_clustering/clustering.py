@@ -294,7 +294,8 @@ class Clustering:
             row.append(f"{round(100 * frac, 1)}%")
 
         # Identify themes within this cluster
-        for i in range(len(self.llms)):  # loop through llms
+        n_llms = len(all_model_info)
+        for i in range(n_llms):  # loop through llms
             print(f"Identifying themes for LLM {i}...")
             model_info = all_model_info[i]
             print(f"inputs: {inputs}")
