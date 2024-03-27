@@ -373,7 +373,7 @@ class EvaluatorPipeline:
                     texts=responses, model=embedding_model
                 )
                 joint_embeddings = [
-                    i + r for i, r in zip(inputs_embeddings, responses_embeddings)
+                    inp + r for inp, r in zip(inputs_embeddings, responses_embeddings)
                 ]
             for input, response, embedding in zip(inputs, responses, joint_embeddings):
                 joint_embeddings_all_llms.append([i, input, response, embedding, model])
@@ -645,6 +645,7 @@ class EvaluatorPipeline:
             model_names, "tsne_embedding_responses"
         )
         # Embed model responses to statement prompts
+        # joint_embeddings_all_llms: [ [model_id, input, response, statement_embedding, model_name], ... ]
         joint_embeddings_all_llms, combined_embeddings = self.embed_responses(
             all_query_results
         )
