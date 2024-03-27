@@ -14,6 +14,7 @@ print("loaded query_model_on_statements")
 import argparse
 import numpy as np
 from sklearn.manifold import TSNE
+from config.run_configuration_manager import RunConfigurationManager
 
 
 def get_args():
@@ -100,6 +101,14 @@ def get_args():
     )
 
     parser.add_argument(
+        "--skip_sections",
+        nargs="*",
+        type=str,
+        default=[],
+        help="Specify which sections of the pipeline to skip. e.g. model_comparison, approvals.",
+    )
+
+    parser.add_argument(
         "--hide_plots",
         nargs="*",
         type=str,
@@ -114,12 +123,23 @@ def get_args():
 
 
 def main(args):
-    print("Loading evaluator pipeline...")
-    evaluator = EvaluatorPipeline(args)
-    print("Loading and preprocessing data...")
-    evaluator.setup_evaluations()
-    print("Running evaluation...")
-    evaluator.run_evaluations()
+    run_config_manager = RunConfigurationManager()
+    selected_run = input(
+        f"Select a run configuration from the following options (default: {run_config_manager.default_run}): {list(run_config_manager.configurations.keys())}"
+    )
+    run_settings = run_config_manager.get_configuration(
+        selected_run or run_config_manager.default_run
+    )
+    if run_settings:
+        print(f"Using run settings: {run_settings.name}")
+        print("Loading evaluator pipeline...")
+        evaluator = EvaluatorPipeline(run_settings)
+        print("Loading and preprocessing data...")
+        evaluator.setup_evaluations()
+        print("Running evaluation...")
+        evaluator.run_evaluations()
+    else:
+        raise ValueError(f"Run settings not found for {selected_run}")
 
 
 if __name__ == "__main__":
