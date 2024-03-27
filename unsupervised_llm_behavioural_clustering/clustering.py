@@ -221,35 +221,48 @@ class Clustering:
             n_clusters,
         )
 
-    def analyze_clusters(self, clustering, joint_embeddings_all_llms, query_results):
+    def compile_cluster_table(self, clustering, data, data_type, all_model_info):
+        """Compiles a table of cluster statistics and themes.
+
+        Args:
+            clustering: A clustering object.
+            data: The data used for clustering. This can be joint_embeddings_all_llms or approvals_statements_and_embeddings.
+            data_type: The type of data used for clustering. Either "joint_embeddings" or "approvals".
+            all_model_info: A list of dictionaries containing information about each model.
+
+        Returns:
+            A list of lists where each row represents a cluster's statistics and themes.
+        """
+        include_responses_and_interactions = data_type in ["joint_embeddings"]
+
         rows = []
         n_clusters = max(clustering.labels_) + 1
         print(f"n_clusters: {n_clusters}")
 
-        print("Analyzing clusters...")
+        print("Compiling cluster table...")
         for cluster_id in tqdm(range(n_clusters)):
-            print(f"Analyzing cluster {cluster_id}...")
-            print(f"Cluster {cluster_id} size: {len(joint_embeddings_all_llms)}")
-            print(f"Cluster {cluster_id} labels: {clustering.labels_}")
+            print(f"Processing cluster {cluster_id}...")
             row = self.get_cluster_row(
                 cluster_id,
                 clustering.labels_,
-                joint_embeddings_all_llms,
-                query_results,
+                data,
+                all_model_info,
+                data_type=data_type,
+                include_responses_and_interactions=include_responses_and_interactions,
             )
             rows.append(row)
-            # this should be a list of lists where each row is a cluster
 
         rows = sorted(rows, key=lambda x: x[1], reverse=True)
-        print(f"rows: {rows}")
+        print(f"Cluster table rows: {rows}")
         return rows
 
     def get_cluster_row(
         self,
         cluster_id,
         labels,
-        joint_embeddings_all_llms,
-        query_results,
+        data,  # joint_embeddings_all_llms or approvals_statements_and_embeddings
+        all_model_info,
+        data_type="joint_embeddings",  # or "approvals"
         include_responses_and_interactions=True,
     ):
         """Generates a row that represents a cluster's statistics and themes."""
@@ -259,19 +272,31 @@ class Clustering:
         cluster_indices = np.where(labels == cluster_id)[0]
         row.append(len(cluster_indices))  # Number of items in the cluster
 
-        # Extract the inputs, responses, and model attribution fractions for this cluster
-        inputs, responses, model_attribution_fractions = self.get_cluster_stats(
-            joint_embeddings_all_llms, labels, cluster_id
-        )
+        # Extract the inputs, responses (if applicable), and fractions of each model/approval prompt in the cluster
+        if data_type == "joint_embeddings":
+            # fractions are the fraction of each model in the cluster
+            inputs, responses, fractions = self.get_cluster_stats(
+                data,
+                labels,
+                cluster_id,
+                data_type=data_type,
+                include_responses=include_responses_and_interactions,
+            )
+        else:  # data_type == "approvals"
+            # fractions are the fraction of each approval prompt in the cluster
+            inputs, fractions = self.get_cluster_stats(
+                data, labels, cluster_id, data_type=data_type
+            )
+            responses = None
 
-        # Add the model attribution fractions to the row
-        for frac in model_attribution_fractions:
+        # Add the fractions to the row
+        for frac in fractions:
             row.append(f"{round(100 * frac, 1)}%")
 
         # Identify themes within this cluster
         for i in range(len(self.llms)):  # loop through llms
             print(f"Identifying themes for LLM {i}...")
-            model_info = query_results[i]["model_info"]
+            model_info = all_model_info[i]
             print(f"inputs: {inputs}")
             print(f"model_info: {model_info}")
             inputs_themes_str = identify_theme(inputs, model_info)
@@ -279,7 +304,7 @@ class Clustering:
             # Add input themes to the row
             row.append(inputs_themes_str)
 
-            if include_responses_and_interactions:
+            if include_responses_and_interactions and responses is not None:
                 print(f"responses: {responses}")
                 responses_themes_str = identify_theme(responses, model_info)
 
@@ -295,7 +320,7 @@ class Clustering:
                 row.append(responses_themes_str)
                 row.append(interactions_themes_str)
 
-        print(f"row: {row}")
+        print(f"Cluster row {cluster_id}: {row}")
         return row
 
     def get_cluster_stats(
@@ -350,49 +375,48 @@ class Clustering:
         else:
             return inputs, fractions
 
-    def compile_cluster_table(
-        self,
-        clustering,
-        approvals_statements_and_embeddings,
-        all_model_info,
-        theme_summary_instructions="Briefly list the common themes of the following texts:",
-        max_desc_length=250,
-    ):
-        rows = []
-        n_clusters = max(clustering.labels_) + 1
+    # def compile_cluster_table(
+    #     self,
+    #     clustering,
+    #     approvals_statements_and_embeddings,
+    #     all_model_info,
+    #     theme_summary_instructions="Briefly list the common themes of the following texts:",
+    #     max_desc_length=250,
+    # ):
+    #     rows = []
+    #     n_clusters = max(clustering.labels_) + 1
+    #     print("cluster_indices", clustering.labels_)
 
-        for cluster_id in tqdm(range(n_clusters)):
-            row = [str(cluster_id)]
-            cluster_indices = np.arange(len(clustering.labels_))[
-                clustering.labels_ == cluster_id
-            ]
-            row.append(len(cluster_indices))
-            print("Cluster", cluster_id)
-            print(approvals_statements_and_embeddings)
-            print("cluster_indices", clustering.labels_)
-            inputs, model_approval_fractions = self.get_cluster_stats(
-                approvals_statements_and_embeddings,
-                clustering.labels_,
-                cluster_id,
-                data_type="approvals",
-                include_responses=False,
-            )
-            for frac in model_approval_fractions:
-                row.append(str(round(100 * frac, 1)) + "%")
-            cluster_inputs_themes = [
-                identify_theme(
-                    inputs,
-                    all_model_info[i],
-                    sampled_texts=10,
-                    max_tokens=70,
-                    temp=0.5,
-                    instructions=theme_summary_instructions,
-                )[:max_desc_length].replace("\n", " ")
-                for i in range(len(all_model_info))
-            ]
-            inputs_themes_str = "\n".join(cluster_inputs_themes)
+    #     for cluster_id in tqdm(range(n_clusters)):
+    #         print("Cluster", cluster_id)
+    #         row = [str(cluster_id)]
+    #         cluster_indices = np.arange(len(clustering.labels_))[
+    #             clustering.labels_ == cluster_id
+    #         ]
+    #         row.append(len(cluster_indices))
+    #         inputs, model_approval_fractions = self.get_cluster_stats(
+    #             approvals_statements_and_embeddings,
+    #             clustering.labels_,
+    #             cluster_id,
+    #             data_type="approvals",
+    #             include_responses=False,
+    #         )
+    #         for frac in model_approval_fractions:
+    #             row.append(str(round(100 * frac, 1)) + "%")
+    #         cluster_inputs_themes = [
+    #             identify_theme(
+    #                 inputs,
+    #                 all_model_info[i],
+    #                 sampled_texts=10,
+    #                 max_tokens=70,
+    #                 temp=0.5,
+    #                 instructions=theme_summary_instructions,
+    #             )[:max_desc_length].replace("\n", " ")
+    #             for i in range(len(all_model_info))
+    #         ]
+    #         inputs_themes_str = "\n".join(cluster_inputs_themes)
 
-            row.append(inputs_themes_str)
-            rows.append(row)
-        rows = sorted(rows, key=lambda x: x[1], reverse=True)
-        return rows
+    #         row.append(inputs_themes_str)
+    #         rows.append(row)
+    #     rows = sorted(rows, key=lambda x: x[1], reverse=True)
+    #     return rows
