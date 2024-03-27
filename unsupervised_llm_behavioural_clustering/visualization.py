@@ -7,70 +7,31 @@ import matplotlib.patches as mpatches
 from scipy.cluster.hierarchy import dendrogram, linkage
 from sklearn.manifold import TSNE
 import numpy as np
-from dataclasses import dataclass
-
-# @dataclass
-# class VisualizationArgs:
-#     texts_subset: int
-#     model_family: list
-#     model: list
-#     n_clusters: int
-#     test_mode: bool
-#     n_statements: int
 
 
 class Visualization:
-    def __init__(
-        self,
-        plot_dim=(16, 16),
-        save_path=f"{os.getcwd()}/data/results/plots",
-        approval_prompts=[],
-    ):
-        self.plot_dim = plot_dim
-        self.save_path = save_path
-        # Define plotting aesthetics
-        self.colors = [
-            "red",
-            "blue",
-            "green",
-            "black",
-            "purple",
-            "orange",
-            "brown",
-            "plum",
-            "salmon",
-            "darkgreen",
-            "cyan",
-            "slategrey",
-            "yellow",
-            "pink",
-        ]
+    def __init__(self, plot_settings: PlotSettings, approval_prompts=[]):
+        """
+        Initialize the visualization class with the plot settings and approval prompts.
+        """
+        self.plot_dim = plot_settings.plot_dim
+        self.save_path = plot_settings.save_path
+        self.colors = plot_settings.colors
+        self.shapes = plot_settings.shapes
+        self.plot_aesthetics = plot_settings.plot_aesthetics
+
         with open(f"{os.getcwd()}/data/prompts/approval_prompts.json", "r") as file:
             self.approval_prompts = json.load(file)
             for key in self.approval_prompts.keys():
-                # This creates labels for personas, awareness, and whatever else is in the json file.
-                # For example, if the json file has a key "awareness", this will create a self.awareness
-                # attribute with the values of the "awareness" key in the json file.
                 setattr(self, key, list(self.approval_prompts[key].keys()))
-        self.shapes = ["o", "o", "*", "+"]
-        self.plot_aesthetics = {
-            "approval": {
-                "colors": self.colors[: len(self.personas)],
-                "shapes": self.shapes[: len(self.personas)],
-                "labels": self.personas,
-                "sizes": [5, 30, 200, 300],
-                "order": None,
-                "font_size": 30,
-            },
-            "awareness": {
-                "colors": self.colors[: len(self.awareness)],
-                "shapes": self.shapes[: len(self.awareness)],
-                "labels": self.awareness,
-                "sizes": [5, 30, 200, 300],
-                "order": [2, 1, 3, 0],
-                "font_size": 30,
-            },
-        }
+
+        self.plot_aesthetics["approval"]["colors"] = self.colors[: len(self.personas)]
+        self.plot_aesthetics["approval"]["shapes"] = self.shapes[: len(self.personas)]
+        self.plot_aesthetics["approval"]["labels"] = self.personas
+        self.plot_aesthetics["awareness"]["colors"] = self.colors[: len(self.awareness)]
+        self.plot_aesthetics["awareness"]["shapes"] = self.shapes[: len(self.awareness)]
+        self.plot_aesthetics["awareness"]["labels"] = self.awareness
+
         if not os.path.exists(self.save_path):
             os.makedirs(self.save_path)
 
@@ -248,5 +209,5 @@ class Visualization:
         fig.savefig(
             filename, bbox_inches="tight"
         )  # Use bbox_inches='tight' to fit the entire content
-        print(f"Saved plot to {filename}")
+        print(f"Saved spectral clustering plot to {filename}")
         plt.close("all")
