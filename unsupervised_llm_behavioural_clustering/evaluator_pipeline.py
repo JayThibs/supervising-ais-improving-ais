@@ -399,17 +399,18 @@ class EvaluatorPipeline:
         return chosen_clustering
 
     def analyze_response_embeddings_clusters(
-        self, chosen_clustering, joint_embeddings_all_llms, all_query_results
+        self, chosen_clustering, joint_embeddings_all_llms, all_model_info
     ):
         print("Analyzing clusters...")
         file_loaded, rows = load_pkl_or_not(
             "rows.pkl", self.pickle_dir, self.reuse_cluster_rows
         )
         if not file_loaded:
-            rows = self.clustering.analyze_clusters(
+            rows = self.clustering_obj.compile_cluster_table(
                 chosen_clustering,
                 joint_embeddings_all_llms,
-                all_query_results,
+                "joint_embeddings",
+                all_model_info,
             )
             with open(f"{self.pickle_dir}/rows.pkl", "wb") as f:
                 pickle.dump(rows, f)
@@ -664,7 +665,7 @@ class EvaluatorPipeline:
         # plt.close()
 
         rows = self.analyze_response_embeddings_clusters(
-            chosen_clustering, joint_embeddings_all_llms, all_query_results
+            chosen_clustering, joint_embeddings_all_llms, self.all_model_info
         )
         clusters_desc_table = [
             ["ID", "N", "Inputs Themes", "Responses Themes", "Interaction Themes"]
