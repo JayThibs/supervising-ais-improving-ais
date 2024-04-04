@@ -459,8 +459,8 @@ if args.hierarchical:
             else:
                 llm_instruction_ids = labeling_tokenizer(llm_instruction_str, return_tensors="pt").to(args.device)
                 with torch.no_grad():
-                    output = local_model.generate(llm_instruction_ids['input_ids'], do_sample=True, top_p = 0.95, max_new_tokens = 220)
-                output = output[0, llm_instruction_ids['input_ids'].shape[1]:]
+                    output = local_model.generate(llm_instruction_ids['input_ids'], do_sample=True, top_p = 0.95, max_new_tokens = 220, return_dict_in_generate=True)
+                output = output.sequences[0, llm_instruction_ids['input_ids'].shape[1]:]
                 #print("output.logits.argmax(dim=2):", output.logits.argmax(dim=2))
                 llm_answer = labeling_tokenizer.decode(output.tolist())
                 print(answer_preface + " " + llm_answer)

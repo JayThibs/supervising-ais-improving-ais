@@ -1,16 +1,14 @@
 import torch
 import pandas as pd
-from model_comparison_helpers import instantiate_models, get_input_ids
+from model_comparison_helpers import instantiate_models
 import tqdm
 import json
-import openai
 from openai import OpenAI
 import re
 from random import sample
-from contrastive_decoding import decode, ContrastiveDecoder
-import copy
+from contrastive_decoding import ContrastiveDecoder
 import numpy as np
-from transformers import BitsAndBytesConfig
+from transformers import BitsAndBytesConfig, AutoModelForCausalLM, AutoTokenizer
         
 class DivergenceFinder:
     def __init__(self, **kwargs):
@@ -18,8 +16,9 @@ class DivergenceFinder:
         self.model_name = "gpt2-xl"
         self.generation_length = 20
         self.n_cycles_ask_chatgpt = 2
-        self.model_str = "gpt-3.5-turbo"
-        self.generations_per_prefix = 1
+        self.openai_model_str = None
+        self.local_model_str = "Upstage/SOLAR-10.7B-Instruct-v1.0"
+        self.generations_per_prefix = 3
         self.starting_model_path = "gpt2-xl"
         self.comparison_model_path = "gpt2-xl"
         self.starting_model_weight = 1
@@ -27,6 +26,7 @@ class DivergenceFinder:
         self.tokenizer_family = "gpt2"
         self.set_prefix_len = 30
         self.device = "cuda:0"
+        self.local_model_device = "cuda:0"
         self.temp_save_model_loc = "/tmp/temp_"
         self.limit_to_starting_model_top_p = -1
         self.similarity_gating_intensity = -1
@@ -35,7 +35,7 @@ class DivergenceFinder:
         self.sequential = True
         self.n_past_texts_subsampled = 10
         self.subsampling_randomness_temperature = 0.5
-        self.api_key_path = "../../key.txt"
+        self.api_key_path = "../key.txt"
         self.prompts_json_path = "chatgpt_prompts/who_is_harry_potter_find_CD_prompts.json"
         self.quantize = True
         self.divergence_fnct = 'l1'
@@ -50,7 +50,22 @@ class DivergenceFinder:
                 bnb_4bit_quant_type="nf4",
                 bnb_4bit_compute_dtype=torch.bfloat16
         )
-        if not self.config.quantize:
+        if self.openai_model_str is None and self.local_model_str is not None:
+            try:
+                local_device_map = {"": int(self.local_model_device.split(":")[1])}
+            except:
+                local_device_map = "auto"
+            self.local_model = AutoModelForCausalLM.from_pretrained(self.local_model_str,
+                                                                    load_in_8bit=True, 
+                                                                    device_map=local_device_map,
+                                                                    quantization_config=self.bnb_config)
+            self.local_tokenizer = AutoTokenizer.from_pretrained(self.local_model_str)
+        elif self.openai_model_str is not None and self.local_model_str is not None:
+            raise ValueError("You cannot specify both openai_model_str and local_model_str.")
+        elif self.openai_model_str is None and self.local_model_str is None:
+            raise ValueError("You must specify either openai_model_str or local_model_str.")
+        
+        if not self.quantize:
             self.bnb_config = None
         self.model, self.starting_model, self.comparison_model, self.tokenizer = instantiate_models(
             model_name = self.model_name,
@@ -67,8 +82,6 @@ class DivergenceFinder:
             starting_model_prefix_ids = self.starting_model_prefix_ids,
             bnb_config = self.bnb_config,
         )
-        with open(self.prompts_json_path, 'r') as f:
-            self.prompts_data = json.load(f)
         # Load system prompt, user instructions, and any seed demonstrations from prompts_json_path:
         with open(self.prompts_json_path, 'r') as f:
             self.prompts_data = json.load(f)
@@ -121,6 +134,39 @@ class DivergenceFinder:
 
         # Authenticate with the OpenAI API
         self.client = OpenAI(api_key=openai_auth_key)
+
+    def get_continuation(self, messages, openai_model_str, client, local_model, local_tokenizer, device):
+        if openai_model_str is not None:
+            # Generate a new text from ChatGPT
+            print("messages:", messages)
+            chat_completion = client.chat.completions.create(
+                model=openai_model_str,
+                messages=messages,
+                max_tokens=2000,
+                temperature=1
+            )
+            output_text = chat_completion.choices[0].message.content
+        else:
+            # Generate a new text from the local model
+            # First, compose the different texts in messages into a single prompt
+            prompt = "\n".join([message['content'] for message in messages]) + "\n\nAnswer:\n"
+            prompt_tokens = local_tokenizer.encode(prompt, return_tensors="pt").to(device)
+            n_prompt_tokens = prompt_tokens.shape[1]
+            with torch.no_grad():
+                output = local_model.generate(
+                    input_ids=prompt_tokens,
+                    max_length=2000,
+                    temperature=1,
+                    do_sample=True,
+                    top_p=0.9,
+                    top_k=0,
+                    num_return_sequences=1,
+                    return_dict_in_generate=True
+                )
+            output_tokens = output.sequences[0][n_prompt_tokens:]
+            output_text = local_tokenizer.decode(output_tokens, skip_special_tokens=True)
+
+        return output_text
     
     def search_step(self):
         print()
@@ -143,16 +189,9 @@ class DivergenceFinder:
             {"role": "user", "content": self.user_end_prompt}
              ]
 
-        # Generate a new text from ChatGPT
-        print("messages:", messages)
-        chat_completion = self.client.chat.completions.create(
-            model=self.model_str,
-            messages=messages,
-            max_tokens=2000,
-            temperature=1
-        )
-        output_text = chat_completion.choices[0].message.content
-        print("output_text:", output_text)
+        # Get new messages from either ChatGPT or a local model:
+        output_text = self.get_continuation(messages, self.openai_model_str, self.client, self.local_model, self.local_tokenizer, self.device)
+        #print("output_text:", output_text)
         additional_texts = interpret_assistant_outputs(output_text)
         print("additional_texts:", additional_texts)
 
@@ -160,7 +199,23 @@ class DivergenceFinder:
             # Compute divergences for additional_texts
             result = self.contrastive_decoder.decode(text_set = additional_texts)
             additional_divergences = result['divergences'].tolist()
-            additional_divergences_and_texts = list(zip(additional_divergences, additional_texts))
+            comparison_model_responses = []
+            with torch.no_grad():
+                for text in additional_texts:
+                    encoded_prompt = self.tokenizer.encode(text, return_tensors="pt").to(self.device)
+                    n_prompt_tokens = encoded_prompt.shape[1]
+                    generated = self.comparison_model.generate(
+                        input_ids=encoded_prompt,
+                        max_length=self.generation_length + n_prompt_tokens,
+                        temperature=1.0,
+                        top_p=0.9,
+                        num_return_sequences=1,
+                        return_dict_in_generate=True
+                    )
+                    returned_ids = generated.sequences[0][n_prompt_tokens:]
+                    decoded_output = self.tokenizer.decode(returned_ids, skip_special_tokens=True)
+                    comparison_model_responses.append(decoded_output)
+            additional_divergences_and_texts = list(zip(additional_divergences, additional_texts, comparison_model_responses))
             # Expand all_divergences_and_texts with results:
             self.all_divergences_and_texts = self.all_divergences_and_texts + additional_divergences_and_texts
         # Assemble a new query from ChatGPT's responses / additional_texts.
@@ -187,12 +242,14 @@ class DivergenceFinder:
             for i in range(min(10, len(self.all_divergences_and_texts))): # Make sure we don't go out of bounds if there are fewer than 10 texts
                 print(f'Text with highest divergence #{i+1}: {self.all_divergences_and_texts[i][0]}')
                 print(f'Text: {self.all_divergences_and_texts[i][1]}')
+                print(f'Response: {self.all_divergences_and_texts[i][2]}')
                 print()
             
             # Print the 10 texts with the lowest divergence values
             for i in range(min(10, len(self.all_divergences_and_texts))): # Make sure we don't go out of bounds if there are fewer than 10 texts
                 print(f'Text with lowest divergence #{i+1}: {self.all_divergences_and_texts[-(i+1)][0]}')
                 print(f'Text: {self.all_divergences_and_texts[-(i+1)][1]}')
+                print(f'Response: {self.all_divergences_and_texts[-(i+1)][2]}')
                 print()
         except:
             print("Error: Could not print texts with highest/lowest divergence values.")
@@ -208,25 +265,41 @@ class DivergenceFinder:
 def rescale_divergences(divergences_and_texts):
     max_divergence = max(divergences_and_texts, key=lambda x: x[0])[0]
     min_divergence = min(divergences_and_texts, key=lambda x: x[0])[0]
-    rescaled_round_divergences_and_texts = [(10 * (div - min_divergence) / max((max_divergence - min_divergence), 0.0001), text) for div, text in divergences_and_texts]
+    rescaled_round_divergences_and_texts = [(10 * (div - min_divergence) / max((max_divergence - min_divergence), 0.0001), text) for div, text, _ in divergences_and_texts]
     return rescaled_round_divergences_and_texts
 
 
-def interpret_assistant_outputs(output_text):
-    # Interpret output_text as a json object with a dictionary and parse it:
-    try:
-        output_text_json = json.loads(output_text)
-    except:
-        print("Error: Could not parse output_text as a json object.")
-        return []
-    # Extract all entries from the dictionary
-    entries = output_text_json.items()
-    # Filter out entries that do not start with "prompt"
-    prompt_entries = [entry for entry in entries if entry[0].startswith("prompt")]
-    # Sort the prompt entries by the number at the end of the key (e.g. "prompt 1", "prompt 2", ...)
-    prompt_entries = sorted(prompt_entries, key=lambda x: int(re.search(r'\d+', x[0]).group()))
-    # Extract the values (i.e. the texts) from the prompt entries
-    prompts = [entry[1] for entry in prompt_entries]
+def interpret_assistant_outputs(output_text, as_json = True, fallback_to_newlines = False):
+    json_parse_fail = False
+    if as_json:
+        # Interpret output_text as a json object with a dictionary and parse it:
+        # First, remove all characters before the first '{' character
+        output_text = output_text[output_text.find('{'):]
+        # Next, remove all characters after the last '}' character
+        output_text = output_text[:output_text.rfind('}')+1]
+        try:
+            #print("json text", output_text)
+            output_text_json = json.loads(output_text)
+        except:
+            print("Error: Could not parse output_text as a json object.")
+            print(output_text)
+            json_parse_fail = True
+        # Extract all entries from the dictionary
+        entries = output_text_json.items()
+        #print("output_text_json", output_text_json)
+        # Filter out entries that do not start with "prompt"
+        prompt_entries = [entry for entry in entries if ("prompt" in entry[0].lower() or "response" in entry[0].lower())]
+        # Sort the prompt entries by the number at the end of the key (e.g. "prompt 1", "prompt 2", ...)
+        prompt_entries = sorted(prompt_entries, key=lambda x: int(re.search(r'\d+', x[0]).group()))
+        # Extract the values (i.e. the texts) from the prompt entries
+        prompts = [entry[1] for entry in prompt_entries]
+    if not as_json or (json_parse_fail and fallback_to_newlines):
+        # Interpret output_text as a list of texts separated by newlines
+        if json_parse_fail:
+            # Try to strip out any json-related characters and split by newlines
+            output_text = re.sub(r'[^a-zA-Z0-9\s]', '', output_text)
+            output_text = output_text.replace("\n\n", "\n")
+        prompts = output_text.split("\n")
     return prompts
     
 

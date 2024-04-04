@@ -283,8 +283,9 @@ class ContrastiveDecoder:
                                                 num_beams=num_beams,
                                                 num_beam_groups=num_beam_groups,
                                                 diversity_penalty=diversity_penalty,
-                                                temperature=temperature
-                                                ).tolist()
+                                                temperature=temperature,
+                                                return_dict_in_generate=True
+                                                ).sequences.tolist()
             else:
                 generations_batch = model.generate(batch_ids, 
                                                 do_sample=sampling, 
@@ -293,7 +294,8 @@ class ContrastiveDecoder:
                                                 top_k=None, 
                                                 top_p=top_p, 
                                                 num_return_sequences=generations_per_prefix,
-                                                temperature=temperature
-                                                ).tolist()
+                                                temperature=temperature,
+                                                return_dict_in_generate=True
+                                                ).sequences.tolist()
             generations += generations_batch
         return generations
