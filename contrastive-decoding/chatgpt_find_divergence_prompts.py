@@ -1,5 +1,4 @@
 import torch
-import pandas as pd
 from model_comparison_helpers import instantiate_models
 import tqdm
 import json
@@ -9,7 +8,10 @@ from random import sample
 from contrastive_decoding import ContrastiveDecoder
 import numpy as np
 from transformers import BitsAndBytesConfig, AutoModelForCausalLM, AutoTokenizer
-        
+from terminaltables import AsciiTable
+import textwrap
+
+
 class DivergenceFinder:
     def __init__(self, **kwargs):
         # Default values
@@ -40,10 +42,14 @@ class DivergenceFinder:
         self.quantize = True
         self.divergence_fnct = 'l1'
         self.include_prefix_in_divergences = False
+        self.verbose = True
+        self.max_width = 70
 
         # Update with any arguments passed to the constructor
         for key, value in kwargs.items():
             setattr(self, key, value)
+        
+        # Define quantization config
         self.bnb_config = BitsAndBytesConfig(
                 load_in_4bit=True,
                 bnb_4bit_use_double_quant=True,
@@ -122,8 +128,11 @@ class DivergenceFinder:
             result = self.contrastive_decoder.decode()
             divergences = result['divergences'].tolist()
 
-            self.all_divergences_and_texts = [[d,s] for s,d in zip(self.seed_demonstrations_list, divergences)]
+            self.all_divergences_and_texts = [(d,s,"") for d,s in zip(divergences, self.seed_demonstrations_list)]
             self.round_divergences_and_texts = divergence_weighted_subsample(self.all_divergences_and_texts, self.n_past_texts_subsampled, self.subsampling_randomness_temperature)
+            if self.verbose:
+                print("round_divergences_and_texts:")
+                print_texts_with_divergences(self.round_divergences_and_texts, max_width = self.max_width)
         else:
             self.all_divergences_and_texts = []
             self.round_divergences_and_texts = []
@@ -169,12 +178,11 @@ class DivergenceFinder:
         return output_text
     
     def search_step(self):
-        print()
-        print("round_divergences_and_texts", self.round_divergences_and_texts)
-        print()
+        if self.verbose:
+            print("round_divergences_and_texts:")
+            print_texts_with_divergences(self.round_divergences_and_texts, max_width = self.max_width)
         # Compose messages to send ChatGPT
         if len(self.round_divergences_and_texts) > 0:
-            print("Few shotting!")
             # First, rescale round_divergences_and_texts divergence values into [0, 10]
             rescaled_round_divergences_and_texts = rescale_divergences(self.round_divergences_and_texts)
             # Format divergences and texts into a single string to provide ChatGPT
@@ -229,6 +237,10 @@ class DivergenceFinder:
                 print("Warning: No additional texts were obtained from this round.")
             # Subsample from all_divergences_and_texts
             self.round_divergences_and_texts = divergence_weighted_subsample(self.all_divergences_and_texts, self.n_past_texts_subsampled, self.subsampling_randomness_temperature)
+             
+            if self.verbose:
+                print("round_divergences_and_texts:")
+                print_texts_with_divergences(self.round_divergences_and_texts, max_width = self.max_width)
     
     def search_loop(self):
         for _ in tqdm.tqdm(range(self.n_cycles_ask_chatgpt)):
@@ -239,18 +251,26 @@ class DivergenceFinder:
             self.all_divergences_and_texts.sort(key=lambda x: x[0], reverse=True)
 
             # Print the 10 texts with the highest divergence values
-            for i in range(min(10, len(self.all_divergences_and_texts))): # Make sure we don't go out of bounds if there are fewer than 10 texts
-                print(f'Text with highest divergence #{i+1}: {self.all_divergences_and_texts[i][0]}')
-                print(f'Text: {self.all_divergences_and_texts[i][1]}')
-                print(f'Response: {self.all_divergences_and_texts[i][2]}')
-                print()
+            table_data = [["#", "Divergence", "Text", "Response"]]
+            for i in range(min(10, len(self.all_divergences_and_texts))):
+                wrapped_text = textwrap.fill(self.all_divergences_and_texts[i][1].replace("\n", "\\n"), width=self.max_width)
+                wrapped_response = textwrap.fill(self.all_divergences_and_texts[i][2].replace("\n", "\\n"), width=self.max_width)
+                row = [str(i+1), str(round(self.all_divergences_and_texts[i][0], 3)), wrapped_text, wrapped_response]
+                table_data.append(row)
+            table = AsciiTable(table_data)
+            table.inner_row_border = True
+            print(table.table)
             
             # Print the 10 texts with the lowest divergence values
-            for i in range(min(10, len(self.all_divergences_and_texts))): # Make sure we don't go out of bounds if there are fewer than 10 texts
-                print(f'Text with lowest divergence #{i+1}: {self.all_divergences_and_texts[-(i+1)][0]}')
-                print(f'Text: {self.all_divergences_and_texts[-(i+1)][1]}')
-                print(f'Response: {self.all_divergences_and_texts[-(i+1)][2]}')
-                print()
+            table_data_lowest = [["#", "Divergence", "Text", "Response"]]
+            for i in range(min(10, len(self.all_divergences_and_texts))):
+                wrapped_text = textwrap.fill(self.all_divergences_and_texts[-(i+1)][1].replace("\n", "\\n"), width=self.max_width)
+                wrapped_response = textwrap.fill(self.all_divergences_and_texts[-(i+1)][2].replace("\n", "\\n"), width=self.max_width)
+                row = [str(i+1), str(round(self.all_divergences_and_texts[-(i+1)][0], 3)), wrapped_text, wrapped_response]
+                table_data_lowest.append(row)
+            table_lowest = AsciiTable(table_data_lowest)
+            table_lowest.inner_row_border = True
+            print(table_lowest.table)
         except:
             print("Error: Could not print texts with highest/lowest divergence values.")
 
@@ -260,6 +280,8 @@ class DivergenceFinder:
                 setattr(self, key, value)
         self.search_loop()
         return self.all_divergences_and_texts
+    
+
 
 
 def rescale_divergences(divergences_and_texts):
@@ -284,15 +306,16 @@ def interpret_assistant_outputs(output_text, as_json = True, fallback_to_newline
             print("Error: Could not parse output_text as a json object.")
             print(output_text)
             json_parse_fail = True
-        # Extract all entries from the dictionary
-        entries = output_text_json.items()
-        #print("output_text_json", output_text_json)
-        # Filter out entries that do not start with "prompt"
-        prompt_entries = [entry for entry in entries if ("prompt" in entry[0].lower() or "response" in entry[0].lower())]
-        # Sort the prompt entries by the number at the end of the key (e.g. "prompt 1", "prompt 2", ...)
-        prompt_entries = sorted(prompt_entries, key=lambda x: int(re.search(r'\d+', x[0]).group()))
-        # Extract the values (i.e. the texts) from the prompt entries
-        prompts = [entry[1] for entry in prompt_entries]
+        if not json_parse_fail:
+            # Extract all entries from the dictionary
+            entries = output_text_json.items()
+            #print("output_text_json", output_text_json)
+            # Filter out entries that do not start with "prompt"
+            prompt_entries = [entry for entry in entries if ("prompt" in entry[0].lower() or "response" in entry[0].lower())]
+            # Sort the prompt entries by the number at the end of the key (e.g. "prompt 1", "prompt 2", ...)
+            prompt_entries = sorted(prompt_entries, key=lambda x: int(re.search(r'\d+', x[0]).group()))
+            # Extract the values (i.e. the texts) from the prompt entries
+            prompts = [entry[1] for entry in prompt_entries]
     if not as_json or (json_parse_fail and fallback_to_newlines):
         # Interpret output_text as a list of texts separated by newlines
         if json_parse_fail:
@@ -322,5 +345,15 @@ def divergence_weighted_subsample(divergence_and_text_pairs, n_past_texts_subsam
     subsample = sorted(subsample, key=lambda x: x[0], reverse=True)
 
     # Return the subsample
-    print("subsample", subsample)
     return subsample
+
+def print_texts_with_divergences(divergences_and_texts, max_width = 50):
+    table_data = [["Div", "Text", "Response"]]
+    for div, text, response in divergences_and_texts:
+            wrapped_text = "\n".join(textwrap.wrap(text, width=max_width))
+            wrapped_response = "\n".join(textwrap.wrap(response, width=max_width))
+            table_data.append([round(div, 3), wrapped_text, wrapped_response])
+    table = AsciiTable(table_data)
+    table.inner_row_border = True
+    print(table.table)
+

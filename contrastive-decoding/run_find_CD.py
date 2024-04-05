@@ -14,13 +14,14 @@ target = args.target.lower()
 gens_per_prefix = args.gens_per_prefix
 
 if target in ['wihp']:
-    print(f"\n\n\n\nATTEMPT with include_prefix_in_divergences={args.include_prefix_in_divergences}, sequential={args.sequential}:")
+    print(f"\n\n\nATTEMPT with include_prefix_in_divergences={args.include_prefix_in_divergences}, sequential={args.sequential}:")
     dict_args = {
         "save_texts_loc": "find_CD_outputs/Llama2-7b-WhoIsHarryPotter-0.95-SMTP_log.txt",
         "model_name": "NousResearch/Llama-2-7b-hf",
         "comparison_model_path": "microsoft/Llama2-7b-WhoIsHarryPotter",
         "starting_model_path": "NousResearch/Llama-2-7b-hf",
         "tokenizer_family": "NousResearch/Llama-2-7b-hf",
+        "prompts_json_path" : "chatgpt_prompts/who_is_harry_potter_find_CD_prompts.json",
         "starting_model_weight": -1,
         "comparison_model_weight": 1,
         "generation_length": 40,
