@@ -30,7 +30,7 @@ def get_args():
     )
 
     parser.add_argument(
-        "--model_family",
+        "--model_families",
         nargs="+",
         type=str,
         required=True,
@@ -38,7 +38,7 @@ def get_args():
     )
 
     parser.add_argument(
-        "--model",
+        "--models",
         nargs="+",
         type=str,
         required=True,
