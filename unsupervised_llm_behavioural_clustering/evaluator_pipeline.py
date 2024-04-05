@@ -12,50 +12,23 @@ from clustering import Clustering
 from utils import embed_texts, load_pkl_or_not, query_model_on_statements
 from typing import List, Dict, Any
 from dataclasses import dataclass
-from config.run_configuration_manager import run_configurations
+from config.run_configuration_manager import RunConfigurationManager
 from config.run_settings import (
-    RunConfiguration,
+    RunSettings,
     ModelSettings,
     DataSettings,
     PlotSettings,
+    PromptSettings,
+    ClusteringSettings,
+    TsneSettings,
 )
 
 
-@dataclass
-class ModelMetadata:
-    model_id: str
-    temperature: float
-    max_tokens: int
-    other_params: Dict[str, Any]  # Include any other model-specific parameters
-
-
-@dataclass
-class StatementResponses:
-    metadata: ModelMetadata
-    response_file: str  # Path to the .jsonl file with responses
-
-    def save_responses(self, statements, responses):
-        with open(self.response_file, "w") as f:
-            for statement, response in zip(statements, responses):
-                json.dump({"statement": statement, "response": response}, f)
-                f.write("\n")
-
-    @staticmethod
-    def load_responses(filepath):
-        statements, responses = [], []
-        with open(filepath, "r") as f:
-            for line in f:
-                data = json.loads(line)
-                statements.append(data["statement"])
-                responses.append(data["response"])
-        return statements, responses
-
-
 class EvaluatorPipeline:
-    def __init__(self, args):
-        self.args = args
+    def __init__(self, run_settings: RunSettings):
+        self.run_settings = run_settings
         # Set up directories
-        self.test_mode = args.test_mode
+        self.test_mode = self.run_settings.test_mode
         self.data_dir = f"{os.getcwd()}/data"
         self.evals_dir = f"{self.data_dir}/evals"
         self.results_dir = f"{self.data_dir}/results"
@@ -64,10 +37,10 @@ class EvaluatorPipeline:
         self.tables_dir = f"{self.results_dir}/tables"
 
         # model information
-        self.llms = []
-        print(f"self.args.model: {self.args.model}")
-        print(f"self.args.model type: {type(self.args.model)}")
-        for model in self.args.model:
+        self.llms = self.run_settings.model_settings.models
+        self.models = [model for _, model in self.llms]
+        print(f"Models: {self.models}")
+        for model in self.models:
             if "gpt-" in model and (
                 not any(char.isdigit() for char in model.split("-")[-1][0])
                 or "turbo" in model
@@ -80,7 +53,9 @@ class EvaluatorPipeline:
             self.llms.append((model_family, model))
 
         # Load approval prompts from same directory as this file
-        self.n_statements = 300 if self.test_mode else self.args.n_statements
+        self.n_statements = (
+            300 if self.test_mode else self.run_settings.data_settings.n_statements
+        )
         with open(f"{self.data_dir}/prompts/approval_prompts.json", "r") as file:
             # { "google_chat_desc": [ "prompt"], "bing_chat_desc": [...], ...}
             self.approval_prompts = json.load(file)
@@ -99,18 +74,21 @@ class EvaluatorPipeline:
         #         # For example, if the json file has a key "awareness", this will create a self.awareness
         #         # attribute with the values of the "awareness" key in the json file.
         #         setattr(self, key, list(self.approval_prompts[key].keys()))
-        self.approval_question_prompt_template = self.args.approval_prompt_template
+        self.approval_question_prompt_template = (
+            self.run_settings.prompt_settings.approval_prompt_template
+        )
         self.set_reuse_flags()
-        self.hide_plots = self.process_hide_plots(self.args.hide_plots)
+        self.hide_plots = self.process_hide_plots(
+            self.run_settings.plot_settings.hide_plots
+        )
         self.plot_statement_clustering = False
 
         # Set up objects
-        self.model_eval = ModelEvaluation(args, self.llms)
-        plot_settings = PlotSettings()
-        self.viz = Visualization(plot_settings)
-        self.clustering_obj = Clustering(self.args)
+        self.model_eval = ModelEvaluation(self.run_settings, self.llms)
+        self.viz = Visualization(self.run_settings.plot_settings)
+        self.clustering_obj = Clustering(self.run_settings.clustering_settings)
 
-        if self.args.new_generation:
+        if self.run_settings.data_settings.new_generation:
             self.saved_query_results = None
             if "all_query_results.pkl" in os.listdir(self.pickle_dir):
                 timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
@@ -246,7 +224,9 @@ class EvaluatorPipeline:
         return filename
 
     def generate_responses(self):
-        self.perplexity = 3 if self.test_mode else 50
+        self.perplexity = (
+            3 if self.test_mode else self.run_settings.tsne_settings.perplexity
+        )
         text_subset = self.data_prep.load_and_preprocess_data(
             n_statements=self.n_statements
         )
@@ -255,8 +235,8 @@ class EvaluatorPipeline:
             all_query_results = self.generate_and_save_responses(
                 text_subset,
                 self.n_statements,
-                self.args.statements_prompt_template,
-                self.args.statements_system_message,
+                self.run_settings.prompt_settings.statements_prompt_template,
+                self.run_settings.prompt_settings.statements_system_message,
                 self.llms,
             )
         else:
@@ -478,9 +458,9 @@ class EvaluatorPipeline:
             )
 
             if not self.reuse_conditions or not conditions_loaded:
-                # note: self.args.model is a list of models
+                # note: self.args.models is a list of models
                 # create a dictionary with the model as the key, and a list of persona approvals as the value
-                all_condition_approvals = {model: [] for model in self.args.model}
+                all_condition_approvals = {model: [] for model in self.args.models}
 
                 for model_family, model in self.llms:
                     model_approvals = []
@@ -651,7 +631,7 @@ class EvaluatorPipeline:
         self.all_model_info = self.collect_model_info(all_query_results)
         model_names = [llm[1] for llm in self.llms]
 
-        if "model_comparison" not in self.args.skip_sections:
+        if "model_comparison" not in self.run_settings.skip_sections:
             tsne_filename = self.generate_plot_filename(
                 model_names, "tsne_embedding_responses"
             )
@@ -687,7 +667,7 @@ class EvaluatorPipeline:
 
         # The Approval Persona prompts and Awareness prompts sections are similar, so we can refactor them into a single function where we loop over the type of prompts created in the json file. So, the following code should be able to run n number of prompts for m number of models and p number of prompt types (e.g. personas, awareness, etc.).
         # In order to do this, we will need to refactor some of the functions used for both prompt types to be more general. We will also need to allow for iterating over the models we want to evaluate.
-        if "approvals" not in self.args.skip_sections:
+        if "approvals" not in self.run_settings.skip_sections:
             for prompt_type in self.approval_prompts.keys():
                 print(
                     f"prompt_type: {prompt_type}"
@@ -696,7 +676,7 @@ class EvaluatorPipeline:
                 approvals_statements_and_embeddings = (
                     self.load_or_generate_approvals_data(
                         approvals_type=prompt_type,
-                        reuse_approvals=self.reuse_approvals,
+                        reuse_approvals=self.run_settings.data_settings.reuse_approvals,
                     )
                 )
                 if "statement_embeddings" not in locals():
@@ -758,7 +738,7 @@ class EvaluatorPipeline:
                     approvals_statements_and_embeddings,
                     rows,
                     prompt_type,
-                    reuse_hierarchical_approvals=self.reuse_hierarchical_approvals,
+                    reuse_hierarchical_approvals=self.run_settings.data_settings.reuse_hierarchical_approvals,
                 )
                 print(f"Visualizing hierarchical cluster for {prompt_type} prompts...")
                 self.visualize_hierarchical_clusters(
