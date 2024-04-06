@@ -3,6 +3,29 @@ import json
 from dataclasses import dataclass, field
 from typing import List, Tuple, Dict, Any
 
+# Define constants for available data types
+REUSABLE_DATA_TYPES = [
+    "embedding_clustering",
+    "joint_embeddings",
+    "tsne",
+    "approvals",
+    "hierarchical_approvals",
+    "hierarchical_awareness",
+    "awareness",
+    "cluster_rows",
+    "conditions",
+]
+
+# Define constants for available plot types
+HIDEABLE_PLOT_TYPES = [
+    "tsne",
+    "approval",
+    "awareness",
+    "hierarchical_approvals",
+    "hierarchical_awareness",
+    "spectral",
+]
+
 
 @dataclass
 class ModelSettings:
@@ -27,19 +50,8 @@ class DataSettings:
     reuse_conditions: bool = False
 
     def __post_init__(self):
-        data_types = [
-            "embedding_clustering",
-            "joint_embeddings",
-            "tsne",
-            "approvals",
-            "hierarchical_approvals",
-            "hierarchical_awareness",
-            "awareness",
-            "cluster_rows",
-            "conditions",
-        ]
-        reuse_data_types = self.process_reuse_data(self.reuse_data, data_types)
-        for data_type in data_types:
+        reuse_data_types = self.process_reuse_data(self.reuse_data, REUSABLE_DATA_TYPES)
+        for data_type in REUSABLE_DATA_TYPES:
             setattr(self, f"reuse_{data_type}", data_type in reuse_data_types)
 
     def process_reuse_data(self, reuse_data, all_data_types):
@@ -75,9 +87,7 @@ class PromptSettings:
 
 @dataclass
 class PlotSettings:
-    hide_plots: List[str] = field(
-        default_factory=lambda: ["all"]
-    )  # Options: "tsne", "approval", "awareness", "hierarchical"
+    hide_plots: List[str] = field(default_factory=lambda: ["all"])
     plot_dim: Tuple[int, int] = (16, 16)
     save_path: str = f"{os.getcwd()}/data/results/plots"
     colors: List[str] = field(
@@ -119,6 +129,25 @@ class PlotSettings:
             },
         }
     )
+
+    def __post_init__(self):
+        self.hide_plot_types = self.process_hide_plots(
+            self.hide_plots, HIDEABLE_PLOT_TYPES
+        )
+
+    def process_hide_plots(self, hide_plots, all_plot_types):
+        hide_types = []
+
+        if "all" not in hide_plots:
+            hide_types = all_plot_types
+        else:
+            for plot_type in hide_plots:
+                if plot_type.startswith("!"):
+                    include_plot_type = plot_type[1:]
+                    if include_plot_type in all_plot_types:
+                        hide_types.remove(include_plot_type)
+
+        return hide_types
 
 
 @dataclass
