@@ -22,6 +22,8 @@ if target in ['wihp']:
         "starting_model_path": "NousResearch/Llama-2-7b-hf",
         "tokenizer_family": "NousResearch/Llama-2-7b-hf",
         "prompts_json_path" : "chatgpt_prompts/who_is_harry_potter_find_CD_prompts.json",
+        "use_custom_selection_criterion": True,
+        "use_custom_selection_criterion_examples": True,
         "starting_model_weight": -1,
         "comparison_model_weight": 1,
         "generation_length": 40,
