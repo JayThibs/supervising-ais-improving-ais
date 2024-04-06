@@ -130,22 +130,31 @@ class PlotSettings:
         }
     )
 
+    hide_tsne: bool = False
+    hide_approval: bool = False
+    hide_awareness: bool = False
+    hide_hierarchical_approvals: bool = False
+    hide_hierarchical_awareness: bool = False
+    hide_spectral: bool = False
+
     def __post_init__(self):
-        self.hide_plot_types = self.process_hide_plots(
-            self.hide_plots, HIDEABLE_PLOT_TYPES
-        )
+        hide_plot_types = self.process_hide_plots(self.hide_plots, HIDEABLE_PLOT_TYPES)
+        for plot_type in HIDEABLE_PLOT_TYPES:
+            setattr(self, f"hide_{plot_type}", plot_type in hide_plot_types)
 
     def process_hide_plots(self, hide_plots, all_plot_types):
-        hide_types = []
+        hide_types = set()
 
-        if "all" not in hide_plots:
-            hide_types = all_plot_types
+        if "all" in hide_plots:
+            hide_types = set(all_plot_types)
+            for item in hide_plots:
+                if item.startswith("!"):
+                    include_plot_type = item[1:]
+                    hide_types.discard(include_plot_type)
         else:
-            for plot_type in hide_plots:
-                if plot_type.startswith("!"):
-                    include_plot_type = plot_type[1:]
-                    if include_plot_type in all_plot_types:
-                        hide_types.remove(include_plot_type)
+            for item in hide_plots:
+                if item in all_plot_types:
+                    hide_types.add(item)
 
         return hide_types
 
@@ -217,21 +226,3 @@ class RunSettings:
     tsne_settings: TsneSettings = field(default_factory=TsneSettings)
     test_mode: bool = False
     skip_sections: List[str] = field(default_factory=list)
-
-    def __post_init__(self):
-        if self.data_settings.reuse_data == ["all"]:
-            self.data_settings.reuse_data = [
-                "tsne",
-                "approvals",
-                "hierarchical",
-                "awareness",
-                "rows",
-                "conditions",
-            ]
-        if self.plot_settings.hide_plots == ["all"]:
-            self.plot_settings.hide_plots = [
-                "tsne",
-                "approval",
-                "awareness",
-                "hierarchical",
-            ]
