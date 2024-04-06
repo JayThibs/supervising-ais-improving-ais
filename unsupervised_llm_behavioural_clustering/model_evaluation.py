@@ -3,6 +3,7 @@ import csv
 import numpy as np
 import pdb
 from tqdm import tqdm
+from typing import List, Tuple
 from utils import *
 from sklearn.manifold import TSNE
 from sklearn.cluster import KMeans
@@ -12,7 +13,7 @@ from config.run_settings import RunSettings
 
 
 class ModelEvaluation:
-    def __init__(self, run_settings: RunSettings, llms):
+    def __init__(self, run_settings: RunSettings, llms: List[Tuple[str, str]]):
         self.settings = run_settings
         self.llms = llms
 
@@ -38,7 +39,9 @@ class ModelEvaluation:
                 model, system_message, temperature=0, max_tokens=5
             )
         elif model_family == "anthropic":
-            model_instance = AnthropicModel()
+            model_instance = AnthropicModel(
+                model, system_message, temperature=0, max_tokens=5
+            )
         elif model_family == "local":
             model_instance = LocalModel()
         else:
