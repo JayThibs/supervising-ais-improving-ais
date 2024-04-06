@@ -6,6 +6,7 @@ from datetime import datetime
 import pdb
 from matplotlib import pyplot as plt
 from data_preparation import DataPreparation
+from models import LocalModel
 from model_evaluation import ModelEvaluation
 from visualization import Visualization
 from clustering import Clustering
@@ -35,7 +36,12 @@ class EvaluatorPipeline:
         self.tables_dir = self.run_settings.directory_settings.tables_dir
 
         # model information
+        self.llms = self.run_settings.model_settings.models
         self.models = [model for _, model in self.llms]
+        self.local_models = {}
+        for model_family, model in self.llms:
+            if model_family == "local":
+                self.local_models[model] = LocalModel(model_name_or_path=model)
         print(f"Models: {self.models}")
         for model in self.models:
             if "gpt-" in model and (
@@ -77,7 +83,7 @@ class EvaluatorPipeline:
         self.plot_statement_clustering = False
 
         # Set up objects
-        self.model_eval = ModelEvaluation(self.run_settings, self.llms)
+        self.model_eval = ModelEvaluation(self.run_settings, self.llms, self)
         self.viz = Visualization(self.run_settings.plot_settings)
         self.clustering_obj = Clustering(self.run_settings.clustering_settings)
 
@@ -183,7 +189,7 @@ class EvaluatorPipeline:
                 system_message
                 or self.run_settings.prompt_settings.statements_system_message
             )
-            models = models or self.run_settings.model_settings.models
+            models = models or self.llms
 
             all_query_results = self.generate_and_save_responses(
                 text_subset,
@@ -205,7 +211,7 @@ class EvaluatorPipeline:
         system_message=None,
         llms=None,
     ):
-        llms = llms or self.run_settings.model_settings.models
+        llms = llms or self.llms
         prompt_template = (
             prompt_template
             or self.run_settings.prompt_settings.statements_prompt_template
@@ -278,7 +284,7 @@ class EvaluatorPipeline:
         )
         if not file_loaded:
             joint_embeddings_all_llms = self.create_embeddings(
-                all_query_results, self.run_settings.model_settings.models
+                all_query_results, self.llms
             )
 
         combined_embeddings = np.array(
@@ -593,6 +599,12 @@ class EvaluatorPipeline:
         # Load data
         all_texts = self.load_evaluation_data()
         # Generate responses to statement prompts
+        # Given that we can only fit 1 model in the GPU at a time, we will need to loop over the models we want to evaluate.
+        # For each loop, we'll run the entire pipeline for that model.
+        # Then, we'll remove that model from the GPU and load the next model.
+        # At the end, we'll plot the results for all models.
+        for model_name, local_model in self.local_models.items():
+            local_model.load()
         self.text_subset, all_query_results = self.generate_responses()
         self.all_model_info = self.collect_model_info(all_query_results)
         model_names = [llm[1] for llm in self.llms]
