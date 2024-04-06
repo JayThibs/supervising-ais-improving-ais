@@ -78,9 +78,6 @@ class EvaluatorPipeline:
             self.run_settings.prompt_settings.approval_prompt_template
         )
         self.set_reuse_flags()
-        self.hide_plots = self.process_hide_plots(
-            self.run_settings.plot_settings.hide_plots
-        )
         self.plot_statement_clustering = False
 
         # Set up objects
@@ -157,47 +154,6 @@ class EvaluatorPipeline:
                     reuse_types.add(item)  # add method to include in the set
 
         return reuse_types
-
-    def set_reuse_flags(self):
-        data_types = [
-            "embedding_clustering",
-            "joint_embeddings",
-            "tsne",
-            "approvals",
-            "hierarchical_approvals",
-            "hierarchical_awareness",
-            "awareness",
-            "cluster_rows",
-            "conditions",
-        ]
-
-        reuse_data_types = self.process_reuse_data(self.args.reuse_data, data_types)
-        print("Data types to reuse:", reuse_data_types)
-
-        for data_type in data_types:
-            setattr(self, f"reuse_{data_type}", data_type in reuse_data_types)
-
-    def process_hide_plots(self, hide_plots):
-        all_plot_types = [
-            "tsne",
-            "approval",
-            "awareness",
-            "hierarchical_approvals",
-            "hierarchical_awareness",
-            "spectral",
-        ]
-        hide_types = []
-
-        if "all" not in hide_plots:
-            hide_types = all_plot_types
-        else:
-            for plot_type in hide_plots:
-                if plot_type.startswith("!"):
-                    include_plot_type = plot_type[1:]
-                    if include_plot_type in all_plot_types:
-                        hide_types.remove(include_plot_type)
-
-        return hide_types
 
     def save_results(self, data, file_name, sub_dir):
         # Save data to a pickle file
@@ -290,7 +246,7 @@ class EvaluatorPipeline:
     def visualize_results(
         self, dim_reduce_tsne, joint_embeddings_all_llms, model_names, tsne_filename
     ):
-        if "tsne" not in self.hide_plots:
+        if "tsne" not in self.run_settings.plot_settings.hide_plot_types:
             self.viz.plot_embedding_responses(
                 dim_reduce_tsne,
                 joint_embeddings_all_llms,
@@ -555,7 +511,7 @@ class EvaluatorPipeline:
         - hierarchy_data: The hierarchical data to be visualized.
         - plot_type: The type of plot to generate ('approval' or 'awareness').
         """
-        if plot_type not in self.hide_plots:
+        if plot_type not in self.run_settings.plot_settings.hide_plot_types:
             for model_name in model_names:
                 filename = (
                     f"{self.viz_dir}/hierarchical_clustering_{plot_type}_{model_name}"
@@ -696,7 +652,10 @@ class EvaluatorPipeline:
                     )
 
                 # Visualize approval embeddings
-                if prompt_type not in self.hide_plots or "all" in self.hide_plots:
+                if (
+                    prompt_type not in self.run_settings.plot_settings.hide_plot_types
+                    or "all" in self.run_settings.plot_settings.hide_plot_types
+                ):
                     self.visualize_approval_embeddings(
                         model_names,
                         dim_reduce_tsne,
@@ -717,7 +676,7 @@ class EvaluatorPipeline:
                         n_clusters=n_clusters,
                         multiple=False,
                     )
-                if "spectral" not in self.hide_plots:
+                if "spectral" not in self.run_settings.plot_settings.hide_plot_types:
                     self.viz.plot_spectral_clustering(
                         statement_clustering.labels_,
                         n_clusters=n_clusters,
