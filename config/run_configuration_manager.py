@@ -36,7 +36,7 @@ class RunConfigurationManager:
             # Use this to play around with different settings before saving them as a new configuration
             ############################################
             "test": RunSettings(
-                name="test",
+                name="template",
                 model_settings=ModelSettings(
                     models=[
                         ("openai", "gpt-3.5-turbo"),
