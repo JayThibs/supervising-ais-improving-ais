@@ -7,6 +7,7 @@ import numpy as np
 import json
 import pickle
 from dotenv import load_dotenv
+from config.run_settings import DataSettings
 
 
 class DataPreparation:
@@ -74,18 +75,16 @@ class DataPreparation:
             print(f"Element {i}: {all_texts[i]}")
         return all_texts
 
-    def load_and_preprocess_data(
-        self, datasets: Union[str, List[str]] = "all", n_statements: int = 5000
-    ) -> List[str]:
+    def load_and_preprocess_data(self, data_settings: DataSettings) -> List[str]:
         """Load and preprocess evaluation data. Return a subset of texts."""
         # Determine file paths based on user input
-        if datasets == "all":
+        if data_settings.datasets == "all":
             file_paths = [
                 path for path in glob.iglob("data/evals/**/*.jsonl", recursive=True)
             ]
-        elif isinstance(datasets, list):
+        elif isinstance(data_settings.datasets, list):
             file_paths = []
-            for dataset in datasets:
+            for dataset in data_settings.datasets:
                 file_paths.extend(
                     [
                         path
@@ -98,7 +97,7 @@ class DataPreparation:
             file_paths = [
                 path
                 for path in glob.iglob(
-                    f"data/evals/**/{datasets}.jsonl", recursive=True
+                    f"data/evals/**/{data_settings.datasets}.jsonl", recursive=True
                 )
             ]
 
@@ -106,7 +105,7 @@ class DataPreparation:
         all_texts = self.load_evaluation_data(file_paths)
         short_texts = self.load_short_texts(all_texts)
         print(f"Sample short texts: {short_texts[:2]}")
-        text_subset = self.create_text_subset(short_texts, n_statements)
+        text_subset = self.create_text_subset(short_texts, data_settings.n_statements)
         print(f"Sample text subset: {text_subset[:2]}")
         print(f"Loaded {len(all_texts)} texts.")
         print(f"Loaded {len(short_texts)} short texts.")
@@ -119,12 +118,12 @@ class DataPreparation:
     def load_short_texts(self, all_texts, max_length=150):
         return [t[1] for t in all_texts if len(t[1]) < max_length]
 
-    def create_text_subset(self, texts, n_statements=5000, seed=42):
-        rng = np.random.default_rng(seed=seed)
-        return rng.permutation(texts)[:n_statements]
+    def create_text_subset(self, texts, data_settings: DataSettings):
+        rng = np.random.default_rng(seed=data_settings.random_state)
+        return rng.permutation(texts)[: data_settings.n_statements]
 
-    def save_to_pickle(self, data, filename):
-        pickle_dir = "data/intermediate/pickle_files"
+    def save_to_pickle(self, data, filename, run_settings: RunSettings):
+        pickle_dir = f"{run_settings.results_dir}/pickle_files"
         if not os.path.exists(pickle_dir):
             os.makedirs(pickle_dir)
         with open(os.path.join(pickle_dir, filename), "wb") as f:

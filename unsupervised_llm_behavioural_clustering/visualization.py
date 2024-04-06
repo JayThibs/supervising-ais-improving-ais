@@ -1,12 +1,12 @@
 import os
 import pdb
 import json
+import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
 import matplotlib.patches as mpatches
-from scipy.cluster.hierarchy import dendrogram, linkage
-from sklearn.manifold import TSNE
-import numpy as np
+from scipy.cluster.hierarchy import dendrogram
+from config.run_settings import PlotSettings
 
 
 class Visualization:

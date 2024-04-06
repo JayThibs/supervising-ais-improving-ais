@@ -27,17 +27,14 @@ from config.run_settings import (
 class EvaluatorPipeline:
     def __init__(self, run_settings: RunSettings):
         self.run_settings = run_settings
-        # Set up directories
-        self.test_mode = self.run_settings.test_mode
-        self.data_dir = f"{os.getcwd()}/data"
-        self.evals_dir = f"{self.data_dir}/evals"
-        self.results_dir = f"{self.data_dir}/results"
-        self.pickle_dir = f"{self.results_dir}/pickle_files"
-        self.viz_dir = f"{self.results_dir}/plots"
-        self.tables_dir = f"{self.results_dir}/tables"
+        self.data_dir = self.run_settings.directory_settings.data_dir
+        self.evals_dir = self.run_settings.directory_settings.evals_dir
+        self.results_dir = self.run_settings.directory_settings.results_dir
+        self.pickle_dir = self.run_settings.directory_settings.pickle_dir
+        self.viz_dir = self.run_settings.directory_settings.viz_dir
+        self.tables_dir = self.run_settings.directory_settings.tables_dir
 
         # model information
-        self.llms = self.run_settings.model_settings.models
         self.models = [model for _, model in self.llms]
         print(f"Models: {self.models}")
         for model in self.models:
@@ -77,7 +74,6 @@ class EvaluatorPipeline:
         self.approval_question_prompt_template = (
             self.run_settings.prompt_settings.approval_prompt_template
         )
-        self.set_reuse_flags()
         self.plot_statement_clustering = False
 
         # Set up objects
@@ -139,22 +135,6 @@ class EvaluatorPipeline:
         all_texts = self.data_prep.load_evaluation_data(self.data_prep.file_paths)
         return all_texts
 
-    def process_reuse_data(self, reuse_data, all_data_types):
-        reuse_types = set()
-
-        if "all" in reuse_data:
-            reuse_types = set(all_data_types)  # Ensure it's a set
-            for item in reuse_data:
-                if item.startswith("!"):
-                    exclude_type = item[1:]
-                    reuse_types.discard(exclude_type)  # discard method works on sets
-        else:
-            for item in reuse_data:
-                if item in all_data_types:
-                    reuse_types.add(item)  # add method to include in the set
-
-        return reuse_types
-
     def save_results(self, data, file_name, sub_dir):
         # Save data to a pickle file
         if not os.path.exists(f"{self.results_dir}/{sub_dir}"):
@@ -179,21 +159,38 @@ class EvaluatorPipeline:
         filename += f"{plot_type}.png"
         return filename
 
-    def generate_responses(self):
-        self.perplexity = (
+    def generate_responses(
+        self,
+        n_statements=None,
+        prompt_template=None,
+        system_message=None,
+        models=None,
+        perplexity=None,
+    ):
+        perplexity = perplexity or (
             3 if self.test_mode else self.run_settings.tsne_settings.perplexity
         )
-        text_subset = self.data_prep.load_and_preprocess_data(
-            n_statements=self.n_statements
-        )
+
+        n_statements = n_statements or self.run_settings.data_settings.n_statements
+        text_subset = self.data_prep.load_and_preprocess_data(n_statements=n_statements)
 
         if self.saved_query_results is None:
+            prompt_template = (
+                prompt_template
+                or self.run_settings.prompt_settings.statements_prompt_template
+            )
+            system_message = (
+                system_message
+                or self.run_settings.prompt_settings.statements_system_message
+            )
+            models = models or self.run_settings.model_settings.models
+
             all_query_results = self.generate_and_save_responses(
                 text_subset,
-                self.n_statements,
-                self.run_settings.prompt_settings.statements_prompt_template,
-                self.run_settings.prompt_settings.statements_system_message,
-                self.llms,
+                n_statements,
+                prompt_template,
+                system_message,
+                models,
             )
         else:
             all_query_results = [self.saved_query_results]
@@ -201,8 +198,23 @@ class EvaluatorPipeline:
         return text_subset, all_query_results
 
     def generate_and_save_responses(
-        self, text_subset, n_statements, prompt_template, system_message, llms
+        self,
+        text_subset,
+        n_statements=None,
+        prompt_template=None,
+        system_message=None,
+        llms=None,
     ):
+        llms = llms or self.run_settings.model_settings.models
+        prompt_template = (
+            prompt_template
+            or self.run_settings.prompt_settings.statements_prompt_template
+        )
+        system_message = (
+            system_message
+            or self.run_settings.prompt_settings.statements_system_message
+        )
+        n_statements = n_statements or self.run_settings.data_settings.n_statements
         all_query_results = []
         for model_family, model in llms:
             print(f"Generating responses for {model} from {model_family}...")
@@ -228,10 +240,13 @@ class EvaluatorPipeline:
             print(key)
         return all_model_info
 
-    def perform_tsne_dimensionality_reduction(self, combined_embeddings):
+    def perform_tsne_dimensionality_reduction(
+        self, combined_embeddings, perplexity=None
+    ):
         print("Performing t-SNE dimensionality reduction...")
+        perplexity = perplexity or self.run_settings.tsne_settings.perplexity
         dim_reduce_tsne = self.model_eval.tsne_dimension_reduction(
-            combined_embeddings, iterations=300, perplexity=self.perplexity
+            combined_embeddings, iterations=300, perplexity=perplexity
         )
         self.check_tsne_values(dim_reduce_tsne)
         return dim_reduce_tsne
@@ -259,11 +274,11 @@ class EvaluatorPipeline:
         file_loaded, joint_embeddings_all_llms = load_pkl_or_not(
             "joint_embeddings_all_llms.pkl",
             self.pickle_dir,
-            self.reuse_joint_embeddings,
+            self.run_settings.data_settings.reuse_joint_embeddings,
         )
         if not file_loaded:
             joint_embeddings_all_llms = self.create_embeddings(
-                all_query_results, self.llms
+                all_query_results, self.run_settings.model_settings.models
             )
 
         combined_embeddings = np.array(
@@ -329,7 +344,9 @@ class EvaluatorPipeline:
 
     def run_clustering(self, combined_embeddings):
         file_loaded, chosen_clustering = load_pkl_or_not(
-            "chosen_clustering.pkl", self.pickle_dir, self.reuse_embedding_clustering
+            "chosen_clustering.pkl",
+            self.pickle_dir,
+            self.run_settings.data_settings.reuse_embedding_clustering,
         )
         if not file_loaded:
             print("Running clustering...")
@@ -347,7 +364,9 @@ class EvaluatorPipeline:
     ):
         print("Analyzing clusters...")
         file_loaded, rows = load_pkl_or_not(
-            "rows.pkl", self.pickle_dir, self.reuse_cluster_rows
+            "rows.pkl",
+            self.pickle_dir,
+            self.run_settings.data_settings.reuse_cluster_rows,
         )
         if not file_loaded:
             rows = self.clustering_obj.compile_cluster_table(
@@ -361,12 +380,8 @@ class EvaluatorPipeline:
         # Save and display the results
         # Save chosen clustering and rows using pickle for later use
         print("Saving results...")
-        clustering_file_path = (
-            f"{os.getcwd()}/data/results/pickle_files/latest_clustering_reaction.pkl"
-        )
-        rows_file_path = (
-            f"{os.getcwd()}/data/results/pickle_files/latest_clustering_rows.pkl"
-        )
+        clustering_file_path = f"{self.pickle_dir}/latest_clustering_reaction.pkl"
+        rows_file_path = f"{self.pickle_dir}/latest_clustering_rows.pkl"
         with open(clustering_file_path, "wb") as f:
             pickle.dump(chosen_clustering, f)
         with open(rows_file_path, "wb") as f:
@@ -378,24 +393,19 @@ class EvaluatorPipeline:
         )
         return rows
 
-    def load_or_generate_approvals_data(
-        self,
-        approvals_type,
-        reuse_approvals=False,
-    ):
+    def load_or_generate_approvals_data(self, approvals_type, reuse_approvals):
         """
         Using the statements from a dataset, prompt the language model with a set of personas
         and ask them if they approve or disapprove of the statements. For the set of personas,
         generate the approval responses for each language model you want to evaluate.
         """
+        reuse_conditions = reuse_approvals  # can set to True if you only want to debug after the conditions are generated
         pickle_filename = f"approvals_statements_and_embeddings_{approvals_type}.pkl"
-        file_loaded = False
-        if reuse_approvals:
-            file_loaded, approvals_statements_and_embeddings = load_pkl_or_not(
-                pickle_filename,
-                self.pickle_dir,
-                reuse_approvals,
-            )
+        file_loaded, approvals_statements_and_embeddings = load_pkl_or_not(
+            pickle_filename,
+            self.pickle_dir,
+            reuse_approvals,
+        )
 
         if not file_loaded:
             print("Generating approvals...")
@@ -410,10 +420,10 @@ class EvaluatorPipeline:
             conditions_loaded, all_condition_approvals = load_pkl_or_not(
                 "all_condition_approvals_{approvals_type}.pkl",
                 self.pickle_dir,
-                self.reuse_conditions,
+                reuse_conditions,
             )
 
-            if not self.reuse_conditions or not conditions_loaded:
+            if not reuse_conditions or not conditions_loaded:
                 # note: self.args.models is a list of models
                 # create a dictionary with the model as the key, and a list of persona approvals as the value
                 all_condition_approvals = {model: [] for model in self.args.models}
@@ -629,10 +639,11 @@ class EvaluatorPipeline:
                     f"prompt_type: {prompt_type}"
                 )  # e.g. "personas", "awareness", etc.
                 # approvals_statements_and_embeddings: # [ [{model_1: [approval1, approval2, ...], model_2: [approval1, approval2, ...], ...}, statement, embedding], ... ]
+                # get boolean from run_settings to determine if we should reuse the hierarchical approvals for whichever prompt type we are currently evaluating
+                reuse_approvals = self.run_settings.data_settings.reuse_approvals
                 approvals_statements_and_embeddings = (
                     self.load_or_generate_approvals_data(
-                        approvals_type=prompt_type,
-                        reuse_approvals=self.run_settings.data_settings.reuse_approvals,
+                        approvals_type=prompt_type, reuse_approvals=reuse_approvals
                     )
                 )
                 if "statement_embeddings" not in locals():
@@ -648,7 +659,7 @@ class EvaluatorPipeline:
                     dim_reduce_tsne = self.model_eval.tsne_dimension_reduction(
                         statement_embeddings,
                         iterations=2000,
-                        perplexity=self.perplexity,
+                        perplexity=self.run_settings.tsne_settings.perplexity,
                     )
 
                 # Visualize approval embeddings
@@ -687,7 +698,7 @@ class EvaluatorPipeline:
                     statement_clustering,
                     self.all_model_info,
                     prompt_dict=prompt_dict,
-                    reuse_cluster_rows=self.reuse_cluster_rows,
+                    reuse_cluster_rows=self.run_settings.data_settings.reuse_cluster_rows,
                 )
                 print(
                     f"Calculating hierarchical cluster data for {prompt_type} prompts..."
