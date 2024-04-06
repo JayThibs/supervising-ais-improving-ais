@@ -17,7 +17,7 @@ class DivergenceFinder:
         # Default values
         self.model_name = "gpt2-xl"
         self.generation_length = 20
-        self.n_cycles_ask_chatgpt = 2
+        self.n_cycles_ask_assistant = 2
         self.openai_model_str = None
         self.local_model_str = "Upstage/SOLAR-10.7B-Instruct-v1.0"
         self.generations_per_prefix = 3
@@ -38,7 +38,7 @@ class DivergenceFinder:
         self.n_past_texts_subsampled = 10
         self.subsampling_randomness_temperature = 0.5
         self.api_key_path = "../key.txt"
-        self.prompts_json_path = "chatgpt_prompts/who_is_harry_potter_find_CD_prompts.json"
+        self.prompts_json_path = "assistant_prompts/who_is_harry_potter_find_CD_prompts.json"
         self.quantize = True
         self.divergence_fnct = 'l1'
         self.include_prefix_in_divergences = False
@@ -226,14 +226,11 @@ class DivergenceFinder:
         return scores
     
     def search_step(self):
-        if self.verbose:
-            print("round_divergences_and_texts:")
-            print_texts_with_divergences(self.round_divergences_and_texts, max_width = self.max_width)
-        # Compose messages to send ChatGPT
+        # Compose messages to send the assistant
         if len(self.round_divergences_and_texts) > 0:
             # First, rescale round_divergences_and_texts divergence values into [0, 10]
             rescaled_round_divergences_and_texts = rescale_divergences(self.round_divergences_and_texts)
-            # Format divergences and texts into a single string to provide ChatGPT
+            # Format divergences and texts into a single string to provide the assistant
             current_divergences_and_texts_str = "\n".join([f"divergence {i}: {round(div, 3)}, input text {i}: {text}" for i, (div, text) in enumerate(rescaled_round_divergences_and_texts)])
             messages=[
             {"role": "system", "content": self.system_start_prompt + "\n" + self.system_loop_prompt},
@@ -245,7 +242,7 @@ class DivergenceFinder:
             {"role": "user", "content": self.user_end_prompt}
              ]
 
-        # Get new messages from either ChatGPT or a local model:
+        # Get new messages from the assistant:
         output_text = self.get_continuation(messages, self.openai_model_str, self.client, self.local_model, self.local_tokenizer, self.device)
         #print("output_text:", output_text)
         additional_texts = interpret_assistant_outputs(output_text)
@@ -275,25 +272,27 @@ class DivergenceFinder:
             additional_divergences_and_texts = list(zip(additional_divergences, additional_texts, comparison_model_responses, custom_scores))
             if self.use_custom_selection_criterion:
                 custom_scores = self.score_by_custom_selection_criterion(additional_divergences_and_texts, self.openai_model_str, self.client, self.local_model, self.local_tokenizer, self.custom_selection_criterion, self.custom_selection_criterion_yes_response, self.custom_selection_criterion_no_response, self.custom_selection_criterion_examples, self.device)
-                if self.verbose:
-                    table_data = [["#", "Prompt", "Response", "Custom Score Boolean"]]
-                    for i, (_, prompt, response, custom_score) in enumerate(zip(additional_divergences, additional_texts, comparison_model_responses, custom_scores)):
-                        custom_score_boolean = custom_score != 0
-                        row = [str(i+1), textwrap.fill(prompt.replace("\n", "\\n"), width=self.max_width), textwrap.fill(response.replace("\n", "\\n"), width=self.max_width), str(custom_score_boolean)]
-                        table_data.append(row)
-                    table = AsciiTable(table_data)
-                    table.inner_row_border = True
-                    print(table.table)
+                # if self.verbose:
+                #     table_data = [["#", "Prompt", "Response", "Custom Score Boolean"]]
+                #     for i, (_, prompt, response, custom_score) in enumerate(zip(additional_divergences, additional_texts, comparison_model_responses, custom_scores)):
+                #         custom_score_boolean = custom_score != 0
+                #         row = [str(i+1), textwrap.fill(prompt.replace("\n", "\\n"), width=self.max_width), textwrap.fill(response.replace("\n", "\\n"), width=self.max_width), str(custom_score_boolean)]
+                #         table_data.append(row)
+                #     table = AsciiTable(table_data)
+                #     table.inner_row_border = True
+                #     print(table.table)
                 additional_divergences_and_texts = list(zip(additional_divergences, additional_texts, comparison_model_responses, custom_scores))
             # Expand all_divergences_and_texts with results:
             self.all_divergences_and_texts = self.all_divergences_and_texts + additional_divergences_and_texts
-        # Assemble a new query from ChatGPT's responses / additional_texts.
+        # Assemble a new query from the assistant's responses / additional_texts.
         if self.sequential and len(additional_texts) > 0:
-            # Feed ChatGPT only its own responses from this round, from additional_divergences and additional_texts
+            # Feed the assistant only its own responses from this round, from additional_divergences and additional_texts
             self.round_divergences_and_texts = additional_divergences_and_texts
         else:
             # If not sequential (or if we didn't get any additional texts from this round), 
-            # then feed ChatGPT responses from all_divergences_and_texts
+            # then feed the assistant responses from all_divergences_and_texts
+            print("Num total texts     :", len(self.all_divergences_and_texts))
+            print("Num additional texts:", len(additional_texts))
             if len(additional_texts) == 0:
                 print("Warning: No additional texts were obtained from this round.")
             # Subsample from all_divergences_and_texts
@@ -305,7 +304,7 @@ class DivergenceFinder:
                 print_texts_with_divergences(self.round_divergences_and_texts, max_width = self.max_width)
     
     def search_loop(self):
-        for _ in tqdm.tqdm(range(self.n_cycles_ask_chatgpt)):
+        for _ in tqdm.tqdm(range(self.n_cycles_ask_assistant)):
             self.search_step()
         try:
             # Sort the list by divergence values in descending order
@@ -413,8 +412,9 @@ def divergence_weighted_subsample(divergence_and_texts, n_past_texts_subsampled 
             weights = np.exp(-np.array(weights) / subsampling_randomness_temperature)
         weights /= np.sum(weights)
 
-        # Randomly choose indices based on weights
-        chosen_indices = np.random.choice(len(divergence_and_texts), size=n_past_texts_subsampled, p=weights)
+        n_samples = min(n_past_texts_subsampled, len(divergence_and_texts))
+        # Randomly choose indices based on weights without repetition
+        chosen_indices = np.random.choice(len(divergence_and_texts), size=n_samples, p=weights, replace=False)
     else:
         # If no randomness, just select the top n_past_texts_subsampled texts by weights
         chosen_indices = np.argsort(weights)[-n_past_texts_subsampled:]
