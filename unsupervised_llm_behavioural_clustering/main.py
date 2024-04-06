@@ -23,13 +23,6 @@ def get_args():
     )
 
     parser.add_argument(
-        "--texts_subset",
-        type=int,
-        default=10,
-        help="Number of texts to consider as a subset for evaluation. 10 works as a test.",
-    )
-
-    parser.add_argument(
         "--model_families",
         nargs="+",
         type=str,
