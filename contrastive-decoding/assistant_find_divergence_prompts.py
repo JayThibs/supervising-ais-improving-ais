@@ -1,6 +1,6 @@
 import torch
 from model_comparison_helpers import instantiate_models
-import tqdm
+import pandas as pd
 import json
 from openai import OpenAI
 import re
@@ -18,6 +18,7 @@ class DivergenceFinder:
         self.model_name = "gpt2-xl"
         self.generation_length = 20
         self.n_cycles_ask_assistant = 2
+        self.max_failed_cycles = 2
         self.openai_model_str = None
         self.local_model_str = "Upstage/SOLAR-10.7B-Instruct-v1.0"
         self.generations_per_prefix = 3
@@ -37,13 +38,14 @@ class DivergenceFinder:
         self.sequential = True
         self.n_past_texts_subsampled = 10
         self.subsampling_randomness_temperature = 0.5
-        self.api_key_path = "../key.txt"
+        self.api_key_path = None
         self.prompts_json_path = "assistant_prompts/who_is_harry_potter_find_CD_prompts.json"
+        self.results_save_path = None
         self.quantize = True
         self.divergence_fnct = 'l1'
         self.include_prefix_in_divergences = False
         self.verbose = True
-        self.max_width = 70
+        self.max_width = 65
         self.use_custom_selection_criterion = False
         self.use_custom_selection_criterion_examples = False
 
@@ -148,14 +150,19 @@ class DivergenceFinder:
             self.round_divergences_and_texts = []
 
         # Read OpenAI auth key from a file
-        with open(self.api_key_path, 'r') as file:
-            openai_auth_key = file.read().strip()
+        if self.api_key_path is not None:
+            with open(self.api_key_path, 'r') as file:
+                openai_auth_key = file.read().strip()
 
-        # Authenticate with the OpenAI API
-        self.client = OpenAI(api_key=openai_auth_key)
+            # Authenticate with the OpenAI API
+            self.client = OpenAI(api_key=openai_auth_key)
+        else:
+            self.client = None
 
     def get_continuation(self, messages, openai_model_str, client, local_model, local_tokenizer, device, verbose_continuations = False):
         if openai_model_str is not None:
+            if client is None:
+                raise ValueError("You must provide an OpenAI API key to use an OpenAI model.")
             # Generate a new text from ChatGPT
             if verbose_continuations:
                 print("messages:", messages)
@@ -236,7 +243,6 @@ class DivergenceFinder:
             {"role": "system", "content": self.system_start_prompt + "\n" + self.system_loop_prompt},
             {"role": "user", "content": current_divergences_and_texts_str + "\n" + self.user_end_prompt}
             ]
-
         else:
              messages=[{"role": "system", "content": self.system_start_prompt},
             {"role": "user", "content": self.user_end_prompt}
@@ -291,21 +297,32 @@ class DivergenceFinder:
         else:
             # If not sequential (or if we didn't get any additional texts from this round), 
             # then feed the assistant responses from all_divergences_and_texts
-            print("Num total texts     :", len(self.all_divergences_and_texts))
-            print("Num additional texts:", len(additional_texts))
-            if len(additional_texts) == 0:
-                print("Warning: No additional texts were obtained from this round.")
             # Subsample from all_divergences_and_texts
             
             self.round_divergences_and_texts = divergence_weighted_subsample(self.all_divergences_and_texts, self.n_past_texts_subsampled, self.subsampling_randomness_temperature, self.use_custom_selection_criterion)
-            
-            if self.verbose:
-                print("round_divergences_and_texts:")
-                print_texts_with_divergences(self.round_divergences_and_texts, max_width = self.max_width)
+
+        n_additional_texts = len(additional_texts)
+        print("Num total texts     :", len(self.all_divergences_and_texts))
+        print("Num additional texts:", n_additional_texts)
+        if self.verbose:
+            print("round_divergences_and_texts:")
+            print_texts_with_divergences(self.round_divergences_and_texts, max_width = self.max_width)
+        return n_additional_texts
     
     def search_loop(self):
-        for _ in tqdm.tqdm(range(self.n_cycles_ask_assistant)):
-            self.search_step()
+        cycle_count = 0
+        failed_cycle_count = 0
+        while cycle_count < self.n_cycles_ask_assistant:
+            n_additional_texts = self.search_step()
+            if n_additional_texts > 0:
+                cycle_count += 1
+                failed_cycle_count = 0
+            else:
+                failed_cycle_count += 1
+                print("Failed to get additional texts from this round. Retrying...")
+                print("Failed cycle count:", failed_cycle_count)
+                if failed_cycle_count >= self.max_failed_cycles:
+                    raise ValueError("Maximum number of failed cycles reached. Exiting search loop.")
         try:
             # Sort the list by divergence values in descending order
             self.all_divergences_and_texts.sort(key=lambda x: x[0], reverse=True)
@@ -318,7 +335,7 @@ class DivergenceFinder:
                 wrapped_response = textwrap.fill(self.all_divergences_and_texts[i][2].replace("\n", "\\n"), width=self.max_width)
                 row = [str(i+1), str(round(self.all_divergences_and_texts[i][0], 3)), wrapped_text, wrapped_response, str(self.all_divergences_and_texts[i][3] != 0)]
                 table_data.append(row)
-            table = AsciiTable(table_data)
+            table = AsciiTable(table_data, "Highest Divergence Texts")
             table.inner_row_border = True
             print(table.table)
             
@@ -329,7 +346,7 @@ class DivergenceFinder:
                 wrapped_response = textwrap.fill(self.all_divergences_and_texts[-(i+1)][2].replace("\n", "\\n"), width=self.max_width)
                 row = [str(i+1), str(round(self.all_divergences_and_texts[-(i+1)][0], 3)), wrapped_text, wrapped_response, str(self.all_divergences_and_texts[-(i+1)][3] != 0)]
                 table_data_lowest.append(row)
-            table_lowest = AsciiTable(table_data_lowest)
+            table_lowest = AsciiTable(table_data_lowest, "Lowest Divergence Texts")
             table_lowest.inner_row_border = True
             print(table_lowest.table)
         except:
@@ -340,6 +357,17 @@ class DivergenceFinder:
             for key, value in kwargs.items():
                 setattr(self, key, value)
         self.search_loop()
+        if self.results_save_path is not None:
+            print("Saving results to", self.results_save_path)
+            # If the path ends in tsv, save as a tsv file. Otherwise, assume a json file.
+            if self.results_save_path.endswith(".tsv"):
+                df = pd.DataFrame(self.all_divergences_and_texts, columns=["Divergence", "Text", "Response", "CSB"])
+                df.to_csv(self.results_save_path, index=False, sep="\t")
+            elif self.results_save_path.endswith(".json"):
+                    with open(self.results_save_path, "w") as f:
+                        json.dump(self.all_divergences_and_texts, f)
+            else:
+                raise ValueError("Results save path must end with .tsv or .json")
         return self.all_divergences_and_texts
     
 
@@ -400,6 +428,8 @@ def interpret_assistant_outputs(output_text, as_json = True, fallback_to_newline
 # scaling the degree of randomness.
 # Optionally takes in a boolean to use scores from a custom selection criterion to bias selection process.
 def divergence_weighted_subsample(divergence_and_texts, n_past_texts_subsampled = 5, subsampling_randomness_temperature = 0.5, select_high_divergence = False, use_custom_selection_criterion = False):
+    if len(divergence_and_texts) == 0:
+        return []
     if use_custom_selection_criterion:
         weights = [entry[0] + entry[3] for entry in divergence_and_texts]
     else:
@@ -414,10 +444,15 @@ def divergence_weighted_subsample(divergence_and_texts, n_past_texts_subsampled 
 
         n_samples = min(n_past_texts_subsampled, len(divergence_and_texts))
         # Randomly choose indices based on weights without repetition
-        chosen_indices = np.random.choice(len(divergence_and_texts), size=n_samples, p=weights, replace=False)
+        try:
+            chosen_indices = np.random.choice(len(divergence_and_texts), size=n_samples, p=weights, replace=False)
+        except:
+            print("weights:", weights)
+            print("n_samples:", n_samples)
+            raise ValueError("Could not select indices based on weights.")
     else:
         # If no randomness, just select the top n_past_texts_subsampled texts by weights
-        chosen_indices = np.argsort(weights)[-n_past_texts_subsampled:]
+        chosen_indices = np.argsort(weights)[-n_samples:]
 
     # Select the subsampled pairs
     subsample = [divergence_and_texts[i] for i in chosen_indices]
