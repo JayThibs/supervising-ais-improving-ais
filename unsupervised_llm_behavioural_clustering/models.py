@@ -1,4 +1,5 @@
 from openai import OpenAI
+import anthropic
 from tenacity import (
     retry,
     stop_after_attempt,
@@ -49,25 +50,68 @@ class OpenAIModel(LanguageModelInterface):
 
 
 class AnthropicModel(LanguageModelInterface):
-    def __init__(self, model):
+    def __init__(self, model, system_message, temperature=0.1, max_tokens=150):
         self.model = model
+        self.system_message = system_message
+        self.temperature = temperature
+        self.max_tokens = max_tokens
+        self.client = anthropic.Anthropic()
 
-    def generate(self, prompts):
-        # Your Anthropic API logic here
-        pass
+    def generate(self, prompt):
+        print("Generating with Anthropic API...")
+
+        @retry(wait=wait_random_exponential(min=20, max=60), stop=stop_after_attempt(6))
+        def completion_with_backoff(model, system_message, prompt):
+            message = self.client.messages.create(
+                model=model,
+                max_tokens=self.max_tokens,
+                temperature=self.temperature,
+                system=system_message,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            return message
+
+        message = completion_with_backoff(
+            model=self.model, system_message=self.system_message, prompt=prompt
+        )
+
+        print("Completed generation.")
+        return message.content
+
+
+from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
 
 
 class LocalModel(LanguageModelInterface):
     """Superclass for local models."""
 
-    def __init__(self, model):
-        # Your local model setup logic here
-        self.model = model
+    def __init__(self, model_name_or_path, device=-1, max_length=150):
+        self.model_name_or_path = model_name_or_path
+        self.device = device
+        self.max_length = max_length
+        self.model = None
+        self.tokenizer = None
+        self.pipeline = None
 
     def load(self):
-        # Your local model loading logic here
-        pass
+        print(f"Loading model: {self.model_name_or_path}")
+        self.model = AutoModelForCausalLM.from_pretrained(self.model_name_or_path)
+        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name_or_path)
+        self.pipeline = pipeline(
+            "text-generation",
+            model=self.model,
+            tokenizer=self.tokenizer,
+            device=self.device,
+            max_length=self.max_length,
+        )
+        print("Model loaded successfully.")
 
-    def generate(self, prompts):
-        # Your local model logic here
-        pass
+    def generate(self, prompt):
+        if self.pipeline is None:
+            raise ValueError("Model not loaded. Call load() method first.")
+
+        print("Generating with local model...")
+        output = self.pipeline(prompt, num_return_sequences=1)
+        generated_text = output[0]["generated_text"]
+        print("Completed generation.")
+        return generated_text
