@@ -5,6 +5,7 @@ from tenacity import (
     stop_after_attempt,
     wait_random_exponential,
 )  # for exponential backoff
+from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
 
 
 class LanguageModelInterface:
@@ -77,9 +78,6 @@ class AnthropicModel(LanguageModelInterface):
 
         print("Completed generation.")
         return message.content
-
-
-from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
 
 
 class LocalModel(LanguageModelInterface):
