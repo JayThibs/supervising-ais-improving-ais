@@ -3,6 +3,7 @@ import json
 from dataclasses import dataclass, field
 from typing import List, Tuple, Dict, Any
 
+
 # Define constants for available data types
 REUSABLE_DATA_TYPES = [
     "embedding_clustering",
@@ -28,24 +29,28 @@ HIDEABLE_PLOT_TYPES = [
 
 
 @dataclass
-class ModelSettings:
-    models: List[Tuple[str, str]] = field(
-        default_factory=lambda: [("openai", "gpt-3.5-turbo")]
-    )
+class DirectorySettings:
+    data_dir: str = f"{os.getcwd()}/data"
+    evals_dir: str = f"{os.getcwd()}/data/evals"
+    results_dir: str = f"{os.getcwd()}/data/results"
+    pickle_dir: str = f"{os.getcwd()}/data/results/pickle_files"
+    viz_dir: str = f"{os.getcwd()}/data/results/plots"
+    tables_dir: str = f"{os.getcwd()}/data/results/tables"
 
 
 @dataclass
 class DataSettings:
     n_statements: int = 5000
     new_generation: bool = False
+    random_state: int = 42
     reuse_data: List[str] = field(default_factory=lambda: ["all"])
     reuse_embedding_clustering: bool = False
     reuse_joint_embeddings: bool = False
     reuse_tsne: bool = False
-    reuse_approvals: bool = False
+    reuse_personas: bool = False
     reuse_hierarchical_approvals: bool = False
-    reuse_hierarchical_awareness: bool = False
     reuse_awareness: bool = False
+    reuse_hierarchical_awareness: bool = False
     reuse_cluster_rows: bool = False
     reuse_conditions: bool = False
 
@@ -69,6 +74,13 @@ class DataSettings:
                     reuse_types.add(item)
 
         return reuse_types
+
+
+@dataclass
+class ModelSettings:
+    models: List[Tuple[str, str]] = field(
+        default_factory=lambda: [("openai", "gpt-3.5-turbo")]
+    )
 
 
 @dataclass
@@ -218,6 +230,7 @@ class TsneSettings:
 @dataclass
 class RunSettings:
     name: str
+    directory_settings: DirectorySettings = field(default_factory=DirectorySettings)
     model_settings: ModelSettings = field(default_factory=ModelSettings)
     data_settings: DataSettings = field(default_factory=DataSettings)
     prompt_settings: PromptSettings = field(default_factory=PromptSettings)
