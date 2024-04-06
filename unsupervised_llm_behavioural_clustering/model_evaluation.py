@@ -1,23 +1,19 @@
 import os
 import csv
 import numpy as np
-import glob
-import pickle
-import random
-import time
 import pdb
 from tqdm import tqdm
 from utils import *
 from sklearn.manifold import TSNE
-from clustering import Clustering
 from sklearn.cluster import KMeans
 from prettytable import PrettyTable
 from models import OpenAIModel, AnthropicModel, LocalModel
+from config.run_settings import RunSettings
 
 
 class ModelEvaluation:
-    def __init__(self, args, llms):
-        self.args = args
+    def __init__(self, run_settings: RunSettings, llms):
+        self.settings = run_settings
         self.llms = llms
 
     def get_model_approvals(
@@ -67,9 +63,7 @@ class ModelEvaluation:
 
         return approvals
 
-    def tsne_dimension_reduction(
-        self, embeddings, dimensions=2, perplexity=50, iterations=2000, random_state=42
-    ):
+    def tsne_dimension_reduction(self, embeddings):
         """
         Performs dimensionality reduction on embeddings using t-SNE.
 
@@ -84,15 +78,16 @@ class ModelEvaluation:
         np.ndarray: The reduced embeddings as a NumPy array.
         """
         # Perform the t-SNE dimensionality reduction
+        tsne_settings = self.settings.tsne_settings
         tsne = TSNE(
-            n_components=dimensions,
-            perplexity=perplexity,
-            n_iter=iterations,
-            angle=0.8,
-            init="pca",
-            early_exaggeration=22,
-            learning_rate="auto",
-            random_state=random_state,
+            n_components=tsne_settings.dimensions,
+            perplexity=tsne_settings.perplexity,
+            n_iter=tsne_settings.iterations,
+            angle=tsne_settings.angle,
+            init=tsne_settings.init,
+            early_exaggeration=tsne_settings.early_exaggeration,
+            learning_rate=tsne_settings.learning_rate,
+            random_state=tsne_settings.random_state,
         )
         reduced_embeddings = tsne.fit_transform(X=embeddings)
 
@@ -102,9 +97,11 @@ class ModelEvaluation:
         self, combined_embeddings: np.array, n_clusters: int = 200
     ) -> KMeans:
         """Perform clustering on combined embeddings."""
-        clustering = KMeans(n_clusters=n_clusters, random_state=42).fit(
-            combined_embeddings
-        )
+        clustering_settings = self.run_settings.clustering_settings
+        clustering = KMeans(
+            n_clusters=clustering_settings.n_clusters,
+            random_state=clustering_settings.random_state,
+        ).fit(combined_embeddings)
         return clustering
 
     def run_eval(
@@ -113,12 +110,14 @@ class ModelEvaluation:
         n_statements,
         llm,
     ):
-        system_message = self.args.statements_system_message
-        prompt_template = self.args.statements_prompt_template
+        prompt_settings = self.settings.prompt_settings
+        data_settings = self.settings.data_settings
+        system_message = prompt_settings.statements_system_message
+        prompt_template = prompt_settings.statements_prompt_template
         model_family, model = llm[0], llm[1]
 
         # Check if there is a saved generated responses file
-        file_name = f"{model_family}_{model}_reaction_to_{n_statements}_anthropic_statements.pkl"
+        file_name = f"{model_family}_{model}_reaction_to_{data_settings.n_statements}_anthropic_statements.pkl"
         query_results = query_model_on_statements(
             text_subset, model_family, model, prompt_template, system_message
         )  # dictionary of inputs, responses, and model instance
@@ -143,7 +142,8 @@ class ModelEvaluation:
                 "Interaction Themes",  # LLM says the theme of the input and response together
             ]
         )
-        csv_file_path = f"{os.getcwd()}/data/results/tables/cluster_results_table_statement_responses.csv"
+        plot_settings = self.settings.plot_settings
+        csv_file_path = f"{plot_settings.save_path}/tables/cluster_results_table_statement_responses.csv"
         with open(csv_file_path, mode="w", newline="", encoding="utf-8") as file:
             writer = csv.writer(file)
             writer.writerow(table_headers)
