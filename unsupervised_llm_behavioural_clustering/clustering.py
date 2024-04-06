@@ -4,24 +4,16 @@ import numpy as np
 from tqdm import tqdm
 import pdb
 import pickle
-import matplotlib.pyplot as plt
-from matplotlib.patches import Rectangle
-import matplotlib.patches as mpatches
-import sklearn
 from terminaltables import AsciiTable
 from sklearn.cluster import OPTICS, SpectralClustering, AgglomerativeClustering, KMeans
 from scipy.cluster.hierarchy import dendrogram, linkage, to_tree
 from utils import lookup_cid_pos_in_rows, identify_theme, compare_response_pair
-from dataclasses import dataclass
-
-
-from dataclasses import dataclass, asdict
-import json
+from config.run_settings import ClusteringSettings
 
 
 class Clustering:
-    def __init__(self, args):
-        self.args = args
+    def __init__(self, clustering_settings: ClusteringSettings):
+        self.settings = clustering_settings
 
     def cluster_embeddings(
         self,
@@ -35,13 +27,17 @@ class Clustering:
             cluster_algorithms = {
                 "OPTICS": OPTICS(min_samples=2, xi=0.12),
                 "Spectral": SpectralClustering(
-                    100 if not self.args.test_mode else 10, random_state=42
+                    self.settings.n_clusters if not self.settings.test_mode else 10,
+                    random_state=42,
                 ),
                 "Agglomerative": AgglomerativeClustering(
-                    100 if not self.args.test_mode else 10
+                    self.settings.n_clusters if not self.settings.test_mode else 10
                 ),
                 "KMeans": KMeans(
-                    n_clusters=200 if not self.args.test_mode else 10, random_state=42
+                    n_clusters=(
+                        self.settings.n_clusters if not self.settings.test_mode else 10
+                    ),
+                    random_state=42,
                 ),
                 # Add more as needed
             }
@@ -54,15 +50,19 @@ class Clustering:
             print(f"Running {clustering_algorithm} on embeddings...")
             if clustering_algorithm == "SpectralClustering":
                 clustering = SpectralClustering(
-                    n_clusters=n_clusters or 120, random_state=42, **kwargs
+                    n_clusters=n_clusters or self.settings.n_clusters,
+                    random_state=42,
+                    **kwargs,
                 ).fit(embeddings)
             elif clustering_algorithm == "KMeans":
                 clustering = KMeans(
-                    n_clusters=n_clusters or 120, random_state=42, **kwargs
+                    n_clusters=n_clusters or self.settings.n_clusters,
+                    random_state=42,
+                    **kwargs,
                 ).fit(embeddings)
             elif clustering_algorithm == "AgglomerativeClustering":
                 clustering = AgglomerativeClustering(
-                    n_clusters=n_clusters or 120, **kwargs
+                    n_clusters=n_clusters or self.settings.n_clusters, **kwargs
                 ).fit(embeddings)
             elif clustering_algorithm == "OPTICS":
                 clustering = OPTICS(**kwargs).fit(embeddings)
