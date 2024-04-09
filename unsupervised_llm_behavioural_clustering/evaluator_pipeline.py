@@ -10,19 +10,15 @@ from models import LocalModel
 from model_evaluation import ModelEvaluation
 from visualization import Visualization
 from clustering import Clustering
-from utils import embed_texts, load_pkl_or_not, query_model_on_statements
-from typing import List, Dict, Any
-from dataclasses import dataclass
-from config.run_configuration_manager import RunConfigurationManager
-from config.run_settings import (
-    RunSettings,
-    ModelSettings,
-    DataSettings,
-    PlotSettings,
-    PromptSettings,
-    ClusteringSettings,
-    TsneSettings,
+from utils import (
+    embed_texts,
+    load_pkl_or_not,
+    query_model_on_statements,
+    check_gpu_availability,
 )
+from typing import List, Dict, Any
+from config.run_configuration_manager import RunConfigurationManager
+from config.run_settings import RunSettings
 
 
 class EvaluatorPipeline:
@@ -107,6 +103,26 @@ class EvaluatorPipeline:
         self.setup_directories()
         self.load_api_key()
         self.clone_evals_repo()
+
+    def get_model_batches(self):
+        model_batches = []
+        batch = []
+        total_memory = 0
+
+        for model_name, local_model in self.local_models.items():
+            model_memory = local_model.get_memory_usage()
+            if total_memory + model_memory <= self.max_gpu_memory:
+                batch.append((model_name, local_model))
+                total_memory += model_memory
+            else:
+                model_batches.append(batch)
+                batch = [(model_name, local_model)]
+                total_memory = model_memory
+
+        if batch:
+            model_batches.append(batch)
+
+        return model_batches
 
     # Set up directories
     def setup_directories(self):
@@ -603,8 +619,11 @@ class EvaluatorPipeline:
         # For each loop, we'll run the entire pipeline for that model.
         # Then, we'll remove that model from the GPU and load the next model.
         # At the end, we'll plot the results for all models.
-        for model_name, local_model in self.local_models.items():
-            local_model.load()
+        if self.local_models:
+            gpu_availability = check_gpu_availability()
+            if gpu_availability == "multiple_gpus":
+                for model_name, local_model in self.local_models.items():
+                    local_model.load()
         self.text_subset, all_query_results = self.generate_responses()
         self.all_model_info = self.collect_model_info(all_query_results)
         model_names = [llm[1] for llm in self.llms]
