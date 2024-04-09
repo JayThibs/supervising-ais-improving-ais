@@ -1,3 +1,5 @@
+import argparse
+
 print("Loading evaluation pipeline...")
 from evaluator_pipeline import EvaluatorPipeline
 
@@ -14,11 +16,28 @@ from config.run_configuration_manager import RunConfigurationManager
 # from utils import query_model_on_statements
 
 
-def main():
-    run_config_manager = RunConfigurationManager()
-    selected_run = input(
-        f"Enter the name of the run configuration you want to use (default: {run_config_manager.default_configuration}): "
+def get_args():
+    parser = argparse.ArgumentParser(
+        description="Language Model Unsupervised Behavioural Evaluator"
     )
+    parser.add_argument(
+        "--run",
+        type=str,
+        default=None,
+        help="Specify the name of the run configuration to use.",
+    )
+    return parser.parse_args()
+
+
+def main(args):
+    run_config_manager = RunConfigurationManager()
+    if args.run:
+        # Useful to add flag to non-default run config in command-line instead of retyping it each time
+        selected_run = args.run
+    else:
+        selected_run = input(
+            f"Enter the name of the run configuration you want to use (default: {run_config_manager.default_configuration}): "
+        )
     run_settings = run_config_manager.get_configuration(
         selected_run or run_config_manager.default_configuration
     )
@@ -36,6 +55,7 @@ def main():
 
 if __name__ == "__main__":
     try:
-        main()
+        args = get_args()
+        main(args)
     except Exception as e:
         print(f"An error occurred: {e}")
