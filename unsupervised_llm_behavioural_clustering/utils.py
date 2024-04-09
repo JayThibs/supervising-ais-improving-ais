@@ -6,41 +6,14 @@ import logging
 import datetime
 import numpy as np
 import sklearn
+import torch
 import pdb
 from tqdm import tqdm
-from sklearn.cluster import KMeans
-from sklearn.manifold import TSNE
 import scipy
-from scipy.cluster.hierarchy import dendrogram, linkage
 from terminaltables import AsciiTable
 from typing import Tuple, Any, Optional, List
-from models import OpenAIModel, AnthropicModel, LocalModel
 from openai import OpenAI
-
-
-def initialize_model(model_info, temperature=0.1, max_tokens=150):
-    """Initialize a language model."""
-    model_family, model, system_message = (
-        model_info["model_family"],
-        model_info["model"],
-        model_info["system_message"],
-    )
-    print("model_family:", model_family)
-    print("model:", model)
-    print("system_message:", system_message)
-    if model_family == "openai":
-        model_instance = OpenAIModel(
-            model, system_message, temperature=temperature, max_tokens=max_tokens
-        )
-    elif model_family == "anthropic":
-        model_instance = AnthropicModel(model)
-    elif model_family == "local":  # This should be replaced by Mistral and other models
-        model_instance = LocalModel(model)
-    else:
-        raise ValueError(
-            f"Invalid model family {model_family}. Options: 'openai', 'anthropic', 'local'."
-        )
-    return model_instance
+from models import initialize_model
 
 
 def query_model_on_statements(
@@ -399,3 +372,13 @@ def load_pkl_or_not(
             logging.info(f"Saved old {filename} as {new_filename}.")
 
         return False, None
+
+
+def check_gpu_availability():
+    num_gpus = torch.cuda.device_count()
+    if num_gpus > 1:
+        return "multiple_gpus"
+    elif torch.cuda.is_available():
+        return "single_gpu"
+    else:
+        return "cpu"
