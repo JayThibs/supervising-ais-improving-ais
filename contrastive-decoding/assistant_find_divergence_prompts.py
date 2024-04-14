@@ -406,6 +406,7 @@ def rescale_divergences(divergences_and_texts):
 # fallback_to_newlines: Whether to interpret the text as a newline-separated list of texts if the json parsing fails.
 def interpret_assistant_outputs(output_text, as_json = True, fallback_to_newlines = False):
     json_parse_fail = False
+    prompts = []
     if as_json:
         # Interpret output_text as a json object with a dictionary and parse it:
         # First, remove all characters before the first '{' character

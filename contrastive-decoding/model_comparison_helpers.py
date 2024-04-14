@@ -215,7 +215,6 @@ def build_contrastive_lm(superclass):
         
         def calculate_current_divergence(self, 
                                          text_ids, 
-                                         metric = "l1", 
                                          batch_size = 16, 
                                          end_tokens_to_only_consider = 0,
                                          return_perplexities = False,
@@ -224,12 +223,6 @@ def build_contrastive_lm(superclass):
                                          use_avg_KL_as_divergences = True,
                                          KL_distribution_choice = "auto"
                                         ):
-            if metric == 'l1':
-                loss_fct = torch.nn.L1Loss()
-            elif metric in ['kl', 'kld']:
-                loss_fct = torch.nn.KLDivLoss()
-            else:
-                raise ValueError("Metric not recognized.")
             n_texts = len(text_ids)
             n_batches = n_texts // batch_size + (n_texts % batch_size != 0)
             divergences = []
@@ -285,23 +278,13 @@ def build_contrastive_lm(superclass):
                     token_divergences = prob_weighted_token_divergences - token_correction_factors
                     batch_divergences = torch.mean(token_divergences, dim=-1).tolist()
                     token_divergences = token_divergences.tolist()
-                elif metric in ['l1']:
+                else:
+                    loss_fct = torch.nn.L1Loss()
                     # Computes one divergence value per id sequence in the batch (output is of size batch_size):
                     batch_divergences = [loss_fct(div_comparison_model_logits[i,:,:], div_starting_model_logits[i,:,:]).item() for i in range(len(div_comparison_model_logits))]
                     if return_all_token_divergences:
                         # Computes one divergence value for every token in every sequence in the batch (output is of size batch_size x sequence_length):
                         token_divergences = [[loss_fct(div_comparison_model_logits[i,j,:], div_starting_model_logits[i,j,:]).item() for j in range(div_comparison_model_logits.size()[1])] for i in range(len(div_comparison_model_logits))]
-                elif metric in ['kl', 'kld']:
-                     # Computes one divergence value per id sequence in the batch:
-                    batch_divergences = [loss_fct(F.log_softmax(div_comparison_model_logits[i,:,:], dim=1), 
-                                        F.softmax(div_starting_model_logits[i,:,:], dim=1)).item() 
-                                        for i in range(len(div_comparison_model_logits))]
-                    if return_all_token_divergences:
-                        # Computes one divergence value for every token in every sequence in the batch
-                        token_divergences = [[loss_fct(F.log_softmax(comparison_model_logits[i,j,:], dim=0), 
-                                            F.softmax(starting_model_logits[i,j,:], dim=0)).item() 
-                                            for j in range(comparison_model_logits.size()[1])] 
-                                            for i in range(comparison_model_logits.size()[0])]
                 
                 divergences = divergences + batch_divergences
                 
