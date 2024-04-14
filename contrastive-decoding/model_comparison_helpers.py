@@ -1,13 +1,14 @@
 import torch
 import shutil
 import os
-from transformers import AutoTokenizer, AutoModelForCausalLM
+from transformers import AutoTokenizer, AutoModelForCausalLM, PreTrainedModel
 from transformers.modeling_outputs import CausalLMOutputWithPast
 from transformers.utils.logging import set_verbosity_error
 import torch.nn.functional as F
 from torch.nn import CrossEntropyLoss
 from pandas import read_csv
 from transformers import PreTrainedTokenizer
+from typing import Optional, List, Tuple, Type
 
 from transformers import (
     GPT2LMHeadModel,
@@ -22,7 +23,7 @@ from transformers import (
 from collections import OrderedDict
 
 class LRUCache(OrderedDict):
-    def __init__(self, max_size = 2):
+    def __init__(self, max_size : int = 2):
         self.max_size = max_size
         super().__init__()
 
@@ -33,26 +34,19 @@ class LRUCache(OrderedDict):
             del self[oldest]
 
 # Adapted from: https://github.com/xiamengzhou/training_trajectory_analysis/blob/main/utils.py
-def build_contrastive_lm(superclass):
+def build_contrastive_lm(superclass : Type[PreTrainedModel]) -> Type[PreTrainedModel]:
     class CausalLMSubtract(superclass):
         def __init__(self,
                      config,
-                     comparison_lm,
-                     starting_model_weight=1,
-                     comparison_model_weight=-1,
-                     limit_to_starting_model_top_p=-1,
-                     similarity_gating_intensity=-1,
-                     comparison_model_prefix_ids=None,
-                     starting_model_prefix_ids=None,
-                     use_8_bit=True,
-                     device="cuda:0",
-                     bnb_config = None,
-                     cache_attn = False):
+                     starting_model_weight : float = 1,
+                     comparison_model_weight : float = -1,
+                     limit_to_starting_model_top_p : Optional[float] = None,
+                     similarity_gating_intensity : Optional[float] = None,
+                     comparison_model_prefix_ids : Optional[List[int]] = None,
+                     starting_model_prefix_ids : Optional[List[int]] = None,
+                     bnb_config : Optional[dict] = None,
+                     cache_attn : bool = False):
             super().__init__(config)
-            # self.comparison_lm = AutoModelForCausalLM.from_pretrained(comparison_lm, 
-            #                                                           load_in_4bit=use_8_bit,
-            #                                                           device_map={"": 1} if device == "cuda:0" else "auto",
-            #                                                           quantization_config=bnb_config)
             self.comparison_lm = None
             self.starting_model_weight = starting_model_weight
             self.comparison_model_weight = comparison_model_weight
@@ -79,7 +73,7 @@ def build_contrastive_lm(superclass):
             else:
                 self.n_starting_model_prefix_ids = 0
 
-        def forward(self, **kwargs):
+        def forward(self, **kwargs) -> CausalLMOutputWithPast:
             """
             kwargs will include
             - input_ids
@@ -167,7 +161,7 @@ def build_contrastive_lm(superclass):
             subtract_prob = self.starting_model_weight * starting_model_probs[:, self.n_starting_model_prefix_ids:, :] + \
                             self.comparison_model_weight * comparison_model_probs[:, self.n_comparison_model_prefix_ids:, :]
 
-            if self.similarity_gating_intensity != -1:
+            if self.similarity_gating_intensity is not None:
                 similarity = torch.nn.functional.cosine_similarity(comparison_model_next_token_probs, starting_model_next_token_probs, dim=1)
                 starting_model_bias = torch.exp(similarity * self.similarity_gating_intensity - self.similarity_gating_intensity)
                 starting_model_bias = starting_model_bias.unsqueeze(1)
@@ -184,7 +178,7 @@ def build_contrastive_lm(superclass):
 
             vocab_size = starting_model_probs.size()[-1]
             batch_size = starting_model_probs.size()[0]
-            if self.limit_to_starting_model_top_p != -1:
+            if self.limit_to_starting_model_top_p is not None:
                 ordered_vocab_probs, ordered_prob_indices = torch.topk(starting_model_next_token_probs, k=vocab_size, dim=1)
                 ordered_cumulative_vocab_probs = torch.cumsum(ordered_vocab_probs, dim=1)
                 ordered_cumulative_vocab_probs_reached_p = ordered_cumulative_vocab_probs < self.limit_to_starting_model_top_p
@@ -214,15 +208,15 @@ def build_contrastive_lm(superclass):
 
         
         def calculate_current_divergence(self, 
-                                         text_ids, 
-                                         batch_size = 16, 
-                                         end_tokens_to_only_consider = 0,
-                                         return_perplexities = False,
-                                         return_all_token_divergences = False,
-                                         logits_comparison_top_p = None,
-                                         use_avg_KL_as_divergences = True,
-                                         KL_distribution_choice = "auto"
-                                        ):
+                                         text_ids : torch.Tensor, 
+                                         batch_size : int = 16, 
+                                         end_tokens_to_only_consider : int = 0,
+                                         return_perplexities : bool = False,
+                                         return_all_token_divergences : bool = False,
+                                         logits_comparison_top_p : Optional[float] = None,
+                                         use_avg_KL_as_divergences : bool = True,
+                                         KL_distribution_choice : str = "auto"
+                                        ) -> dict:
             n_texts = len(text_ids)
             n_batches = n_texts // batch_size + (n_texts % batch_size != 0)
             divergences = []
@@ -314,7 +308,10 @@ def build_contrastive_lm(superclass):
     return CausalLMSubtract
 
 # Adapted from: https://github.com/huggingface/transformers/blob/v4.35.2/src/transformers/models/mistral/modeling_mistral.py#L931
-def LM_loss(labels, logits, vocab_size):
+def LM_loss(labels : torch.Tensor, 
+            logits : torch.Tensor, 
+            vocab_size : int
+            ) -> torch.Tensor:
     # Shift so that tokens < n predict n
     shift_logits = logits[..., :-1, :].contiguous()
     shift_labels = labels[..., 1:].contiguous()
@@ -327,7 +324,7 @@ def LM_loss(labels, logits, vocab_size):
     return loss
 
 
-def get_cls(model_name):
+def get_cls(model_name : str) -> Type[PreTrainedModel]:
     model_name = str.lower(model_name)
     if "gpt2" in model_name:
         return GPT2LMHeadModel
@@ -345,22 +342,23 @@ def get_cls(model_name):
         raise ValueError("Model name not recognized.")
 
 def instantiate_models(
-        model_name = "gpt2-xl",
-        starting_model_path = "gpt2-xl",
-        comparison_model_path = "gpt2-xl",
-        starting_model_weight = -1,
-        comparison_model_weight = 1,
-        tokenizer_family = "gpt2",
-        device = "cuda:0",
-        temp_save_model_loc = "/tmp/temp_",
-        limit_to_starting_model_top_p = -1,
-        similarity_gating_intensity = -1,
-        comparison_model_prefix_ids=None,
-        starting_model_prefix_ids=None,
-        use_8_bit = True,
-        no_quantize_base_model = False,
-        bnb_config = None,
-        cache_attn = False):
+        model_name : str = "gpt2-xl",
+        starting_model_path : str = "gpt2-xl",
+        comparison_model_path : str = "gpt2-xl",
+        starting_model_weight : float = -1,
+        comparison_model_weight : float = 1,
+        tokenizer_family : str = "gpt2",
+        device : str = "cuda:0",
+        temp_save_model_loc : str = "/tmp/temp_",
+        limit_to_starting_model_top_p : Optional[float] = None,
+        similarity_gating_intensity : Optional[float] = None,
+        comparison_model_prefix_ids : Optional[List[int]] = None,
+        starting_model_prefix_ids : Optional[List[int]] = None,
+        use_4_bit : bool = True,
+        no_quantize_base_model : bool = False,
+        bnb_config : Optional[dict] = None,
+        cache_attn : bool = False
+        ) -> Tuple[PreTrainedModel, PreTrainedModel, PreTrainedModel, PreTrainedTokenizer]:
     if ".pth" in starting_model_path:
         starting_model = torch.load(starting_model_path)
         starting_model_name = starting_model_path.split("/")[-1][:-4]
@@ -388,7 +386,7 @@ def instantiate_models(
         comparison_model_path = comparison_model_temp_save_pretrained_dir
     else:
         comparison_model = AutoModelForCausalLM.from_pretrained(comparison_model_path, 
-                                                                load_in_4bit=use_8_bit, 
+                                                                load_in_4bit=use_4_bit, 
                                                                 device_map={"": 0} if device == "cuda:0" else "auto",
                                                                 quantization_config=bnb_config)#.to(device)
 
@@ -397,17 +395,16 @@ def instantiate_models(
     set_verbosity_error()
     model = build_contrastive_lm(model_class).from_pretrained(
         starting_model_path,
-        comparison_lm=comparison_model_path, 
         starting_model_weight=starting_model_weight, 
         comparison_model_weight=comparison_model_weight,
         limit_to_starting_model_top_p=limit_to_starting_model_top_p,
         similarity_gating_intensity=similarity_gating_intensity,
         comparison_model_prefix_ids=comparison_model_prefix_ids,
         starting_model_prefix_ids=starting_model_prefix_ids,
-        bnb_config=bnb_config if not no_quantize_base_model else None,
         quantization_config=bnb_config if not no_quantize_base_model else None,
-        load_in_4bit=use_8_bit and not no_quantize_base_model, 
+        load_in_4bit=use_4_bit and not no_quantize_base_model, 
         device_map={"": 0} if device == "cuda:0" else "auto",
+        bnb_config=bnb_config if not no_quantize_base_model else None,
         cache_attn=cache_attn,
     ).eval()#.to(device)
     #print(model)
@@ -424,14 +421,14 @@ def instantiate_models(
     return model, starting_model, comparison_model, tokenizer
 
 def get_input_ids(
-        tokenizer,
-        single_prefix = None,
-        text_set = None,
-        prefixes_path = None,
-        set_prefix_len = None,
-        n_prefixes = None,
-        device = "cuda:0"
-        ):
+        tokenizer : PreTrainedTokenizer,
+        single_prefix : Optional[str] = None,
+        text_set : Optional[List[str]] = None,
+        prefixes_path : Optional[str] = None,
+        set_prefix_len : Optional[int] = None,
+        n_prefixes : Optional[int] = None,
+        device : str = "cuda:0"
+        ) -> torch.Tensor:
     if not single_prefix is None:
         prompt = [single_prefix]
         if not n_prefixes is None:
@@ -462,7 +459,8 @@ def string_with_token_colors(text : str,
                              token_scores : list, 
                              tokenizer : PreTrainedTokenizer,
                              min_score : float = None,
-                             max_score : float = None):
+                             max_score : float = None
+                             ) -> str:
     # First, tokenize the text.
     tokens = tokenizer.tokenize(text)[-len(token_scores):]
     if len(token_scores) != len(tokens):

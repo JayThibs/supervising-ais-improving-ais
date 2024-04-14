@@ -7,47 +7,46 @@ import re
 from random import sample
 from contrastive_decoding import ContrastiveDecoder
 import numpy as np
-from transformers import BitsAndBytesConfig, AutoModelForCausalLM, AutoTokenizer
+from transformers import BitsAndBytesConfig, AutoModelForCausalLM, AutoTokenizer, PreTrainedModel, PreTrainedTokenizer
 from terminaltables import AsciiTable
 import textwrap
-
+from typing import Optional, List, Tuple
 
 class DivergenceFinder:
     def __init__(self, **kwargs):
         # Default values
-        self.model_name = "gpt2-xl"
-        self.generation_length = 25
-        self.n_cycles_ask_assistant = 2
-        self.max_failed_cycles = 2
-        self.openai_model_str = None
-        self.local_model_str = "Upstage/SOLAR-10.7B-Instruct-v1.0"
-        self.generations_per_prefix = 5
-        self.starting_model_path = "gpt2-xl"
-        self.comparison_model_path = "gpt2-xl"
-        self.starting_model_weight = 1
-        self.comparison_model_weight = -1
-        self.tokenizer_family = "gpt2"
-        self.set_prefix_len = 30
-        self.device = "cuda:0"
-        self.local_model_device = "cuda:0"
-        self.temp_save_model_loc = "/tmp/temp_"
-        self.limit_to_starting_model_top_p = -1
-        self.similarity_gating_intensity = -1
-        self.comparison_model_prefix_ids = None
-        self.starting_model_prefix_ids = None
-        self.sequential = True
-        self.n_past_texts_subsampled = 10
-        self.subsampling_randomness_temperature = 0.5
-        self.api_key_path = None
-        self.prompts_json_path = "assistant_prompts/who_is_harry_potter_find_high_div_prompts.json"
-        self.results_save_path = None
-        self.quantize = True
-        self.divergence_fnct = 'l1'
-        self.include_prefix_in_divergences = False
-        self.verbose = True
-        self.max_width = 65
-        self.use_custom_selection_criterion = False
-        self.use_custom_selection_criterion_examples = False
+        self.model_name : str = "gpt2-xl"
+        self.generation_length : int = 25
+        self.n_cycles_ask_assistant : int = 2
+        self.max_failed_cycles : int = 2
+        self.openai_model_str : Optional[str] = None
+        self.local_model_str : str = "Upstage/SOLAR-10.7B-Instruct-v1.0"
+        self.generations_per_prefix : int = 5
+        self.starting_model_path : str = "gpt2-xl"
+        self.comparison_model_path : str = "gpt2-xl"
+        self.starting_model_weight : float = 1
+        self.comparison_model_weight : float = -1
+        self.tokenizer_family : str = "gpt2"
+        self.set_prefix_len : int = 30
+        self.device : str = "cuda:0"
+        self.local_model_device : str = "cuda:0"
+        self.temp_save_model_loc : str = "/tmp/temp_"
+        self.limit_to_starting_model_top_p : Optional[float] = None
+        self.similarity_gating_intensity : Optional[float] = None
+        self.comparison_model_prefix_ids : Optional[List[int]] = None
+        self.starting_model_prefix_ids : Optional[List[int]] = None
+        self.sequential : bool = True
+        self.n_past_texts_subsampled : int = 10
+        self.subsampling_randomness_temperature : float = 0.5
+        self.api_key_path : Optional[str] = None
+        self.prompts_json_path : str = "assistant_prompts/who_is_harry_potter_find_high_div_prompts.json"
+        self.results_save_path : Optional[str] = None
+        self.quantize : bool = True
+        self.include_prefix_in_divergences : bool = False
+        self.verbose : bool = True
+        self.max_width : int = 65
+        self.use_custom_selection_criterion : bool = False
+        self.use_custom_selection_criterion_examples : bool = False
 
         # Update with any arguments passed to the constructor
         for key, value in kwargs.items():
@@ -131,13 +130,13 @@ class DivergenceFinder:
             "return_divergences": True,
             "include_prefix_in_divergences": self.include_prefix_in_divergences,
             "quantize": self.quantize,
-            "divergence_fnct": self.divergence_fnct
         }
         self.contrastive_decoder = ContrastiveDecoder(**contrastive_decoder_params)
 
         if len(self.seed_demonstrations_list) > 0:
             # Compute divergences for seed_demonstrations_list
-            result = self.contrastive_decoder.decode()
+            with torch.no_grad():
+                result = self.contrastive_decoder.decode()
             divergences = result['divergences'].tolist()
 
             self.all_divergences_and_texts = [(d,s,"", 0) for d,s in zip(divergences, self.seed_demonstrations_list)]
@@ -159,7 +158,15 @@ class DivergenceFinder:
         else:
             self.client = None
 
-    def get_continuation(self, messages, openai_model_str, client, local_model, local_tokenizer, device, verbose_continuations = False):
+    def get_continuation(self, 
+                         messages : List[dict], 
+                         openai_model_str : Optional[str], 
+                         client : Optional[OpenAI], 
+                         local_model : PreTrainedModel, 
+                         local_tokenizer : PreTrainedTokenizer, 
+                         device : str, 
+                         verbose_continuations : bool = False
+                         ) -> str:
         if openai_model_str is not None:
             if client is None:
                 raise ValueError("You must provide an OpenAI API key to use an OpenAI model.")
@@ -200,7 +207,18 @@ class DivergenceFinder:
     # This function takes in a list of prompts and responses, and returns a list of scores
     # where each score either 0 or 1, indicating whether each prompt satisfied the custom 
     # selection criterion.
-    def score_by_custom_selection_criterion(self, prompts_and_responses, openai_model_str, client, local_model, local_tokenizer, custom_selection_criterion, yes_response_str, no_response_str, custom_selection_criterion_examples, device):
+    def score_by_custom_selection_criterion(self, 
+                                            prompts_and_responses : List[Tuple[int, str, str, int]], 
+                                            openai_model_str : Optional[str], 
+                                            client : Optional[OpenAI], 
+                                            local_model : PreTrainedModel, 
+                                            local_tokenizer : PreTrainedTokenizer, 
+                                            custom_selection_criterion : Optional[str], 
+                                            yes_response_strs : List[str], 
+                                            no_response_strs : List[str], 
+                                            custom_selection_criterion_examples : Optional[List[str]], 
+                                            device : str
+                                            ) -> List[int]:
         scores = []
         #print(prompts_and_responses)
         for _, prompt, response, _ in prompts_and_responses:
@@ -225,13 +243,13 @@ class DivergenceFinder:
             assistant_response_bool = False
             match_found = False
             response_len = len(assistant_response)
-            processed_assistant_response = assistant_response[:min(response_len, 5)]
-            for yes_response in yes_response_str:
+            processed_assistant_response = assistant_response[:min(response_len, 5)].lower()
+            for yes_response in yes_response_strs:
                 if yes_response in processed_assistant_response:
                     assistant_response_bool = True
                     match_found = True
                     break
-            for no_response in no_response_str:
+            for no_response in no_response_strs:
                 if no_response in processed_assistant_response:
                     assistant_response_bool = False
                     if match_found:
@@ -248,7 +266,7 @@ class DivergenceFinder:
                 scores.append(0)  # Default score for unexpected responses
         return scores
     
-    def search_step(self):
+    def search_step(self) -> int:
         # Compose messages to send the assistant
         if len(self.round_divergences_and_texts) > 0:
             # First, rescale round_divergences_and_texts divergence values into [0, 10]
@@ -272,7 +290,8 @@ class DivergenceFinder:
 
         if len(additional_texts) > 0:
             # Compute divergences for additional_texts
-            result = self.contrastive_decoder.decode(text_set = additional_texts)
+            with torch.no_grad():
+                result = self.contrastive_decoder.decode(text_set = additional_texts)
             additional_divergences = result['divergences'].tolist()
             comparison_model_responses = []
             with torch.no_grad():
@@ -325,7 +344,7 @@ class DivergenceFinder:
             print_texts_with_divergences(self.round_divergences_and_texts, max_width = self.max_width)
         return n_additional_texts
     
-    def search_loop(self):
+    def search_loop(self) -> None:
         cycle_count = 0
         failed_cycle_count = 0
         while cycle_count < self.n_cycles_ask_assistant:
@@ -368,7 +387,7 @@ class DivergenceFinder:
         except:
             print("Error: Could not print texts with highest/lowest divergence values.")
 
-    def find_diverging_texts(self, **kwargs):
+    def find_diverging_texts(self, **kwargs) -> List[Tuple[float, str, str, int]]:
         if kwargs:
             for key, value in kwargs.items():
                 setattr(self, key, value)
@@ -387,11 +406,11 @@ class DivergenceFinder:
         return self.all_divergences_and_texts
     
 
-# This function takes in a list of divergences and texts, and rescales the divergences into [0, 10].
-# It returns a list of pairs of divergences and texts, where the texts are the same as the input texts.
+# This function takes in a list of divergences / texts / response / custom_score tuples, and rescales the divergences into [0, 10].
+# It returns a list of tuples of divergences / texts / response / custom_score tuples, where the texts are the same as the input texts.
 #
-# divergences_and_texts: A list of pairs of divergences and texts.
-def rescale_divergences(divergences_and_texts):
+# divergences_and_texts: A list of tuples of divergences / texts / response / custom_score tuples.
+def rescale_divergences(divergences_and_texts : List[Tuple[float, str, str, int]]) -> List[Tuple[float, str, str, int]]:
     max_divergence = max(divergences_and_texts, key=lambda x: x[0])[0]
     min_divergence = min(divergences_and_texts, key=lambda x: x[0])[0]
     rescaled_round_divergences_and_texts = [(10 * (div - min_divergence) / max((max_divergence - min_divergence), 0.0001), text) for div, text, _, _ in divergences_and_texts]
@@ -404,7 +423,9 @@ def rescale_divergences(divergences_and_texts):
 # output_text: The string of text to interpret.
 # as_json: Whether to interpret the text as a json object or a newline-separated list of texts.
 # fallback_to_newlines: Whether to interpret the text as a newline-separated list of texts if the json parsing fails.
-def interpret_assistant_outputs(output_text, as_json = True, fallback_to_newlines = False):
+def interpret_assistant_outputs(output_text : str, 
+                                as_json : bool = True, 
+                                fallback_to_newlines : bool = False) -> List[str]:
     json_parse_fail = False
     prompts = []
     if as_json:
@@ -444,7 +465,12 @@ def interpret_assistant_outputs(output_text, as_json = True, fallback_to_newline
 # the texts are a random subsample of the input texts, weighted by the divergence values, with subsampling_randomness_temperature
 # scaling the degree of randomness.
 # Optionally takes in a boolean to use scores from a custom selection criterion to bias selection process.
-def divergence_weighted_subsample(divergence_and_texts, n_past_texts_subsampled = 5, subsampling_randomness_temperature = 0.5, select_high_divergence = False, use_custom_selection_criterion = False):
+def divergence_weighted_subsample(divergence_and_texts : List[Tuple[float, str, str, int]], 
+                                  n_past_texts_subsampled : int = 5, 
+                                  subsampling_randomness_temperature : float = 0.5, 
+                                  select_high_divergence : bool = False, 
+                                  use_custom_selection_criterion : bool = False
+                                  ) -> List[Tuple[float, str, str, int]]:
     if len(divergence_and_texts) == 0:
         return []
     if use_custom_selection_criterion:
@@ -480,7 +506,7 @@ def divergence_weighted_subsample(divergence_and_texts, n_past_texts_subsampled 
     # Return the subsample
     return subsample
 
-def print_texts_with_divergences(divergences_and_texts, max_width = 50):
+def print_texts_with_divergences(divergences_and_texts : List[Tuple[float, str, str, int]], max_width : int = 50) -> None:
     table_data = [["Div", "Text", "Response", "CSB"]]
     for div, text, response, custom_score in divergences_and_texts:
             wrapped_text = "\n".join(textwrap.wrap(text, width=max_width))

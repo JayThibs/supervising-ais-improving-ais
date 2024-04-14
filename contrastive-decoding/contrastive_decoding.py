@@ -2,54 +2,55 @@ import torch
 import pandas as pd
 from model_comparison_helpers import instantiate_models, get_input_ids
 import tqdm
-from transformers import BitsAndBytesConfig
+from transformers import BitsAndBytesConfig, PreTrainedTokenizer
 import torch
+from typing import Optional, List
 
 
 class ContrastiveDecoder:
     def __init__(self, **kwargs):
         # Default values
-        self.model_name = "gpt2-xl"
-        self.generation_length = 20
-        self.generations_per_prefix = 1
-        self.starting_model_path = "gpt2-xl"
-        self.comparison_model_path = "gpt2-xl"
-        self.starting_model_weight = -1
-        self.comparison_model_weight = 1
-        self.tokenizer_family = "gpt2"
-        self.single_prefix = None
-        self.prefixes_path = None
-        self.set_prefix_len = 7
-        self.n_prefixes = None
-        self.device = "cuda:0"
-        self.save_texts_loc = None
-        self.text_set = None
-        self.temp_save_model_loc = "/tmp/temp_"
-        self.print_texts = True
-        self.sampling = True
-        self.num_beams = None
-        self.num_beam_groups = None
-        self.diversity_penalty = 0.0
-        self.top_p = 0.95
-        self.limit_to_starting_model_top_p = -1
-        self.similarity_gating_intensity = -1
-        self.comparison_model_prefix_ids = None
-        self.starting_model_prefix_ids = None
-        self.return_divergences = False
-        self.sort_by_divergences = True
-        self.return_perplexities = False
-        self.include_prefix_in_divergences = True
-        self.beam_search_sort = None
-        self.quantize=True
-        self.no_quantize_base_model=False
-        self.use_avg_KL_as_divergences = True
-        self.model = None
-        self.starting_model = None
-        self.comparison_model = None
-        self.tokenizer = None
-        self.cache_attn = False
-        self.batch_size = 1
-        self.return_all_token_divergences = False
+        self.model_name : str = "gpt2-xl"
+        self.generation_length : int = 20
+        self.generations_per_prefix : int = 1
+        self.starting_model_path : str = "gpt2-xl"
+        self.comparison_model_path : str = "gpt2-xl"
+        self.starting_model_weight : float = -1
+        self.comparison_model_weight : float = 1
+        self.tokenizer_family : str = "gpt2"
+        self.single_prefix : Optional[str] = None
+        self.prefixes_path : Optional[str] = None
+        self.set_prefix_len : int = 7
+        self.n_prefixes : Optional[int] = None
+        self.device : str = "cuda:0"
+        self.save_texts_loc : Optional[str] = None
+        self.text_set : Optional[str] = None
+        self.temp_save_model_loc : str = "/tmp/temp_"
+        self.print_texts : bool = True
+        self.sampling : bool = True
+        self.num_beams : Optional[int] = None
+        self.num_beam_groups : Optional[int] = None
+        self.diversity_penalty : float = 0.0
+        self.top_p : float = 0.95
+        self.limit_to_starting_model_top_p : Optional[float] = None
+        self.similarity_gating_intensity : Optional[float] = None
+        self.comparison_model_prefix_ids : Optional[List[int]] = None
+        self.starting_model_prefix_ids : Optional[List[int]] = None
+        self.return_divergences : bool = False
+        self.sort_by_divergences : bool = True
+        self.return_perplexities : bool = False
+        self.include_prefix_in_divergences : bool = True
+        self.beam_search_sort : Optional[bool] = None
+        self.quantize : bool = True
+        self.no_quantize_base_model : bool = False
+        self.use_avg_KL_as_divergences : bool = True
+        self.model : Optional[torch.nn.Module] = None
+        self.starting_model : Optional[torch.nn.Module] = None
+        self.comparison_model : Optional[torch.nn.Module] = None
+        self.tokenizer : Optional[PreTrainedTokenizer] = None
+        self.cache_attn : bool = False
+        self.batch_size : int = 1
+        self.return_all_token_divergences : bool = False
 
          # Update with any arguments passed to the constructor
         for key, value in kwargs.items():
@@ -81,11 +82,11 @@ class ContrastiveDecoder:
                     comparison_model_prefix_ids = self.comparison_model_prefix_ids,
                     starting_model_prefix_ids = self.starting_model_prefix_ids,
                     bnb_config = bnb_config,
-                    use_8_bit = self.quantize,
+                    use_4_bit = self.quantize,
                     no_quantize_base_model = self.no_quantize_base_model,
                     cache_attn = self.cache_attn
                 )
-    def decode(self, **kwargs):
+    def decode(self, **kwargs) -> dict:
         if kwargs:
             if self.model is None or self.tokenizer is None or "starting_model" in kwargs or "comparison_model" in kwargs:
                 self.__init__(**kwargs)
@@ -251,18 +252,19 @@ class ContrastiveDecoder:
         return result
 
     def decode_loop(self, 
-                    input_ids, 
-                    model, 
-                    tokenizer, 
-                    generation_length, 
-                    sampling, 
-                    num_beams,
-                    num_beam_groups,
-                    diversity_penalty, 
-                    top_p, 
-                    generations_per_prefix, 
-                    batch_size = 1,
-                    temperature = 0.6):
+                    input_ids : torch.Tensor, 
+                    model : torch.nn.Module, 
+                    tokenizer : PreTrainedTokenizer, 
+                    generation_length : int = 20, 
+                    sampling : bool = True, 
+                    num_beams : Optional[int] = None,
+                    num_beam_groups : Optional[int] = None,
+                    diversity_penalty : float = 0.0, 
+                    top_p : float = 0.95, 
+                    generations_per_prefix : int = 1, 
+                    batch_size : int = 1,
+                    temperature : float = 0.6
+                    ) -> List[List[int]]:
         generations = []
         n_inputs = input_ids.size()[0]
         output_len = input_ids.size()[1] + generation_length
