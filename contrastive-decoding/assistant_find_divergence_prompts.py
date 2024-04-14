@@ -16,12 +16,12 @@ class DivergenceFinder:
     def __init__(self, **kwargs):
         # Default values
         self.model_name = "gpt2-xl"
-        self.generation_length = 20
+        self.generation_length = 25
         self.n_cycles_ask_assistant = 2
         self.max_failed_cycles = 2
         self.openai_model_str = None
         self.local_model_str = "Upstage/SOLAR-10.7B-Instruct-v1.0"
-        self.generations_per_prefix = 3
+        self.generations_per_prefix = 5
         self.starting_model_path = "gpt2-xl"
         self.comparison_model_path = "gpt2-xl"
         self.starting_model_weight = 1
@@ -39,7 +39,7 @@ class DivergenceFinder:
         self.n_past_texts_subsampled = 10
         self.subsampling_randomness_temperature = 0.5
         self.api_key_path = None
-        self.prompts_json_path = "assistant_prompts/who_is_harry_potter_find_CD_prompts.json"
+        self.prompts_json_path = "assistant_prompts/who_is_harry_potter_find_high_div_prompts.json"
         self.results_save_path = None
         self.quantize = True
         self.divergence_fnct = 'l1'
@@ -222,10 +222,26 @@ class DivergenceFinder:
                 device=device
             )
             # Determine if the assistant's response matches the expected "yes" or "no" responses
-            if assistant_response.split(" ")[0].strip().rstrip('.!?') in yes_response_str:
-                scores.append(1)
-            elif assistant_response.split(" ")[0].strip().rstrip('.!?') in no_response_str:
-                scores.append(0)
+            assistant_response_bool = False
+            match_found = False
+            response_len = len(assistant_response)
+            processed_assistant_response = assistant_response[:min(response_len, 5)]
+            for yes_response in yes_response_str:
+                if yes_response in processed_assistant_response:
+                    assistant_response_bool = True
+                    match_found = True
+                    break
+            for no_response in no_response_str:
+                if no_response in processed_assistant_response:
+                    assistant_response_bool = False
+                    if match_found:
+                        print("Conflicting matches found for processed_assistant_response:", processed_assistant_response)
+                        print("Yes response:", yes_response)
+                        print("No response:", no_response)
+                    match_found = True
+                    break
+            if match_found:
+                scores.append(assistant_response_bool)
             else:
                 # If the response is neither "yes" nor "no", log an error and append a default score
                 print(f"Error: Unexpected response from assistant model: {assistant_response}")

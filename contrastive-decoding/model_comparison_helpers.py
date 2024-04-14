@@ -220,7 +220,9 @@ def build_contrastive_lm(superclass):
                                          end_tokens_to_only_consider = 0,
                                          return_perplexities = False,
                                          return_all_token_divergences = False,
-                                         logits_comparison_top_p = None
+                                         logits_comparison_top_p = None,
+                                         use_avg_KL_as_divergences = True,
+                                         KL_distribution_choice = "auto"
                                         ):
             if metric == 'l1':
                 loss_fct = torch.nn.L1Loss()
@@ -246,7 +248,7 @@ def build_contrastive_lm(superclass):
                 n_tokens = starting_model_logits.size()[-2]
 
                 if comparison_model_logits.size()[-1] > starting_model_logits.size()[-1]:
-                    comparison_model_logits = comparison_model_logits[:, :, :starting_model_logits.size()[-1]]
+                    comparison_model_logits = comparison_model_logits[:, :, : vocab_size]
 
                 div_starting_model_logits = starting_model_logits.clone()
                 div_comparison_model_logits = comparison_model_logits.clone()
@@ -263,14 +265,32 @@ def build_contrastive_lm(superclass):
                     div_starting_model_logits = starting_model_logits[:, -end_tokens_to_only_consider:, :]
                     div_comparison_model_logits = comparison_model_logits[:, -end_tokens_to_only_consider:, :]
 
-                if metric in ['l1']:
+                if use_avg_KL_as_divergences:
+                    if KL_distribution_choice == "auto":
+                        if self.starting_model_weight < 0 and self.comparison_model_weight > 0:
+                            token_probabilities = torch.softmax(div_comparison_model_logits, dim=-1)
+                        elif self.starting_model_weight > 0 and self.comparison_model_weight < 0:
+                            token_probabilities = torch.softmax(div_starting_model_logits, dim=-1)
+                        else:
+                            token_probabilities = torch.softmax(self.starting_model_weight * div_starting_model_logits + self.comparison_model_weight * div_comparison_model_logits, dim=-1)
+                    elif "comparison" in str.lower(KL_distribution_choice):
+                        token_probabilities = torch.softmax(div_comparison_model_logits, dim=-1)
+                    elif "starting" in str.lower(KL_distribution_choice):
+                        token_probabilities = torch.softmax(div_starting_model_logits, dim=-1)
+                    else:
+                        raise ValueError("KL_distribution_choice not recognized.")
+                    prob_weighted_token_divergences = torch.sum((self.starting_model_weight * div_starting_model_logits + self.comparison_model_weight * div_comparison_model_logits) * token_probabilities, dim=-1)
+
+                    token_correction_factors = self.starting_model_weight * torch.logsumexp(div_starting_model_logits, dim=-1) + self.comparison_model_weight * torch.logsumexp(div_comparison_model_logits, dim=-1)
+                    token_divergences = prob_weighted_token_divergences - token_correction_factors
+                    batch_divergences = torch.mean(token_divergences, dim=-1).tolist()
+                    token_divergences = token_divergences.tolist()
+                elif metric in ['l1']:
                     # Computes one divergence value per id sequence in the batch (output is of size batch_size):
                     batch_divergences = [loss_fct(div_comparison_model_logits[i,:,:], div_starting_model_logits[i,:,:]).item() for i in range(len(div_comparison_model_logits))]
                     if return_all_token_divergences:
                         # Computes one divergence value for every token in every sequence in the batch (output is of size batch_size x sequence_length):
-                        token_divergences = [[loss_fct(div_comparison_model_logits[i,j,:], div_starting_model_logits[i,j,:]).item() for j in range(div_comparison_model_logits.size()[1])] for i in range(div_comparison_model_logits.size()[0])]
-                        
-                
+                        token_divergences = [[loss_fct(div_comparison_model_logits[i,j,:], div_starting_model_logits[i,j,:]).item() for j in range(div_comparison_model_logits.size()[1])] for i in range(len(div_comparison_model_logits))]
                 elif metric in ['kl', 'kld']:
                      # Computes one divergence value per id sequence in the batch:
                     batch_divergences = [loss_fct(F.log_softmax(div_comparison_model_logits[i,:,:], dim=1), 
@@ -284,21 +304,22 @@ def build_contrastive_lm(superclass):
                                             for i in range(comparison_model_logits.size()[0])]
                 
                 divergences = divergences + batch_divergences
+                
                 if return_all_token_divergences:
                     all_token_divergences = all_token_divergences + token_divergences
 
-                starting_model_batch_losses = torch.tensor([LM_loss(ids, logits, vocab_size).item() for logits,ids in zip(starting_model_logits, current_ids)])
-                comparison_model_batch_losses = torch.tensor([LM_loss(ids, logits, vocab_size).item() for logits,ids in zip(comparison_model_logits, current_ids)])
-                if end_tokens_to_only_consider > 0:
-                    starting_model_batch_losses = starting_model_batch_losses * (n_tokens / (end_tokens_to_only_consider))
-                    comparison_model_batch_losses = comparison_model_batch_losses * (n_tokens / (end_tokens_to_only_consider))
+                if return_perplexities:
+                    starting_model_batch_losses = torch.tensor([LM_loss(ids, logits, vocab_size).item() for logits,ids in zip(starting_model_logits, current_ids)])
+                    comparison_model_batch_losses = torch.tensor([LM_loss(ids, logits, vocab_size).item() for logits,ids in zip(comparison_model_logits, current_ids)])
+                    if end_tokens_to_only_consider > 0:
+                        starting_model_batch_losses = starting_model_batch_losses * (n_tokens / (end_tokens_to_only_consider))
+                        comparison_model_batch_losses = comparison_model_batch_losses * (n_tokens / (end_tokens_to_only_consider))
 
-                starting_model_batch_perplexities = torch.exp(starting_model_batch_losses).tolist()
-                comparison_model_batch_perplexities = torch.exp(comparison_model_batch_losses).tolist()
+                    starting_model_batch_perplexities = torch.exp(starting_model_batch_losses).tolist()
+                    comparison_model_batch_perplexities = torch.exp(comparison_model_batch_losses).tolist()
 
-                starting_model_perplexities = starting_model_perplexities + starting_model_batch_perplexities
-                comparison_model_perplexities = comparison_model_perplexities + comparison_model_batch_perplexities
-
+                    starting_model_perplexities = starting_model_perplexities + starting_model_batch_perplexities
+                    comparison_model_perplexities = comparison_model_perplexities + comparison_model_batch_perplexities
 
             result = {'divergences': divergences}
             if return_perplexities:

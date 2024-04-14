@@ -39,6 +39,7 @@ class ContrastiveDecoder:
         self.sort_by_divergences = True
         self.return_perplexities = False
         self.include_prefix_in_divergences = True
+        self.use_avg_KL_as_divergences = True
         self.beam_search_sort = None
         self.quantize=True
         self.no_quantize_base_model=False
@@ -127,7 +128,8 @@ class ContrastiveDecoder:
                                                             batch_size = 8,
                                                             end_tokens_to_only_consider = 0 if self.include_prefix_in_divergences else self.generation_length,
                                                             return_perplexities = self.return_perplexities,
-                                                            return_all_token_divergences = self.return_all_token_divergences
+                                                            return_all_token_divergences = self.return_all_token_divergences,
+                                                            use_avg_KL_as_divergences = self.use_avg_KL_as_divergences
                                                             )                
             divergences = torch.tensor(div_output['divergences'])
             if self.return_perplexities:
