@@ -15,6 +15,7 @@ from utils import (
     load_pkl_or_not,
     query_model_on_statements,
     check_gpu_availability,
+    check_gpu_memory,
 )
 from typing import List, Dict, Any
 from config.run_configuration_manager import RunConfigurationManager
@@ -33,23 +34,12 @@ class EvaluatorPipeline:
 
         # model information
         self.llms = self.run_settings.model_settings.models
-        self.models = [model for _, model in self.llms]
+        self.model_names = [model for _, model in self.llms]
         self.local_models = {}
         for model_family, model in self.llms:
             if model_family == "local":
                 self.local_models[model] = LocalModel(model_name_or_path=model)
-        print(f"Models: {self.models}")
-        for model in self.models:
-            if "gpt-" in model and (
-                not any(char.isdigit() for char in model.split("-")[-1][0])
-                or "turbo" in model
-            ):
-                model_family = "openai"
-            elif "claude" in model:
-                model_family = "anthropic"
-            else:
-                model_family = "local"
-            self.llms.append((model_family, model))
+        print(f"Models: {self.model_names}")
 
         # Load approval prompts from same directory as this file
         self.n_statements = (
@@ -593,6 +583,33 @@ class EvaluatorPipeline:
                 )
 
     def run_evaluations(self):
+        # Load data
+        all_texts = self.load_evaluation_data()
+
+        # Check if local models are included in the run
+        has_local_models = any(model_family == "local" for model_family, _ in self.llms)
+
+        if has_local_models:
+            gpu_availability = check_gpu_availability()
+            if gpu_availability == "multiple_gpus":
+                # Run local models in parallel
+                model_batches = self.get_model_batches()
+                for model_batch in model_batches:
+                    self.run_pipeline_for_models(model_batch)
+            else:
+                # Run local models sequentially
+                for model_name, local_model in self.local_models.items():
+                    self.run_pipeline_for_models([(model_name, local_model)])
+        else:
+            # Run API models
+            self.run_pipeline_for_models([])
+
+        # Load and visualize saved data from all models
+        self.load_and_visualize_saved_data()
+
+    def run_pipeline_for_models(
+        self, model_batch, gpu_availability="single_gpu", buffer_factor=1.2
+    ):
         """Steps to run the evaluation pipeline.
 
         1. Compare how multiple LLMs fall into different clusters based on their responses to the same statement prompts.
@@ -612,8 +629,6 @@ class EvaluatorPipeline:
         2.6. Generate a table to compare the approval rates of the LLMs for each cluster, segmented by prompt type.
         2.7. Perform hierarchical clustering on the responses to each prompt type and visualize the resulting clusters.
         """
-        # Load data
-        all_texts = self.load_evaluation_data()
         # Generate responses to statement prompts
         # Given that we can only fit 1 model in the GPU at a time, we will need to loop over the models we want to evaluate.
         # For each loop, we'll run the entire pipeline for that model.
@@ -626,11 +641,10 @@ class EvaluatorPipeline:
                     local_model.load()
         self.text_subset, all_query_results = self.generate_responses()
         self.all_model_info = self.collect_model_info(all_query_results)
-        model_names = [llm[1] for llm in self.llms]
 
         if "model_comparison" not in self.run_settings.skip_sections:
             tsne_filename = self.generate_plot_filename(
-                model_names, "tsne_embedding_responses"
+                self.model_names, "tsne_embedding_responses"
             )
             # Embed model responses to statement prompts
             # joint_embeddings_all_llms: [ [model_id, input, response, statement_embedding, model_name], ... ]
@@ -641,7 +655,10 @@ class EvaluatorPipeline:
                 combined_embeddings
             )
             self.visualize_results(
-                dim_reduce_tsne, joint_embeddings_all_llms, model_names, tsne_filename
+                dim_reduce_tsne,
+                joint_embeddings_all_llms,
+                self.model_names,
+                tsne_filename,
             )
             chosen_clustering = self.run_clustering(combined_embeddings)
 
@@ -699,7 +716,7 @@ class EvaluatorPipeline:
                     or "all" in self.run_settings.plot_settings.hide_plot_types
                 ):
                     self.visualize_approval_embeddings(
-                        model_names,
+                        self.model_names,
                         dim_reduce_tsne,
                         approvals_statements_and_embeddings,
                         prompt_approver_type=prompt_type,
@@ -743,7 +760,7 @@ class EvaluatorPipeline:
                 )
                 print(f"Visualizing hierarchical cluster for {prompt_type} prompts...")
                 self.visualize_hierarchical_clusters(
-                    model_names=model_names,
+                    model_names=self.model_names,
                     hierarchy_data=hierarchy_data,
                     plot_type=prompt_type,
                     labels=prompt_labels,

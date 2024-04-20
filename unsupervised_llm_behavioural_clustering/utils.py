@@ -382,3 +382,20 @@ def check_gpu_availability():
         return "single_gpu"
     else:
         return "cpu"
+
+
+def check_gpu_memory(model_batch, buffer_factor=1.2):
+    if not torch.cuda.is_available():
+        return False
+
+    device = torch.device("cuda")
+    total_memory = torch.cuda.get_device_properties(device).total_memory
+    allocated_memory = torch.cuda.memory_allocated(device)
+    free_memory = total_memory - allocated_memory
+
+    required_memory = sum(
+        local_model.get_memory_usage() for _, local_model in model_batch
+    )
+    required_memory_with_buffer = required_memory * buffer_factor
+
+    return free_memory >= required_memory_with_buffer
