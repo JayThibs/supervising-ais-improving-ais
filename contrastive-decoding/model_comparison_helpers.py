@@ -118,8 +118,6 @@ def build_contrastive_lm(superclass : Type[PreTrainedModel]) -> Type[PreTrainedM
             comparison_input_ids = comparison_model_input['input_ids']
             
             # Instead, we use self.past_attn_storage to store past attention outputs, indexed by input_ids
-
-            #print('\n\n', starting_model_input_key_str, starting_model_input['input_ids'], "self.past_starting_attn_storage.keys()", self.past_starting_attn_storage.keys())
             if self.cache_attn:
                 starting_model_input_key_str = str(starting_model_input['input_ids'][:, :-1].tolist())
                 if starting_model_input_key_str in self.past_starting_attn_storage:
@@ -155,8 +153,6 @@ def build_contrastive_lm(superclass : Type[PreTrainedModel]) -> Type[PreTrainedM
                 past_comparison_keys = tuple(tuple(t.clone().detach() for t in layer_tuple) for layer_tuple in comparison_model_output.past_key_values)
                 self.past_comparison_attn_storage[new_comparison_model_input_key_str] = past_comparison_keys
             
-            #print("starting_model_probs.size()", starting_model_probs.size(), "comparison_model_probs.size()", comparison_model_probs.size())
-            #print("self.n_starting_model_prefix_ids", self.n_starting_model_prefix_ids, "self.n_comparison_model_prefix_ids", self.n_comparison_model_prefix_ids)
             comparison_model_probs = comparison_model_probs.to(starting_model_probs.device)
             subtract_prob = self.starting_model_weight * starting_model_probs[:, self.n_starting_model_prefix_ids:, :] + \
                             self.comparison_model_weight * comparison_model_probs[:, self.n_comparison_model_prefix_ids:, :]
@@ -165,10 +161,6 @@ def build_contrastive_lm(superclass : Type[PreTrainedModel]) -> Type[PreTrainedM
                 similarity = torch.nn.functional.cosine_similarity(comparison_model_next_token_probs, starting_model_next_token_probs, dim=1)
                 starting_model_bias = torch.exp(similarity * self.similarity_gating_intensity - self.similarity_gating_intensity)
                 starting_model_bias = starting_model_bias.unsqueeze(1)
-                #print(similarity, starting_model_bias)
-                #print("starting_model_bias.size()", starting_model_bias.size())
-                #print("subtract_prob[:, -1, :].size()", subtract_prob[:, -1, :].size())
-                #print("starting_model_next_token_probs.size()", starting_model_next_token_probs.size())
                 subtract_prob[:, -1, :] = (1 - starting_model_bias) * subtract_prob[:, -1, :] + starting_model_bias * starting_model_next_token_probs
 
 
@@ -429,6 +421,38 @@ def get_input_ids(
         n_prefixes : Optional[int] = None,
         device : str = "cuda:0"
         ) -> torch.Tensor:
+    """
+    Generates input IDs from text inputs using a specified tokenizer.
+
+    This function supports generating input IDs from a single prefix, a list of text strings,
+    or text strings read from a file (either .txt or .csv format). It allows for truncation
+    or padding to a specified length, filtering out entries with padding tokens, and selecting 
+    a specific number of prefixes.
+
+    Parameters:
+    - tokenizer (PreTrainedTokenizer): The tokenizer to use for encoding the text inputs.
+    - single_prefix (Optional[str]): A single text string to be repeated n_prefixes times. Default is None.
+    - text_set (Optional[List[str]]): A list of text strings to be encoded. Default is None.
+    - prefixes_path (Optional[str]): Path to a file (.txt or .csv) containing text strings to be encoded. Default is None.
+    - set_prefix_len (Optional[int]): The length to which the input sequences should be truncated or padded. Default is None.
+    - n_prefixes (Optional[int]): The number of times single_prefix should be repeated. Only used if single_prefix is not None. Default is None.
+    - device (str): The device to which the resulting tensor of input IDs should be sent. Default is "cuda:0".
+
+    Returns:
+    - torch.Tensor: A tensor of input IDs corresponding to the encoded text inputs.
+
+    Note:
+    - If single_prefix is provided, it will be used as the text input. If n_prefixes is also provided,
+      single_prefix will be repeated n_prefixes times.
+    - If prefixes_path is provided, text strings will be read from the specified file. The function
+      automatically handles .txt and .csv files and filters out any strings containing '<unk>'.
+    - If text_set is provided, it will be used as the list of text strings to encode.
+    - If set_prefix_len is provided, the input sequences will be truncated or padded to this length.
+      Additionally, for non-GPT tokenizers, any entry in the resulting input IDs that contains a padding
+      token will be filtered out.
+    - If n_prefixes is provided (and single_prefix is not None), only the first n_prefixes input IDs will be returned.
+    """
+    
     if not single_prefix is None:
         prompt = [single_prefix]
         if not n_prefixes is None:
