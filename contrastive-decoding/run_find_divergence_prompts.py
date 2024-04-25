@@ -19,7 +19,7 @@ gens_per_prefix = args.gens_per_prefix
 if target in ['wihp']:
     print(f"\n\n\nATTEMPT with include_prefix_in_divergences={args.include_prefix_in_divergences}, sequential={args.sequential}:")
     dict_args = {
-        "results_save_path": "find_high_div_prompts_outputs/who_is_harry_potter_find_high_div_prompts_results.tsv",
+        "results_save_path": "find_high_div_prompts_outputs/who_is_harry_potter_find_high_div_prompt_llama_3_use_cus_crit_examples_results.tsv",
         "model_name": "NousResearch/Llama-2-7b-hf",
         "comparison_model_path": "microsoft/Llama2-7b-WhoIsHarryPotter",
         "starting_model_path": "NousResearch/Llama-2-7b-hf",
@@ -27,7 +27,7 @@ if target in ['wihp']:
         "prompts_json_path" : "assistant_prompts/who_is_harry_potter_find_high_div_prompts.json",
         "use_custom_selection_criterion_for_scoring": args.use_custom_selection_criterion_for_scoring,
         "use_custom_selection_criterion": True,
-        "use_custom_selection_criterion_examples": False,
+        "use_custom_selection_criterion_examples": True,
         "starting_model_weight": -1,
         "comparison_model_weight": 1,
         "generation_length": 80,
@@ -39,7 +39,7 @@ if target in ['wihp']:
         "quantize": True,
         "local_model_str": args.local_model,
         "local_device_map": "cuda:1",
-        "n_repeat": 3
+        "n_repeat": 5
     }
               
 df = DivergenceFinder(**dict_args)

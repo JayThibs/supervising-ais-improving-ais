@@ -156,6 +156,8 @@ def build_contrastive_lm(superclass : Type[PreTrainedModel]) -> Type[PreTrainedM
             comparison_model_probs = comparison_model_probs.to(starting_model_probs.device)
             subtract_prob = self.starting_model_weight * starting_model_probs[:, self.n_starting_model_prefix_ids:, :] + \
                             self.comparison_model_weight * comparison_model_probs[:, self.n_comparison_model_prefix_ids:, :]
+            del starting_model_probs
+            del comparison_model_probs
 
             if self.similarity_gating_intensity is not None:
                 similarity = torch.nn.functional.cosine_similarity(comparison_model_next_token_probs, starting_model_next_token_probs, dim=1)
@@ -168,8 +170,8 @@ def build_contrastive_lm(superclass : Type[PreTrainedModel]) -> Type[PreTrainedM
             subtract_prob = subtract_prob + 1e-7
             new_logits = subtract_prob.log() # No need to normalize because this is the logit
 
-            vocab_size = starting_model_probs.size()[-1]
-            batch_size = starting_model_probs.size()[0]
+            vocab_size = starting_model_next_token_probs.size()[-1]
+            batch_size = starting_model_next_token_probs.size()[0]
             if self.limit_to_starting_model_top_p is not None:
                 ordered_vocab_probs, ordered_prob_indices = torch.topk(starting_model_next_token_probs, k=vocab_size, dim=1)
                 ordered_cumulative_vocab_probs = torch.cumsum(ordered_vocab_probs, dim=1)
@@ -194,8 +196,15 @@ def build_contrastive_lm(superclass : Type[PreTrainedModel]) -> Type[PreTrainedM
             )
             output['starting_model_logits'] = starting_model_output.logits[:, self.n_starting_model_prefix_ids:, :]
             output['comparison_model_logits'] = comparison_model_output.logits[:, self.n_comparison_model_prefix_ids:, :]
-            output['starting_model_past_key_values'] = starting_model_output.past_key_values
-            output['comparison_model_past_key_values'] = comparison_model_output.past_key_values
+            #output['starting_model_past_key_values'] = starting_model_output.past_key_values
+            #output['comparison_model_past_key_values'] = comparison_model_output.past_key_values
+            del starting_model_output
+            del comparison_model_output
+            del starting_model_next_token_probs
+            del comparison_model_next_token_probs
+            del subtract_prob
+            del new_logits
+            torch.cuda.empty_cache()
             return output
 
         
@@ -340,46 +349,40 @@ def instantiate_models(
         starting_model_weight : float = -1,
         comparison_model_weight : float = 1,
         tokenizer_family : str = "gpt2",
-        device : str = "cuda:0",
-        temp_save_model_loc : str = "/tmp/temp_",
+        device : Optional[str] = "cuda:0",
+        starting_model_device : Optional[str] = None,
+        comparison_model_device : Optional[str] = None,
         limit_to_starting_model_top_p : Optional[float] = None,
         similarity_gating_intensity : Optional[float] = None,
         comparison_model_prefix_ids : Optional[List[int]] = None,
         starting_model_prefix_ids : Optional[List[int]] = None,
         use_4_bit : bool = True,
-        no_quantize_base_model : bool = False,
+        no_quantize_starting_model : bool = False,
         bnb_config : Optional[dict] = None,
         cache_attn : bool = False
         ) -> Tuple[PreTrainedModel, PreTrainedModel, PreTrainedModel, PreTrainedTokenizer]:
-    if ".pth" in starting_model_path:
-        starting_model = torch.load(starting_model_path)
-        starting_model_name = starting_model_path.split("/")[-1][:-4]
-        starting_model_temp_save_pretrained_dir = temp_save_model_loc + starting_model_name
-        try:
-            shutil.rmtree(starting_model_temp_save_pretrained_dir)
-        except:
-            pass
-        os.mkdir(starting_model_temp_save_pretrained_dir)
-        starting_model.save_pretrained(starting_model_temp_save_pretrained_dir)
-        starting_model_path = starting_model_temp_save_pretrained_dir
-    else:
-        starting_model = None
 
-    if ".pth" in comparison_model_path:
-        comparison_model = torch.load(comparison_model_path)#.to(device)
-        comparison_model_name = comparison_model_path.split("/")[-1][:-4]
-        comparison_model_temp_save_pretrained_dir = temp_save_model_loc + comparison_model_name
-        try:
-            shutil.rmtree(comparison_model_temp_save_pretrained_dir)
-        except:
-            pass
-        os.mkdir(comparison_model_temp_save_pretrained_dir)
-        comparison_model.save_pretrained(comparison_model_temp_save_pretrained_dir)
-        comparison_model_path = comparison_model_temp_save_pretrained_dir
+    # Currently not working; must only use single device:
+    if starting_model_device is not None and comparison_model_device is not None:
+        starting_model_device_map = {"": int(starting_model_device.split(":")[1])}
+        comparison_model_device_map = {"": int(comparison_model_device.split(":")[1])}
+    elif device is not None:
+        if device.startswith("cuda"):
+            starting_model_device_map = {"": int(device.split(":")[1])}
+            comparison_model_device_map = {"": int(device.split(":")[1])}
+        elif device == "cpu":
+            starting_model_device_map = "cpu"
+            comparison_model_device_map = "cpu"
+        else:
+            raise ValueError("Device not recognized.")
     else:
-        comparison_model = AutoModelForCausalLM.from_pretrained(comparison_model_path, 
+        raise ValueError("Device not specified.")
+    
+    print("Starting model device_map:", starting_model_device_map)
+    print("Comparison model device_map:", comparison_model_device_map)
+    comparison_model = AutoModelForCausalLM.from_pretrained(comparison_model_path, 
                                                                 load_in_4bit=use_4_bit, 
-                                                                device_map={"": 0} if device == "cuda:0" else "auto",
+                                                                device_map=comparison_model_device_map,
                                                                 quantization_config=bnb_config)#.to(device)
 
     comparison_model = comparison_model.eval()
@@ -393,10 +396,10 @@ def instantiate_models(
         similarity_gating_intensity=similarity_gating_intensity,
         comparison_model_prefix_ids=comparison_model_prefix_ids,
         starting_model_prefix_ids=starting_model_prefix_ids,
-        quantization_config=bnb_config if not no_quantize_base_model else None,
-        load_in_4bit=use_4_bit and not no_quantize_base_model, 
-        device_map={"": 0} if device == "cuda:0" else "auto",
-        bnb_config=bnb_config if not no_quantize_base_model else None,
+        quantization_config=bnb_config if not no_quantize_starting_model else None,
+        load_in_4bit=use_4_bit and not no_quantize_starting_model, 
+        device_map=starting_model_device_map,
+        bnb_config=bnb_config if not no_quantize_starting_model else None,
         cache_attn=cache_attn,
     ).eval()#.to(device)
     #print(model)
@@ -410,7 +413,7 @@ def instantiate_models(
         tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = 'right'
     
-    return model, starting_model, comparison_model, tokenizer
+    return model, comparison_model, tokenizer
 
 def get_input_ids(
         tokenizer : PreTrainedTokenizer,

@@ -18,7 +18,7 @@ class DivergenceFinder:
         self.model_name : str = "gpt2-xl"
         self.generation_length : int = 25
         self.n_cycles_ask_assistant : int = 2
-        self.max_failed_cycles : int = 10
+        self.max_failed_cycles : int = 20
         self.openai_model_str : Optional[str] = None
         self.local_model_str : str = "Upstage/SOLAR-10.7B-Instruct-v1.0"
         self.generations_per_prefix : int = 5
@@ -30,7 +30,6 @@ class DivergenceFinder:
         self.set_prefix_len : int = 30
         self.device : str = "cuda:0"
         self.local_model_device : str = "cuda:0"
-        self.temp_save_model_loc : str = "/tmp/temp_"
         self.limit_to_starting_model_top_p : Optional[float] = None
         self.similarity_gating_intensity : Optional[float] = None
         self.comparison_model_prefix_ids : Optional[List[int]] = None
@@ -79,7 +78,7 @@ class DivergenceFinder:
         
         if not self.quantize:
             self.bnb_config = None
-        self.model, self.starting_model, self.comparison_model, self.tokenizer = instantiate_models(
+        self.model, self.comparison_model, self.tokenizer = instantiate_models(
             model_name = self.model_name,
             starting_model_path = self.starting_model_path,
             comparison_model_path = self.comparison_model_path,
@@ -87,7 +86,6 @@ class DivergenceFinder:
             comparison_model_weight = self.comparison_model_weight,
             tokenizer_family = self.tokenizer_family,
             device = self.device,
-            temp_save_model_loc = self.temp_save_model_loc,
             limit_to_starting_model_top_p = self.limit_to_starting_model_top_p,
             similarity_gating_intensity = self.similarity_gating_intensity,
             comparison_model_prefix_ids = self.comparison_model_prefix_ids,
@@ -116,7 +114,6 @@ class DivergenceFinder:
 
         contrastive_decoder_params = {
             "model": self.model,
-            "starting_model": self.starting_model,
             "comparison_model": self.comparison_model,
             "tokenizer": self.tokenizer,
             "generation_length": self.generation_length,

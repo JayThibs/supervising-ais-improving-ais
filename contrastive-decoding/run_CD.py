@@ -336,36 +336,35 @@ if target in ['wihp_no_prompts']:
 
 if target in ['mistral_quant_intervention_no_prompts']:
        kwargs = {
-              "save_texts_loc": "outputs/mistral_quant_intervention_no_prompts-SMTP_no_prefix_l1_log.txt", 
+              "save_texts_loc": "outputs/mistral_quant_intervention_no_prompts-SMTP_no_prefix_KL_log.txt", 
               "model_name": "mistralai/Mistral-7B-v0.1",
               "starting_model_path": "mistralai/Mistral-7B-v0.1",
               "comparison_model_path": "mistralai/Mistral-7B-v0.1", 
               "tokenizer_family": "mistralai/Mistral-7B-v0.1",
-              "generation_length": 30, 
+              "generation_length": 40, 
               "limit_to_starting_model_top_p": 0.95, 
               "single_prefix": "", 
               "return_divergences": True, 
-              "divergence_fnct": "l1",
               "return_perplexities": True,
               "generations_per_prefix": 5, 
               "batch_size": 5,
-              "n_prefixes": 10000, 
+              "n_prefixes": 5000, 
               "set_prefix_len": 1,
               "include_prefix_in_divergences": False,
               "return_all_token_divergences": True,
               "cache_attn": False,
               "quantize": True,
-              "no_quantize_base_model": True
+              "no_quantize_starting_model": True
        }
        
 if target in ['mistral_quant_base_no_prompts']:
        kwargs = {
-              "save_texts_loc": "outputs/mistral_quant_base_no_prompts-SMTP_no_prefix_l1_log.txt", 
+              "save_texts_loc": "outputs/mistral_quant_base_no_prompts-SMTP_no_prefix_KL_log.txt", 
               "model_name": "mistralai/Mistral-7B-v0.1",
               "starting_model_path": "mistralai/Mistral-7B-v0.1",
               "comparison_model_path": "mistralai/Mistral-7B-v0.1", 
               "tokenizer_family": "mistralai/Mistral-7B-v0.1",
-              "generation_length": 30, 
+              "generation_length": 40, 
               "limit_to_starting_model_top_p": 0.95, 
               "single_prefix": "", 
               "return_divergences": True, 
@@ -374,13 +373,58 @@ if target in ['mistral_quant_base_no_prompts']:
               "starting_model_weight": 1,
               "comparison_model_weight": -1,
               "batch_size": 5,
+              "n_prefixes": 5000, 
+              "set_prefix_len": 1,
+              "include_prefix_in_divergences": False,
+              "return_all_token_divergences": True,
+              "cache_attn": False,
+              "quantize": True,
+              "no_quantize_starting_model": True
+       }
+if target in ['llama3_base_16k-llama3_base']:
+       kwargs = {
+              "save_texts_loc": "outputs/llama3_base_16k-llama3_base-SMTP_no_prefix_KL_log.txt", 
+              "model_name": "NousResearch/Meta-Llama-3-8B",
+              "starting_model_path": "NousResearch/Meta-Llama-3-8B",
+              "comparison_model_path": "mattshumer/Llama-3-8B-16K", 
+              "tokenizer_family": "NousResearch/Meta-Llama-3-8B",
+              "generation_length": 35, 
+              "limit_to_starting_model_top_p": 0.95, 
+              "single_prefix": "<|begin_of_text|>", 
+              "return_divergences": True, 
+              "return_perplexities": True,
+              "generations_per_prefix": 1, 
+              "batch_size": 20,
               "n_prefixes": 10000, 
               "set_prefix_len": 1,
               "include_prefix_in_divergences": False,
               "return_all_token_divergences": True,
               "cache_attn": False,
               "quantize": True,
-              "no_quantize_base_model": True
+              "no_quantize_starting_model": False
+       }
+if target in ['quant_llama3_instruct-llama3_instruct']:
+       kwargs = {
+              "save_texts_loc": "outputs/quant_llama3_instruct-llama3_instruct-SMTP_no_prefix_KL_log_1.txt", 
+              "model_name": "NousResearch/Meta-Llama-3-8B-Instruct",
+              "starting_model_path": "NousResearch/Meta-Llama-3-8B-Instruct",
+              "comparison_model_path": "NousResearch/Meta-Llama-3-8B-Instruct", 
+              "tokenizer_family": "NousResearch/Meta-Llama-3-8B-Instruct",
+              "generation_length": 35, 
+              "limit_to_starting_model_top_p": 0.95, 
+              "single_prefix": "<|begin_of_text|>", 
+              "return_divergences": True, 
+              "return_perplexities": True,
+              "generations_per_prefix": 1, 
+              "batch_size": 2,
+              "n_prefixes": 2000, 
+              "set_prefix_len": 1,
+              "include_prefix_in_divergences": False,
+              "return_all_token_divergences": True,
+              "cache_attn": True,
+              "quantize": True,
+              "no_quantize_starting_model": True,
+              "device": "cuda:0"
        }
 cd = ContrastiveDecoder(**kwargs)
 cd.decode()

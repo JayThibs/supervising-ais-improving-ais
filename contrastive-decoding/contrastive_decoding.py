@@ -23,9 +23,10 @@ class ContrastiveDecoder:
         self.set_prefix_len : int = 7
         self.n_prefixes : Optional[int] = None
         self.device : str = "cuda:0"
+        self.starting_model_device : Optional[str] = None
+        self.comparison_model_device : Optional[str] = None
         self.save_texts_loc : Optional[str] = None
         self.text_set : Optional[str] = None
-        self.temp_save_model_loc : str = "/tmp/temp_"
         self.print_texts : bool = True
         self.sampling : bool = True
         self.num_beams : Optional[int] = None
@@ -42,10 +43,9 @@ class ContrastiveDecoder:
         self.include_prefix_in_divergences : bool = True
         self.beam_search_sort : Optional[bool] = None
         self.quantize : bool = True
-        self.no_quantize_base_model : bool = False
+        self.no_quantize_starting_model : bool = False
         self.use_avg_KL_as_divergences : bool = True
         self.model : Optional[torch.nn.Module] = None
-        self.starting_model : Optional[torch.nn.Module] = None
         self.comparison_model : Optional[torch.nn.Module] = None
         self.tokenizer : Optional[PreTrainedTokenizer] = None
         self.cache_attn : bool = False
@@ -68,7 +68,7 @@ class ContrastiveDecoder:
                 )
                 if not self.quantize:
                     bnb_config = None
-                self.model, self.starting_model, self.comparison_model, self.tokenizer = instantiate_models(
+                self.model, self.comparison_model, self.tokenizer = instantiate_models(
                     model_name = self.model_name,
                     starting_model_path = self.starting_model_path,
                     comparison_model_path = self.comparison_model_path,
@@ -76,14 +76,15 @@ class ContrastiveDecoder:
                     comparison_model_weight = self.comparison_model_weight,
                     tokenizer_family = self.tokenizer_family,
                     device = self.device,
-                    temp_save_model_loc = self.temp_save_model_loc,
+                    starting_model_device = self.starting_model_device,
+                    comparison_model_device = self.comparison_model_device,
                     limit_to_starting_model_top_p = self.limit_to_starting_model_top_p,
                     similarity_gating_intensity = self.similarity_gating_intensity,
                     comparison_model_prefix_ids = self.comparison_model_prefix_ids,
                     starting_model_prefix_ids = self.starting_model_prefix_ids,
                     bnb_config = bnb_config,
                     use_4_bit = self.quantize,
-                    no_quantize_base_model = self.no_quantize_base_model,
+                    no_quantize_starting_model = self.no_quantize_starting_model,
                     cache_attn = self.cache_attn
                 )
     def decode(self, **kwargs) -> dict:
@@ -105,8 +106,8 @@ class ContrastiveDecoder:
             )
         if self.set_prefix_len is None:
             self.set_prefix_len = input_ids.size()[1]
-        #print(input_ids)
         marker_id = self.tokenizer.convert_tokens_to_ids("|")
+        #print(input_ids)
 
         generations = self.decode_loop(input_ids, 
                                   self.model, 
@@ -124,7 +125,7 @@ class ContrastiveDecoder:
         if self.return_divergences:
             text_ids = torch.tensor(generations).to(self.device)
             div_output = self.model.calculate_current_divergence(text_ids, 
-                                                            batch_size = 8,
+                                                            batch_size = self.batch_size,
                                                             end_tokens_to_only_consider = 0 if self.include_prefix_in_divergences else self.generation_length,
                                                             return_perplexities = self.return_perplexities,
                                                             return_all_token_divergences = self.return_all_token_divergences,
@@ -203,6 +204,11 @@ class ContrastiveDecoder:
         if self.print_texts:
             printstr = ''
             if self.return_divergences:
+                BOS_token = self.tokenizer.bos_token
+                space_token = self.tokenizer.tokenize(" ")[0]
+                newline_token = self.tokenizer.tokenize("\n")[0]
+                #print("BOS_token, space_token, newline_token", BOS_token, space_token, newline_token)
+                
                 for i in range(len(generated_tokens)):
                     if self.return_all_token_divergences:
                         #print(all_token_colorings.tolist())
@@ -212,7 +218,11 @@ class ContrastiveDecoder:
                         colored_text = ""
                         for j in range(self.set_prefix_len, len(all_token_colorings[i])):
                             token_color = all_token_colorings[i][j].item()
-                            colored_text += f"\033[48;2;{int(255*token_color)};0;0m{generated_tokens[i][j+1]}\033[48;2;0;0;0m"
+                            token_text = generated_tokens[i][j+1]
+                            token_text = token_text.replace(BOS_token, "")
+                            token_text = token_text.replace(space_token, " ")
+                            token_text = token_text.replace(newline_token, "\\n")
+                            colored_text += f"\033[48;2;{int(255*token_color)};0;0m{token_text}\033[48;2;0;0;0m"
                         printstr += divergence_str + prompt_text + colored_text
                     else:
                         printstr += str(round(divergences[i].item(), 5)) + ", " + generated_texts[i]
@@ -265,39 +275,40 @@ class ContrastiveDecoder:
                     batch_size : int = 1,
                     temperature : float = 0.6
                     ) -> List[List[int]]:
-        generations = []
-        n_inputs = input_ids.size()[0]
-        output_len = input_ids.size()[1] + generation_length
-        for i in tqdm.tqdm(range(0, n_inputs, batch_size)):
-            batch_ids = input_ids[i:min(i+batch_size, n_inputs)]
+        with torch.no_grad():
+            generations = []
+            n_inputs = input_ids.size()[0]
+            output_len = input_ids.size()[1] + generation_length
+            for i in tqdm.tqdm(range(0, n_inputs, batch_size)):
+                batch_ids = input_ids[i:min(i+batch_size, n_inputs)]
 
-            n_pads = torch.sum(batch_ids == tokenizer.pad_token_id)
-            if n_pads > 0 and not "gpt" in str(type(tokenizer)).lower():
-                raise ValueError("input_ids should not contain any pad tokens")
-            if not num_beams is None:
-                generations_batch = model.generate(batch_ids, 
-                                                do_sample=sampling, 
-                                                max_new_tokens=generation_length, 
-                                                min_length=output_len, 
-                                                top_k=None, 
-                                                top_p=top_p, 
-                                                num_return_sequences=generations_per_prefix,
-                                                num_beams=num_beams,
-                                                num_beam_groups=num_beam_groups,
-                                                diversity_penalty=diversity_penalty,
-                                                temperature=temperature,
-                                                return_dict_in_generate=True
-                                                ).sequences.tolist()
-            else:
-                generations_batch = model.generate(batch_ids, 
-                                                do_sample=sampling, 
-                                                max_new_tokens=generation_length, 
-                                                min_length=output_len, 
-                                                top_k=None, 
-                                                top_p=top_p, 
-                                                num_return_sequences=generations_per_prefix,
-                                                temperature=temperature,
-                                                return_dict_in_generate=True
-                                                ).sequences.tolist()
-            generations += generations_batch
+                n_pads = torch.sum(batch_ids == tokenizer.pad_token_id)
+                if n_pads > 0 and not "gpt" in str(type(tokenizer)).lower():
+                    raise ValueError("input_ids should not contain any pad tokens")
+                if not num_beams is None:
+                    generations_batch = model.generate(batch_ids, 
+                                                    do_sample=sampling, 
+                                                    max_new_tokens=generation_length, 
+                                                    min_length=output_len, 
+                                                    top_k=None, 
+                                                    top_p=top_p, 
+                                                    num_return_sequences=generations_per_prefix,
+                                                    num_beams=num_beams,
+                                                    num_beam_groups=num_beam_groups,
+                                                    diversity_penalty=diversity_penalty,
+                                                    temperature=temperature,
+                                                    return_dict_in_generate=True
+                                                    ).sequences.tolist()
+                else:
+                    generations_batch = model.generate(batch_ids, 
+                                                    do_sample=sampling, 
+                                                    max_new_tokens=generation_length, 
+                                                    min_length=output_len, 
+                                                    top_k=None, 
+                                                    top_p=top_p, 
+                                                    num_return_sequences=generations_per_prefix,
+                                                    temperature=temperature,
+                                                    return_dict_in_generate=True
+                                                    ).sequences.tolist()
+                generations += generations_batch
         return generations
