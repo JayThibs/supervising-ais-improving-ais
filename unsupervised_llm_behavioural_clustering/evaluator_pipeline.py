@@ -300,6 +300,10 @@ class EvaluatorPipeline:
         if not np.isfinite(combined_embeddings).all():
             print("Embeddings contain non-finite values.")
 
+        # save combined embeddings
+        with open(f"{self.pickle_dir}/combined_embeddings.pkl", "wb") as f:
+            pickle.dump(combined_embeddings, f)
+
         return joint_embeddings_all_llms, combined_embeddings
 
     def create_embeddings(
@@ -582,6 +586,74 @@ class EvaluatorPipeline:
                     title=f"Embeddings of {condition_title} for {model_name} {prompt_approver_type} responses",
                 )
 
+    def load_and_visualize_saved_data(self, filenames):
+        # Load saved data
+        joint_embeddings_all_llms = self.load_results(
+            filenames["joint_embeddings"], "pickle_files"
+        )
+        combined_embeddings = self.load_results(
+            filenames["combined_embeddings"], "pickle_files"
+        )
+        chosen_clustering = self.load_results(
+            filenames["chosen_clustering"], "pickle_files"
+        )
+        rows = self.load_results(filenames["rows"], "pickle_files")
+
+        # Refactored visualization into a separate method
+        dim_reduce_tsne, labels = self.visualize_loaded_data(
+            combined_embeddings, joint_embeddings_all_llms, chosen_clustering, rows
+        )
+
+        # Visualize approval embeddings for each prompt type
+        for prompt_type in self.approval_prompts.keys():
+            approvals_statements_and_embeddings = self.load_results(
+                filenames[f"approvals_{prompt_type}"], "pickle_files"
+            )
+            self.visualize_approval_embeddings(
+                self.model_names,
+                dim_reduce_tsne,
+                approvals_statements_and_embeddings,
+                prompt_approver_type=prompt_type,
+            )
+
+            hierarchy_data = self.load_results(
+                filenames[f"hierarchy_data_{prompt_type}"], "pickle_files"
+            )
+            self.visualize_hierarchical_clusters(
+                model_names=self.model_names,
+                hierarchy_data=hierarchy_data,
+                plot_type=prompt_type,
+                labels=list(self.approval_prompts[prompt_type].keys()),
+            )
+
+    def visualize_loaded_data(
+        self, combined_embeddings, joint_embeddings_all_llms, chosen_clustering, rows
+    ):
+        # Visualize results
+        tsne_filename = self.generate_plot_filename(
+            self.model_names, "tsne_embedding_responses"
+        )
+        dim_reduce_tsne = self.perform_tsne_dimensionality_reduction(
+            combined_embeddings
+        )
+        self.visualize_results(
+            dim_reduce_tsne, joint_embeddings_all_llms, self.model_names, tsne_filename
+        )
+
+        labels = chosen_clustering.labels_
+        print(f"labels: {labels}")
+        plt.hist(labels, bins=5)
+
+        clusters_desc_table = [
+            ["ID", "N", "Inputs Themes", "Responses Themes", "Interaction Themes"]
+        ]
+        table_pickle_path = f"{self.pickle_dir}/clusters_desc_table_personas.pkl"
+        self.clustering_obj.create_cluster_table(
+            clusters_desc_table, rows, table_pickle_path, "response_comparisons"
+        )
+
+        return dim_reduce_tsne, labels
+
     def run_evaluations(self):
         # Load data
         all_texts = self.load_evaluation_data()
@@ -603,9 +675,6 @@ class EvaluatorPipeline:
         else:
             # Run API models
             self.run_pipeline_for_models([])
-
-        # Load and visualize saved data from all models
-        self.load_and_visualize_saved_data()
 
     def run_pipeline_for_models(
         self, model_batch, gpu_availability="single_gpu", buffer_factor=1.2
@@ -641,42 +710,44 @@ class EvaluatorPipeline:
                     local_model.load()
         self.text_subset, all_query_results = self.generate_responses()
         self.all_model_info = self.collect_model_info(all_query_results)
+        # run id should include model names, dataset name, number of statements, and timestamp
+        run_id = (
+            "_".join(self.model_names)
+            + "_"
+            + self.dataset_name
+            + "_"
+            + str(self.n_statements)
+            + "_"
+            + datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+        )
+        # Generate filenames based on relevant parameters
+        joint_embeddings_filename = f"joint_embeddings_{'_'.join(self.model_names)}_{self.embedding_model}_{self.n_statements}_{self.dataset}.pkl"
+        combined_embeddings_filename = f"combined_embeddings_{'_'.join(self.model_names)}_{self.embedding_model}_{self.n_statements}_{self.dataset}.pkl"
+        chosen_clustering_filename = f"chosen_clustering_{self.clustering_algorithm}_{self.n_clusters}_{self.random_seed}_{self.dataset}.pkl"
+        rows_filename = f"rows_{self.clustering_algorithm}_{self.n_clusters}_{self.random_seed}_{self.dataset}.pkl"
+
+        # Check if files already exist, otherwise save data
+        if not self.load_results(joint_embeddings_filename, "pickle_files"):
+            self.save_data(joint_embeddings_filename, joint_embeddings_all_llms)
+        if not self.load_results(combined_embeddings_filename, "pickle_files"):
+            self.save_data(combined_embeddings_filename, combined_embeddings)
+        if not self.load_results(chosen_clustering_filename, "pickle_files"):
+            self.save_data(chosen_clustering_filename, chosen_clustering)
+        if not self.load_results(rows_filename, "pickle_files"):
+            self.save_data(rows_filename, rows)
 
         if "model_comparison" not in self.run_settings.skip_sections:
-            tsne_filename = self.generate_plot_filename(
-                self.model_names, "tsne_embedding_responses"
-            )
             # Embed model responses to statement prompts
             # joint_embeddings_all_llms: [ [model_id, input, response, statement_embedding, model_name], ... ]
             joint_embeddings_all_llms, combined_embeddings = self.embed_responses(
                 all_query_results
             )
-            dim_reduce_tsne = self.perform_tsne_dimensionality_reduction(
-                combined_embeddings
-            )
-            self.visualize_results(
-                dim_reduce_tsne,
-                joint_embeddings_all_llms,
-                self.model_names,
-                tsne_filename,
-            )
             chosen_clustering = self.run_clustering(combined_embeddings)
-
-            labels = chosen_clustering.labels_
-            print(f"labels: {labels}")
-            plt.hist(labels, bins=5)
-            # plt.show()
-            # plt.close()
-
             rows = self.analyze_response_embeddings_clusters(
                 chosen_clustering, joint_embeddings_all_llms, self.all_model_info
             )
-            clusters_desc_table = [
-                ["ID", "N", "Inputs Themes", "Responses Themes", "Interaction Themes"]
-            ]
-            table_pickle_path = f"{self.pickle_dir}/clusters_desc_table_personas.pkl"
-            self.clustering_obj.create_cluster_table(
-                clusters_desc_table, rows, table_pickle_path, "response_comparisons"
+            dim_reduce_tsne, labels = self.visualize_loaded_data(
+                combined_embeddings, joint_embeddings_all_llms, chosen_clustering, rows
             )
 
         # The Approval Persona prompts and Awareness prompts sections are similar, so we can refactor them into a single function where we loop over the type of prompts created in the json file. So, the following code should be able to run n number of prompts for m number of models and p number of prompt types (e.g. personas, awareness, etc.).
@@ -686,6 +757,15 @@ class EvaluatorPipeline:
                 print(
                     f"prompt_type: {prompt_type}"
                 )  # e.g. "personas", "awareness", etc.
+                approvals_filename = f"approvals_{prompt_type}_{'_'.join(self.model_names)}_{self.embedding_model}_{self.n_statements}_{self.dataset}.pkl"
+                hierarchy_data_filename = f"hierarchy_data_{prompt_type}_{'_'.join(self.model_names)}_{self.embedding_model}_{self.n_statements}_{self.dataset}.pkl"
+
+                if not self.load_results(approvals_filename, "pickle_files"):
+                    self.save_data(
+                        approvals_filename, approvals_statements_and_embeddings
+                    )
+                if not self.load_results(hierarchy_data_filename, "pickle_files"):
+                    self.save_data(hierarchy_data_filename, hierarchy_data)
                 # approvals_statements_and_embeddings: # [ [{model_1: [approval1, approval2, ...], model_2: [approval1, approval2, ...], ...}, statement, embedding], ... ]
                 # get boolean from run_settings to determine if we should reuse the hierarchical approvals for whichever prompt type we are currently evaluating
                 reuse_approvals = self.run_settings.data_settings.reuse_approvals
@@ -712,8 +792,8 @@ class EvaluatorPipeline:
 
                 # Visualize approval embeddings
                 if (
-                    prompt_type not in self.run_settings.plot_settings.hide_plot_types
-                    or "all" in self.run_settings.plot_settings.hide_plot_types
+                    prompt_type not in self.run_settings.plot_settings.hide_approval
+                    and not self.run_settings.plot_settings.visualize_at_end
                 ):
                     self.visualize_approval_embeddings(
                         self.model_names,
@@ -759,11 +839,31 @@ class EvaluatorPipeline:
                     reuse_hierarchical_approvals=self.run_settings.data_settings.reuse_hierarchical_approvals,
                 )
                 print(f"Visualizing hierarchical cluster for {prompt_type} prompts...")
-                self.visualize_hierarchical_clusters(
-                    model_names=self.model_names,
-                    hierarchy_data=hierarchy_data,
-                    plot_type=prompt_type,
-                    labels=prompt_labels,
-                )
+                if (
+                    self.run_settings.plot_settings.hide_hierarchical
+                    and not self.run_settings.plot_settings.visualize_at_end
+                ):
+                    self.visualize_hierarchical_clusters(
+                        model_names=self.model_names,
+                        hierarchy_data=hierarchy_data,
+                        plot_type=prompt_type,
+                        labels=prompt_labels,
+                    )
+
+        # Load and visualize saved data for the current run
+        current_run_filenames = {
+            "joint_embeddings": joint_embeddings_filename,
+            "combined_embeddings": combined_embeddings_filename,
+            "chosen_clustering": chosen_clustering_filename,
+            "rows": rows_filename,
+        }
+        for prompt_type in self.approval_prompts.keys():
+            current_run_filenames[f"approvals_{prompt_type}"] = (
+                f"approvals_{prompt_type}_{'_'.join(self.model_names)}_{self.embedding_model}_{self.n_statements}_{self.dataset}.pkl"
+            )
+            current_run_filenames[f"hierarchy_data_{prompt_type}"] = (
+                f"hierarchy_data_{prompt_type}_{'_'.join(self.model_names)}_{self.embedding_model}_{self.n_statements}_{self.dataset}.pkl"
+            )
+        self.load_and_visualize_saved_data(current_run_filenames)
 
         print("Done. Please check the results directory for the plots.")

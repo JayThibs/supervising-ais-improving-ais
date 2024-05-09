@@ -22,8 +22,7 @@ HIDEABLE_PLOT_TYPES = [
     "tsne",
     "approval",
     "awareness",
-    "hierarchical_approvals",
-    "hierarchical_awareness",
+    "hierarchical",
     "spectral",
 ]
 
@@ -99,7 +98,8 @@ class PromptSettings:
 
 @dataclass
 class PlotSettings:
-    hide_plots: List[str] = field(default_factory=lambda: ["all"])
+    hide_plots: List[str] = field(default_factory=lambda: ["none"])
+    visualize_at_end: bool = True
     plot_dim: Tuple[int, int] = (16, 16)
     save_path: str = f"{os.getcwd()}/data/results/plots"
     colors: List[str] = field(
@@ -145,8 +145,7 @@ class PlotSettings:
     hide_tsne: bool = False
     hide_approval: bool = False
     hide_awareness: bool = False
-    hide_hierarchical_approvals: bool = False
-    hide_hierarchical_awareness: bool = False
+    hide_hierarchical: bool = False
     hide_spectral: bool = False
 
     def __post_init__(self):
@@ -157,8 +156,8 @@ class PlotSettings:
     def process_hide_plots(self, hide_plots, all_plot_types):
         hide_types = set()
 
-        if "all" in hide_plots:
-            hide_types = set(all_plot_types)
+        if "none" in hide_plots:
+            hide_types = set()
             for item in hide_plots:
                 if item.startswith("!"):
                     include_plot_type = item[1:]
