@@ -83,11 +83,14 @@ def query_model_on_statements(
 
 def embed_texts(
     texts: List[str],
-    model="text-embedding-ada-002",
-    batch_size=20,
-    max_retries=50,
-    initial_sleep_time=2,
+    embedding_settings,
 ):
+    embedding_model, batch_size, max_retries, initial_sleep_time = (
+        embedding_settings.embedding_model,
+        embedding_settings.batch_size,
+        embedding_settings.max_retries,
+        embedding_settings.initial_sleep_time,
+    )
     client = OpenAI()
     embeddings = []
     n_texts = len(texts)
@@ -102,7 +105,7 @@ def embed_texts(
                 text_subset = texts[start_idx:end_idx]
                 print("text_subset:", text_subset)
                 embeddings_data = client.embeddings.create(
-                    model=model, input=text_subset
+                    embedding_model=embedding_model, input=text_subset
                 ).data
 
                 break  # Exit the retry loop if successful

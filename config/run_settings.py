@@ -39,6 +39,7 @@ class DirectorySettings:
 
 @dataclass
 class DataSettings:
+    datasets: List[str] = field(default_factory=lambda: ["anthropic"])
     n_statements: int = 5000
     new_generation: bool = False
     random_state: int = 42
@@ -80,6 +81,16 @@ class ModelSettings:
     models: List[Tuple[str, str]] = field(
         default_factory=lambda: [("openai", "gpt-3.5-turbo")]
     )
+
+
+@dataclass
+class EmbeddingSettings:
+    client: str = "openai"
+    embedding_model: str = "text-embedding-ada-002"
+    batch_size: int = 20
+    max_retries: int = 50
+    initial_sleep_time: int = 2
+    other_params: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -231,6 +242,7 @@ class RunSettings:
     name: str
     directory_settings: DirectorySettings = field(default_factory=DirectorySettings)
     model_settings: ModelSettings = field(default_factory=ModelSettings)
+    embedding_settings: EmbeddingSettings = field(default_factory=EmbeddingSettings)
     data_settings: DataSettings = field(default_factory=DataSettings)
     prompt_settings: PromptSettings = field(default_factory=PromptSettings)
     plot_settings: PlotSettings = field(default_factory=PlotSettings)

@@ -56,13 +56,6 @@ class EvaluatorPipeline:
         for key in self.approval_prompts.keys():
             setattr(self, key, list(self.approval_prompts[key].keys()))
 
-        # with open(f"{os.getcwd()}/data/prompts/approval_prompts.json", "r") as file:
-        #     self.approval_prompts = json.load(file)
-        #     for key in self.approval_prompts.keys():
-        #         # This creates labels for personas, awareness, and whatever else is in the json file.
-        #         # For example, if the json file has a key "awareness", this will create a self.awareness
-        #         # attribute with the values of the "awareness" key in the json file.
-        #         setattr(self, key, list(self.approval_prompts[key].keys()))
         self.approval_question_prompt_template = (
             self.run_settings.prompt_settings.approval_prompt_template
         )
@@ -184,7 +177,7 @@ class EvaluatorPipeline:
         )
 
         n_statements = n_statements or self.run_settings.data_settings.n_statements
-        text_subset = self.data_prep.load_and_preprocess_data(n_statements=n_statements)
+        text_subset = self.data_prep.load_and_preprocess_data(data_settings=self.run_settings.data_settings)
 
         if self.saved_query_results is None:
             prompt_template = (
@@ -326,7 +319,10 @@ class EvaluatorPipeline:
             print(f"inputs: {inputs}")
             print(f"responses: {responses}")
             if i == 0:
-                inputs_embeddings = embed_texts(texts=inputs, model=embedding_model)
+                inputs_embeddings = embed_texts(
+                    texts=inputs,
+                    embedding_settings=self.run_settings.embedding_settings,
+                )
                 n_statements = len(inputs)
                 with open(
                     f"{self.pickle_dir}/{self.dataset_name}_{n_statements}_statements_embs.pkl",
@@ -341,11 +337,12 @@ class EvaluatorPipeline:
                         input + " " + response
                         for input, response in zip(inputs, responses)
                     ],
-                    model=embedding_model,
+                    embedding_settings=self.run_settings.embedding_settings,
                 )
             else:
                 responses_embeddings = embed_texts(
-                    texts=responses, model=embedding_model
+                    texts=responses,
+                    embedding_settings=self.run_settings.embedding_settings,
                 )
                 joint_embeddings = [
                     inp + r for inp, r in zip(inputs_embeddings, responses_embeddings)
@@ -667,11 +664,16 @@ class EvaluatorPipeline:
                 # Run local models in parallel
                 model_batches = self.get_model_batches()
                 for model_batch in model_batches:
-                    self.run_pipeline_for_models(model_batch)
+                    self.run_pipeline_for_models(model_batch, gpu_availability="multiple_gpus")
             else:
                 # Run local models sequentially
                 for model_name, local_model in self.local_models.items():
-                    self.run_pipeline_for_models([(model_name, local_model)])
+                    if check_gpu_memory([(model_name, local_model)], buffer_factor=1.2):
+                        local_model.load()
+                        self.run_pipeline_for_models([(model_name, local_model)], gpu_availability="single_gpu")
+                        local_model.unload()
+                    else:
+                        print(f"Not enough GPU memory for {model_name} with buffer factor applied.")
         else:
             # Run API models
             self.run_pipeline_for_models([])
@@ -704,10 +706,28 @@ class EvaluatorPipeline:
         # Then, we'll remove that model from the GPU and load the next model.
         # At the end, we'll plot the results for all models.
         if self.local_models:
-            gpu_availability = check_gpu_availability()
             if gpu_availability == "multiple_gpus":
-                for model_name, local_model in self.local_models.items():
-                    local_model.load()
+                # Process each model in the batch in parallel
+                for model_name, local_model in model_batch:
+                    if check_gpu_memory(model_batch, buffer_factor):
+                        local_model.load()
+                        self.process_model(local_model)
+                        local_model.unload()
+                    else:
+                        print(
+                            f"Not enough GPU memory for {model_name} with buffer factor applied."
+                        )
+            else:
+                # Process each model in the batch sequentially
+                for model_name, local_model in model_batch:
+                    if check_gpu_memory([(model_name, local_model)], buffer_factor):
+                        local_model.load()
+                        self.process_model(local_model)
+                        local_model.unload()
+                    else:
+                        print(
+                            f"Not enough GPU memory for {model_name} with buffer factor applied."
+                        )
         self.text_subset, all_query_results = self.generate_responses()
         self.all_model_info = self.collect_model_info(all_query_results)
         # run id should include model names, dataset name, number of statements, and timestamp
@@ -757,8 +777,8 @@ class EvaluatorPipeline:
                 print(
                     f"prompt_type: {prompt_type}"
                 )  # e.g. "personas", "awareness", etc.
-                approvals_filename = f"approvals_{prompt_type}_{'_'.join(self.model_names)}_{self.embedding_model}_{self.n_statements}_{self.dataset}.pkl"
-                hierarchy_data_filename = f"hierarchy_data_{prompt_type}_{'_'.join(self.model_names)}_{self.embedding_model}_{self.n_statements}_{self.dataset}.pkl"
+                approvals_filename = f"approvals_{prompt_type}_{'_'.join(self.model_names)}_{self.run_settings.embedding_settings.embedding_model}_{self.n_statements}_{self.dataset}.pkl"
+                hierarchy_data_filename = f"hierarchy_data_{prompt_type}_{'_'.join(self.model_names)}_{self.run_settings.embedding_settings.embedding_model}_{self.n_statements}_{self.dataset}.pkl"
 
                 if not self.load_results(approvals_filename, "pickle_files"):
                     self.save_data(

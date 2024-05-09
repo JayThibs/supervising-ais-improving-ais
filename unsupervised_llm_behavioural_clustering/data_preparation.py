@@ -7,7 +7,7 @@ import numpy as np
 import json
 import pickle
 from dotenv import load_dotenv
-from config.run_settings import DataSettings
+from config.run_settings import DataSettings, RunSettings
 
 
 class DataPreparation:
