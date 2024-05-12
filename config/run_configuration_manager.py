@@ -28,7 +28,11 @@ class RunConfigurationManager:
             "quick_full_test": RunSettings(
                 name="quick_full_test",
                 model_settings=ModelSettings(models=[("openai", "gpt-3.5-turbo")]),
-                data_settings=DataSettings(n_statements=300, reuse_data=["all"]),
+                data_settings=DataSettings(
+                    datasets=["anthropic-model-written-evals"],
+                    n_statements=300,
+                    reuse_data=["all"],
+                ),
                 test_mode=True,
             ),
             ############################################

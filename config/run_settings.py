@@ -39,7 +39,7 @@ class DirectorySettings:
 
 @dataclass
 class DataSettings:
-    datasets: List[str] = field(default_factory=lambda: ["anthropic"])
+    datasets: List[str] = field(default_factory=lambda: ["all"])
     n_statements: int = 5000
     new_generation: bool = False
     random_state: int = 42
