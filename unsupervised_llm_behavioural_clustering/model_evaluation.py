@@ -126,13 +126,13 @@ class ModelEvaluation:
         )  # dictionary of inputs, responses, and model instance
         return query_results, file_name
 
-    def display_statement_themes(self, chosen_clustering, rows, all_model_info):
+    def display_statement_themes(self, chosen_clustering, rows, model_info_list):
         print(f"Chosen clustering: {chosen_clustering}")
         print(f"Rows: {rows}")
         # Create a table and save it in a readable format (CSV) for easy visualization in VSCode
         model_columns = [
-            model_info["model"] for model_info in all_model_info
-        ]  # Extract model names from all_model_info
+            model_info["model"] for model_info in model_info_list
+        ]  # Extract model names from model_info_list
         table_headers = (
             [
                 "ID",  # cluster ID

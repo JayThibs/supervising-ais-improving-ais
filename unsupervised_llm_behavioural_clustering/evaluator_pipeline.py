@@ -68,16 +68,16 @@ class EvaluatorPipeline:
 
         if self.run_settings.data_settings.new_generation:
             self.saved_query_results = None
-            if "all_query_results.pkl" in os.listdir(self.pickle_dir):
+            if "query_results_per_model.pkl" in os.listdir(self.pickle_dir):
                 timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
                 os.rename(
-                    f"{self.pickle_dir}/all_query_results.pkl",
-                    f"{self.pickle_dir}/all_query_results_{timestamp}.pkl",
+                    f"{self.pickle_dir}/query_results_per_model.pkl",
+                    f"{self.pickle_dir}/query_results_per_model_{timestamp}.pkl",
                 )
         else:
-            if "all_query_results.pkl" in os.listdir(self.pickle_dir):
+            if "query_results_per_model.pkl" in os.listdir(self.pickle_dir):
                 self.saved_query_results = self.load_results(
-                    "all_query_results.pkl", "pickle_files"
+                    "query_results_per_model.pkl", "pickle_files"
                 )
             else:
                 self.query_results = None
@@ -177,7 +177,9 @@ class EvaluatorPipeline:
         )
 
         n_statements = n_statements or self.run_settings.data_settings.n_statements
-        text_subset = self.data_prep.load_and_preprocess_data(data_settings=self.run_settings.data_settings)
+        text_subset = self.data_prep.load_and_preprocess_data(
+            data_settings=self.run_settings.data_settings
+        )
 
         if self.saved_query_results is None:
             prompt_template = (
@@ -190,7 +192,7 @@ class EvaluatorPipeline:
             )
             models = models or self.llms
 
-            all_query_results = self.generate_and_save_responses(
+            query_results_per_model = self.generate_and_save_responses(
                 text_subset,
                 n_statements,
                 prompt_template,
@@ -198,9 +200,9 @@ class EvaluatorPipeline:
                 models,
             )
         else:
-            all_query_results = [self.saved_query_results]
+            query_results_per_model = [self.saved_query_results]
 
-        return text_subset, all_query_results
+        return text_subset, query_results_per_model
 
     def generate_and_save_responses(
         self,
@@ -220,30 +222,30 @@ class EvaluatorPipeline:
             or self.run_settings.prompt_settings.statements_system_message
         )
         n_statements = n_statements or self.run_settings.data_settings.n_statements
-        all_query_results = []
+        query_results_per_model = []
         for model_family, model in llms:
             print(f"Generating responses for {model} from {model_family}...")
             file_name = f"{model_family}_{model}_reaction_to_{n_statements}_{self.dataset_name}_statements.pkl"
             query_results = query_model_on_statements(
                 text_subset, model_family, model, prompt_template, system_message
             )  # dictionary of inputs, responses, and model instance
-            all_query_results.append(query_results)
+            query_results_per_model.append(query_results)
             self.save_results(query_results, file_name, "pickle_files")
             print(f"{file_name} saved.")
         self.save_results(
-            all_query_results, "all_query_results.pickle", "pickle_files"
+            query_results_per_model, "query_results_per_model.pkl", "pickle_files"
         )  # last saved
         print(f"{file_name} saved.")
-        return all_query_results
+        return query_results_per_model
 
-    def collect_model_info(self, all_query_results):
+    def collect_model_info(self, query_results_per_model):
         print("Collecting model info...")
-        print(f"all_query_results: {all_query_results}")
-        all_model_info = [result["model_info"] for result in all_query_results]
+        print(f"query_results_per_model: {query_results_per_model}")
+        model_info_list = [result["model_info"] for result in query_results_per_model]
         # print the keys
-        for key in all_model_info[0].keys():
+        for key in model_info_list[0].keys():
             print(key)
-        return all_model_info
+        return model_info_list
 
     def perform_tsne_dimensionality_reduction(
         self, combined_embeddings, perplexity=None
@@ -274,7 +276,7 @@ class EvaluatorPipeline:
                 tsne_filename,
             )
 
-    def embed_responses(self, all_query_results):
+    def embed_responses(self, query_results_per_model):
         print("Embedding responses...")
         file_loaded, joint_embeddings_all_llms = load_pkl_or_not(
             "joint_embeddings_all_llms.pkl",
@@ -283,7 +285,7 @@ class EvaluatorPipeline:
         )
         if not file_loaded:
             joint_embeddings_all_llms = self.create_embeddings(
-                all_query_results, self.llms
+                query_results_per_model, self.llms
             )
 
         combined_embeddings = np.array(
@@ -301,7 +303,7 @@ class EvaluatorPipeline:
 
     def create_embeddings(
         self,
-        all_query_results,
+        query_results_per_model,
         llms,
         embedding_model="text-embedding-ada-002",
         combine_statements=False,
@@ -312,8 +314,8 @@ class EvaluatorPipeline:
 
         for i, (model_family, model) in enumerate(llms):
             print(f"Embedding responses for LLM {i}...")
-            inputs = all_query_results[i]["inputs"]  # list of statements
-            responses = all_query_results[i][
+            inputs = query_results_per_model[i]["inputs"]  # list of statements
+            responses = query_results_per_model[i][
                 "responses"
             ]  # list of responses to the statements by the LLM number i
             print(f"inputs: {inputs}")
@@ -373,7 +375,7 @@ class EvaluatorPipeline:
         return chosen_clustering
 
     def analyze_response_embeddings_clusters(
-        self, chosen_clustering, joint_embeddings_all_llms, all_model_info
+        self, chosen_clustering, joint_embeddings_all_llms, model_info_list
     ):
         print("Analyzing clusters...")
         file_loaded, rows = load_pkl_or_not(
@@ -386,7 +388,7 @@ class EvaluatorPipeline:
                 chosen_clustering,
                 joint_embeddings_all_llms,
                 "joint_embeddings",
-                all_model_info,
+                model_info_list,
             )
             with open(f"{self.pickle_dir}/rows.pkl", "wb") as f:
                 pickle.dump(rows, f)
@@ -402,7 +404,7 @@ class EvaluatorPipeline:
         print("Results saved.")
         print("Displaying results...")
         self.model_eval.display_statement_themes(
-            chosen_clustering, rows, self.all_model_info
+            chosen_clustering, rows, self.model_info_list
         )
         return rows
 
@@ -430,8 +432,8 @@ class EvaluatorPipeline:
             ) as f:
                 statement_embeddings = pickle.load(f)
 
-            conditions_loaded, all_condition_approvals = load_pkl_or_not(
-                "all_condition_approvals_{approvals_type}.pkl",
+            conditions_loaded, approval_results_per_model = load_pkl_or_not(
+                "approval_results_per_model_{approvals_type}.pkl",
                 self.pickle_dir,
                 reuse_conditions,
             )
@@ -439,7 +441,7 @@ class EvaluatorPipeline:
             if not reuse_conditions or not conditions_loaded:
                 # note: self.args.models is a list of models
                 # create a dictionary with the model as the key, and a list of persona approvals as the value
-                all_condition_approvals = {model: [] for model in self.args.models}
+                approval_results_per_model = {model: [] for model in self.args.models}
 
                 for model_family, model in self.llms:
                     model_approvals = []
@@ -454,19 +456,21 @@ class EvaluatorPipeline:
                             )
                         )  # [0, 1, 0, 1, -1, 0, ...]
                         model_approvals.append(list_of_approvals_for_statements)
-                    all_condition_approvals[model] = (
+                    approval_results_per_model[model] = (
                         model_approvals  # {model_1: [approval1, approval2, ...], model_2: [approval1, approval2, ...], ... }
                     )
 
-                if not os.path.exists(f"{self.pickle_dir}/all_condition_approvals.pkl"):
+                if not os.path.exists(
+                    f"{self.pickle_dir}/approval_results_per_model_{approvals_type}.pkl"
+                ):
                     pickle.dump(
-                        all_condition_approvals,
+                        approval_results_per_model,
                         open(
-                            f"{self.pickle_dir}/all_condition_approvals.pkl",
+                            f"{self.pickle_dir}/approval_results_per_model_{approvals_type}.pkl",
                             "wb",
                         ),
                     )
-            print(f"all_condition_approvals: {all_condition_approvals}")
+            print(f"approval_results_per_model: {approval_results_per_model}")
 
             # Store the approvals, statements, and embeddings in a list
             # [ [{model_1: [approval_for_prompt_1, approval_for_prompt_2, ...], model_2: [approval_for_prompt_1, approval_for_prompt_2, ...], ...}, statement, embedding], ... ]
@@ -474,7 +478,7 @@ class EvaluatorPipeline:
             for i in range(len(self.text_subset)):
                 print(f"Approvals record {i}")
                 record_approvals = {}
-                for model, model_approvals in all_condition_approvals.items():
+                for model, model_approvals in approval_results_per_model.items():
                     record_approvals[model] = [
                         approval[i] for approval in model_approvals
                     ]
@@ -664,16 +668,22 @@ class EvaluatorPipeline:
                 # Run local models in parallel
                 model_batches = self.get_model_batches()
                 for model_batch in model_batches:
-                    self.run_pipeline_for_models(model_batch, gpu_availability="multiple_gpus")
+                    self.run_pipeline_for_models(
+                        model_batch, gpu_availability="multiple_gpus"
+                    )
             else:
                 # Run local models sequentially
                 for model_name, local_model in self.local_models.items():
                     if check_gpu_memory([(model_name, local_model)], buffer_factor=1.2):
                         local_model.load()
-                        self.run_pipeline_for_models([(model_name, local_model)], gpu_availability="single_gpu")
+                        self.run_pipeline_for_models(
+                            [(model_name, local_model)], gpu_availability="single_gpu"
+                        )
                         local_model.unload()
                     else:
-                        print(f"Not enough GPU memory for {model_name} with buffer factor applied.")
+                        print(
+                            f"Not enough GPU memory for {model_name} with buffer factor applied."
+                        )
         else:
             # Run API models
             self.run_pipeline_for_models([])
@@ -705,31 +715,8 @@ class EvaluatorPipeline:
         # For each loop, we'll run the entire pipeline for that model.
         # Then, we'll remove that model from the GPU and load the next model.
         # At the end, we'll plot the results for all models.
-        if self.local_models:
-            if gpu_availability == "multiple_gpus":
-                # Process each model in the batch in parallel
-                for model_name, local_model in model_batch:
-                    if check_gpu_memory(model_batch, buffer_factor):
-                        local_model.load()
-                        self.process_model(local_model)
-                        local_model.unload()
-                    else:
-                        print(
-                            f"Not enough GPU memory for {model_name} with buffer factor applied."
-                        )
-            else:
-                # Process each model in the batch sequentially
-                for model_name, local_model in model_batch:
-                    if check_gpu_memory([(model_name, local_model)], buffer_factor):
-                        local_model.load()
-                        self.process_model(local_model)
-                        local_model.unload()
-                    else:
-                        print(
-                            f"Not enough GPU memory for {model_name} with buffer factor applied."
-                        )
-        self.text_subset, all_query_results = self.generate_responses()
-        self.all_model_info = self.collect_model_info(all_query_results)
+        self.text_subset, query_results_per_model = self.generate_responses()
+        self.model_info_list = self.collect_model_info(query_results_per_model)
         # run id should include model names, dataset name, number of statements, and timestamp
         run_id = (
             "_".join(self.model_names)
@@ -760,11 +747,11 @@ class EvaluatorPipeline:
             # Embed model responses to statement prompts
             # joint_embeddings_all_llms: [ [model_id, input, response, statement_embedding, model_name], ... ]
             joint_embeddings_all_llms, combined_embeddings = self.embed_responses(
-                all_query_results
+                query_results_per_model
             )
             chosen_clustering = self.run_clustering(combined_embeddings)
             rows = self.analyze_response_embeddings_clusters(
-                chosen_clustering, joint_embeddings_all_llms, self.all_model_info
+                chosen_clustering, joint_embeddings_all_llms, self.model_info_list
             )
             dim_reduce_tsne, labels = self.visualize_loaded_data(
                 combined_embeddings, joint_embeddings_all_llms, chosen_clustering, rows
@@ -844,7 +831,7 @@ class EvaluatorPipeline:
                 self.clustering_obj.cluster_approval_stats(
                     approvals_statements_and_embeddings,
                     statement_clustering,
-                    self.all_model_info,
+                    self.model_info_list,
                     prompt_dict=prompt_dict,
                     reuse_cluster_rows=self.run_settings.data_settings.reuse_cluster_rows,
                 )

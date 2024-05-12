@@ -50,8 +50,8 @@ if __name__ == "__main__":
 @dataclass
 class ClusteringPipelineState:
     text_subset: list
-    all_query_results: dict
-    all_model_info: dict
+    query_results_per_model: dict
+    model_info_list: dict
     joint_embeddings: np.ndarray
     combined_embeddings: np.ndarray
     chosen_clustering: Any  # Actual cluster object

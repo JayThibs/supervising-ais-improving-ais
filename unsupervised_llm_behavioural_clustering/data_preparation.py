@@ -78,9 +78,9 @@ class DataPreparation:
     def load_and_preprocess_data(self, data_settings: DataSettings) -> List[str]:
         """Load and preprocess evaluation data. Return a subset of texts."""
         # Determine file paths based on user input
-        if data_settings.datasets == "all":
+        if data_settings.datasets == ["all"]:
             file_paths = [
-                path for path in glob.iglob("data/evals/**/*.jsonl", recursive=True)
+                path for path in glob.iglob("data/evals/**/**/*.jsonl", recursive=True)
             ]
         elif isinstance(data_settings.datasets, list):
             file_paths = []
@@ -89,7 +89,7 @@ class DataPreparation:
                     [
                         path
                         for path in glob.iglob(
-                            f"data/evals/**/{dataset}.jsonl", recursive=True
+                            f"data/evals/{dataset}/**/**/*.jsonl", recursive=True
                         )
                     ]
                 )
@@ -97,7 +97,7 @@ class DataPreparation:
             file_paths = [
                 path
                 for path in glob.iglob(
-                    f"data/evals/**/{data_settings.datasets}.jsonl", recursive=True
+                    f"data/evals/{data_settings.datasets}/**/**/*.jsonl", recursive=True
                 )
             ]
 

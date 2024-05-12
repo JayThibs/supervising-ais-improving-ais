@@ -87,7 +87,7 @@ class Clustering:
         self,
         approvals_statements_and_embeddings,
         statement_clustering,
-        all_model_info,
+        model_info_list,
         prompt_dict,
         reuse_cluster_rows=False,
     ):
@@ -126,7 +126,7 @@ class Clustering:
             rows = self.compile_cluster_table(
                 statement_clustering,
                 approvals_statements_and_embeddings,
-                all_model_info,
+                model_info_list,
                 theme_summary_instructions="Briefly list the common themes of the following texts:",
                 max_desc_length=250,
             )
@@ -221,14 +221,14 @@ class Clustering:
             n_clusters,
         )
 
-    def compile_cluster_table(self, clustering, data, data_type, all_model_info):
+    def compile_cluster_table(self, clustering, data, data_type, model_info_list):
         """Compiles a table of cluster statistics and themes.
 
         Args:
             clustering: A clustering object.
             data: The data used for clustering. This can be joint_embeddings_all_llms or approvals_statements_and_embeddings.
             data_type: The type of data used for clustering. Either "joint_embeddings" or "approvals".
-            all_model_info: A list of dictionaries containing information about each model.
+            model_info_list: A list of dictionaries containing information about each model.
 
         Returns:
             A list of lists where each row represents a cluster's statistics and themes.
@@ -246,7 +246,7 @@ class Clustering:
                 cluster_id,
                 clustering.labels_,
                 data,
-                all_model_info,
+                model_info_list,
                 data_type=data_type,
                 include_responses_and_interactions=include_responses_and_interactions,
             )
@@ -261,7 +261,7 @@ class Clustering:
         cluster_id,
         labels,
         data,  # joint_embeddings_all_llms or approvals_statements_and_embeddings
-        all_model_info,
+        model_info_list,
         data_type="joint_embeddings",  # or "approvals"
         include_responses_and_interactions=True,
     ):
@@ -294,10 +294,10 @@ class Clustering:
             row.append(f"{round(100 * frac, 1)}%")
 
         # Identify themes within this cluster
-        n_llms = len(all_model_info)
+        n_llms = len(model_info_list)
         for i in range(n_llms):  # loop through llms
             print(f"Identifying themes for LLM {i}...")
-            model_info = all_model_info[i]
+            model_info = model_info_list[i]
             print(f"inputs: {inputs}")
             print(f"model_info: {model_info}")
             inputs_themes_str = identify_theme(inputs, model_info)
@@ -380,7 +380,7 @@ class Clustering:
     #     self,
     #     clustering,
     #     approvals_statements_and_embeddings,
-    #     all_model_info,
+    #     model_info_list,
     #     theme_summary_instructions="Briefly list the common themes of the following texts:",
     #     max_desc_length=250,
     # ):
@@ -407,13 +407,13 @@ class Clustering:
     #         cluster_inputs_themes = [
     #             identify_theme(
     #                 inputs,
-    #                 all_model_info[i],
+    #                 model_info_list[i],
     #                 sampled_texts=10,
     #                 max_tokens=70,
     #                 temp=0.5,
     #                 instructions=theme_summary_instructions,
     #             )[:max_desc_length].replace("\n", " ")
-    #             for i in range(len(all_model_info))
+    #             for i in range(len(model_info_list))
     #         ]
     #         inputs_themes_str = "\n".join(cluster_inputs_themes)
 
