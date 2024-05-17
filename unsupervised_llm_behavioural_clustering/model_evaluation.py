@@ -85,12 +85,12 @@ class ModelEvaluation:
         tsne = TSNE(
             n_components=tsne_settings.dimensions,
             perplexity=tsne_settings.perplexity,
-            n_iter=tsne_settings.iterations,
+            n_iter=tsne_settings.n_iter,
             angle=tsne_settings.angle,
             init=tsne_settings.init,
             early_exaggeration=tsne_settings.early_exaggeration,
             learning_rate=tsne_settings.learning_rate,
-            random_state=tsne_settings.random_state,
+            random_state=self.settings.random_state,
         )
         reduced_embeddings = tsne.fit_transform(X=embeddings)
 
@@ -100,10 +100,10 @@ class ModelEvaluation:
         self, combined_embeddings: np.array, n_clusters: int = 200
     ) -> KMeans:
         """Perform clustering on combined embeddings."""
-        clustering_settings = self.run_settings.clustering_settings
+        clustering_settings = self.settings.clustering_settings
         clustering = KMeans(
             n_clusters=clustering_settings.n_clusters,
-            random_state=clustering_settings.random_state,
+            random_state=self.settings.random_state,
         ).fit(combined_embeddings)
         return clustering
 

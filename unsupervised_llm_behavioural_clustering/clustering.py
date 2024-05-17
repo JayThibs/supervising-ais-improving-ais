@@ -26,11 +26,11 @@ class Clustering:
         if multiple:
             cluster_algorithms = {
                 "OPTICS": OPTICS(min_samples=2, xi=0.12),
-                "Spectral": SpectralClustering(
+                "SpectralClustering": SpectralClustering(
                     self.settings.n_clusters if not self.settings.test_mode else 10,
                     random_state=42,
                 ),
-                "Agglomerative": AgglomerativeClustering(
+                "AgglomerativeClustering": AgglomerativeClustering(
                     self.settings.n_clusters if not self.settings.test_mode else 10
                 ),
                 "KMeans": KMeans(
