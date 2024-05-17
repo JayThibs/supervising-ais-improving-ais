@@ -1,5 +1,6 @@
 import os
 import json
+import yaml
 import numpy as np
 import pickle
 from datetime import datetime
@@ -17,7 +18,7 @@ from utils import (
     check_gpu_availability,
     check_gpu_memory,
 )
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
 from config.run_configuration_manager import RunConfigurationManager
 from config.run_settings import RunSettings
 
@@ -33,13 +34,16 @@ class EvaluatorPipeline:
         self.tables_dir = self.run_settings.directory_settings.tables_dir
 
         # model information
-        self.llms = self.run_settings.model_settings.models
-        self.model_names = [model for _, model in self.llms]
-        self.local_models = {}
+        self.llms: List[Tuple[str, str]] = self.run_settings.model_settings.models
+        self.model_names: List[str] = [model for _, model in self.llms]
+        self.local_models: Dict[str, LocalModel] = {}
         for model_family, model in self.llms:
             if model_family == "local":
                 self.local_models[model] = LocalModel(model_name_or_path=model)
         print(f"Models: {self.model_names}")
+        self.embedding_model_name: str = (
+            self.run_settings.embedding_settings.embedding_model
+        )
 
         # Load approval prompts from same directory as this file
         self.n_statements = (
@@ -124,18 +128,21 @@ class EvaluatorPipeline:
     def load_api_key(self):
         self.api_key = DataPreparation.load_api_key(self, "OPENAI_API_KEY")
 
-    def clone_evals_repo(self):
-        if not os.path.exists(
-            os.path.join(self.evals_dir, "anthropic-model-written-evals")
-        ):
-            DataPreparation.clone_repo(
-                self,
-                "https://github.com/anthropics/evals.git",
-                "anthropic-model-written-evals",
-            )
+    def clone_evals_repo(self, repos=None):
+        if repos is None:
+            repos = [
+                (
+                    "https://github.com/anthropics/evals.git",
+                    "anthropic-model-written-evals",
+                )
+            ]
 
-    def load_evaluation_data(self, dataset_name="anthropic"):
-        self.dataset_name = dataset_name
+        for repo_url, folder_name in repos:
+            if not os.path.exists(os.path.join(self.evals_dir, folder_name)):
+                DataPreparation.clone_repo(self, repo_url, folder_name)
+
+    def load_evaluation_data(self, dataset_names: List[str] = ["anthropic"]):
+        self.datasets_filename: str = "_".join(dataset_names)
         self.data_prep = DataPreparation()
         all_texts = self.data_prep.load_evaluation_data(self.data_prep.file_paths)
         return all_texts
@@ -154,6 +161,57 @@ class EvaluatorPipeline:
                 return pickle.load(f)
         except FileNotFoundError:
             return None
+
+    def save_run_metadata_to_yaml(
+        self,
+        run_id: str,
+        data_files: Dict[str, str],
+    ):
+        metadata = {
+            "run_id": run_id,
+            "dataset_name": self.datasets_filename,
+            "model_names": self.model_names,
+            "n_statements": self.n_statements,
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "data_settings": self.run_settings.data_settings.__dict__,
+            "model_settings": self.run_settings.model_settings.__dict__,
+            "embedding_settings": self.run_settings.embedding_settings.__dict__,
+            "prompt_settings": self.run_settings.prompt_settings.__dict__,
+            "plot_settings": self.run_settings.plot_settings.__dict__,
+            "clustering_settings": self.run_settings.clustering_settings.__dict__,
+            "tsne_settings": self.run_settings.tsne_settings.__dict__,
+            "test_mode": self.run_settings.test_mode,
+            "skip_sections": self.run_settings.skip_sections,
+            "data_files": data_files,
+        }
+
+        with open(self.run_settings.directory_settings.run_metadata, "a") as f:
+            yaml.dump([metadata], f)
+            f.write("\n")  # Add a newline separator between runs
+
+    def get_or_create_data_file_path(
+        self, data_file_id, data_file_dir, mapping_file, **kwargs
+    ):
+        with open(mapping_file, "r") as f:
+            data_file_mapping = yaml.safe_load(f)
+
+        # Generate the filename based on the provided arguments
+        filename_parts = [data_file_id]
+        for key, value in kwargs.items():
+            filename_parts.append(f"{key}_{value}")
+        filename = "_".join(filename_parts) + ".pkl"
+
+        if filename in data_file_mapping:
+            return data_file_mapping[filename]
+        else:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            file_path = f"{data_file_dir}/{filename}_{timestamp}.pkl"
+            data_file_mapping[filename] = file_path
+
+            with open(mapping_file, "w") as f:
+                yaml.dump(data_file_mapping, f)
+
+            return file_path
 
     def generate_plot_filename(self, model_names: list, plot_type: str):
         # timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
@@ -587,18 +645,30 @@ class EvaluatorPipeline:
                     title=f"Embeddings of {condition_title} for {model_name} {prompt_approver_type} responses",
                 )
 
-    def load_and_visualize_saved_data(self, filenames):
+    def load_and_visualize_saved_data(self, run_id):
+        with open(self.run_settings.directory_settings.metadata_file, "r") as f:
+            runs_metadata = yaml.safe_load(f)
+
+        run_metadata = next(
+            (run for run in runs_metadata if run["run_id"] == run_id), None
+        )
+        if run_metadata is None:
+            print(f"Run with ID {run_id} not found.")
+            return
+
+        data_files = run_metadata["data_files"]
+
         # Load saved data
         joint_embeddings_all_llms = self.load_results(
-            filenames["joint_embeddings"], "pickle_files"
+            data_files["joint_embeddings"], "pickle_files"
         )
         combined_embeddings = self.load_results(
-            filenames["combined_embeddings"], "pickle_files"
+            data_files["combined_embeddings"], "pickle_files"
         )
         chosen_clustering = self.load_results(
-            filenames["chosen_clustering"], "pickle_files"
+            data_files["chosen_clustering"], "pickle_files"
         )
-        rows = self.load_results(filenames["rows"], "pickle_files")
+        rows = self.load_results(data_files["rows"], "pickle_files")
 
         # Refactored visualization into a separate method
         dim_reduce_tsne, labels = self.visualize_loaded_data(
@@ -608,7 +678,7 @@ class EvaluatorPipeline:
         # Visualize approval embeddings for each prompt type
         for prompt_type in self.approval_prompts.keys():
             approvals_statements_and_embeddings = self.load_results(
-                filenames[f"approvals_{prompt_type}"], "pickle_files"
+                data_files[f"approvals_{prompt_type}"], "pickle_files"
             )
             self.visualize_approval_embeddings(
                 self.model_names,
@@ -618,7 +688,7 @@ class EvaluatorPipeline:
             )
 
             hierarchy_data = self.load_results(
-                filenames[f"hierarchy_data_{prompt_type}"], "pickle_files"
+                data_files[f"hierarchy_data_{prompt_type}"], "pickle_files"
             )
             self.visualize_hierarchical_clusters(
                 model_names=self.model_names,
@@ -657,7 +727,7 @@ class EvaluatorPipeline:
 
     def run_evaluations(self):
         # Load data
-        all_texts = self.load_evaluation_data()
+        all_texts = self.load_evaluation_data(self.run_settings.data_settings.datasets)
 
         # Check if local models are included in the run
         has_local_models = any(model_family == "local" for model_family, _ in self.llms)
@@ -728,20 +798,52 @@ class EvaluatorPipeline:
             + datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
         )
         # Generate filenames based on relevant parameters
-        joint_embeddings_filename = f"joint_embeddings_{'_'.join(self.model_names)}_{self.embedding_model}_{self.n_statements}_{self.dataset}.pkl"
-        combined_embeddings_filename = f"combined_embeddings_{'_'.join(self.model_names)}_{self.embedding_model}_{self.n_statements}_{self.dataset}.pkl"
-        chosen_clustering_filename = f"chosen_clustering_{self.clustering_algorithm}_{self.n_clusters}_{self.random_seed}_{self.dataset}.pkl"
-        rows_filename = f"rows_{self.clustering_algorithm}_{self.n_clusters}_{self.random_seed}_{self.dataset}.pkl"
+        joint_embeddings_filename = self.get_or_create_data_file_path(
+            "joint_embeddings",
+            self.run_settings.directory_settings.pickle_dir,
+            self.run_settings.directory_settings.data_file_mapping,
+            models="_".join(self.model_names),
+            embedding_model=self.embedding_model_name,
+            n_statements=self.n_statements,
+            dataset=self.datasets_filename,
+            random_seed=self.run_settings.random_state,
+        )
 
-        # Check if files already exist, otherwise save data
-        if not self.load_results(joint_embeddings_filename, "pickle_files"):
-            self.save_data(joint_embeddings_filename, joint_embeddings_all_llms)
-        if not self.load_results(combined_embeddings_filename, "pickle_files"):
-            self.save_data(combined_embeddings_filename, combined_embeddings)
-        if not self.load_results(chosen_clustering_filename, "pickle_files"):
-            self.save_data(chosen_clustering_filename, chosen_clustering)
-        if not self.load_results(rows_filename, "pickle_files"):
-            self.save_data(rows_filename, rows)
+        combined_embeddings_filename = self.get_or_create_data_file_path(
+            "combined_embeddings",
+            self.run_settings.directory_settings.pickle_dir,
+            self.run_settings.directory_settings.data_file_mapping,
+            models="_".join(self.model_names),
+            embedding_model=self.embedding_model_name,
+            n_statements=self.n_statements,
+            dataset=self.datasets_filename,
+            random_seed=self.run_settings.random_state,
+        )
+
+        chosen_clustering_filename = self.get_or_create_data_file_path(
+            "chosen_clustering",
+            self.run_settings.directory_settings.pickle_dir,
+            self.run_settings.directory_settings.data_file_mapping,
+            clustering_algorithm=self.run_settings.clustering_settings.main_clustering_algorithm,
+            n_clusters=self.run_settings.clustering_settings.n_clusters,
+            random_seed=self.run_settings.random_state,
+            dataset=self.datasets_filename,
+        )
+
+        rows_filename = self.get_or_create_data_file_path(
+            "rows",
+            self.run_settings.directory_settings.pickle_dir,
+            self.run_settings.directory_settings.data_file_mapping,
+            clustering_algorithm=self.run_settings.clustering_settings.main_clustering_algorithm,
+            n_clusters=self.run_settings.clustering_settings.n_clusters,
+            random_seed=self.run_settings.random_state,
+            dataset=self.datasets_filename,
+        )
+
+        self.save_data(joint_embeddings_filename, joint_embeddings_all_llms)
+        self.save_data(combined_embeddings_filename, combined_embeddings)
+        self.save_data(chosen_clustering_filename, chosen_clustering)
+        self.save_data(rows_filename, rows)
 
         if "model_comparison" not in self.run_settings.skip_sections:
             # Embed model responses to statement prompts
@@ -858,19 +960,21 @@ class EvaluatorPipeline:
                     )
 
         # Load and visualize saved data for the current run
-        current_run_filenames = {
+        data_files = {
             "joint_embeddings": joint_embeddings_filename,
             "combined_embeddings": combined_embeddings_filename,
             "chosen_clustering": chosen_clustering_filename,
             "rows": rows_filename,
         }
+
         for prompt_type in self.approval_prompts.keys():
-            current_run_filenames[f"approvals_{prompt_type}"] = (
-                f"approvals_{prompt_type}_{'_'.join(self.model_names)}_{self.embedding_model}_{self.n_statements}_{self.dataset}.pkl"
+            data_files[f"approvals_{prompt_type}"] = (
+                f"approvals_{prompt_type}_{'_'.join(self.model_names)}_{self.embedding_model_name}_{self.n_statements}_{self.datasets_filename}.pkl"
             )
-            current_run_filenames[f"hierarchy_data_{prompt_type}"] = (
-                f"hierarchy_data_{prompt_type}_{'_'.join(self.model_names)}_{self.embedding_model}_{self.n_statements}_{self.dataset}.pkl"
+            data_files[f"hierarchy_data_{prompt_type}"] = (
+                f"hierarchy_data_{prompt_type}_{'_'.join(self.model_names)}_{self.embedding_model_name}_{self.n_statements}_{self.datasets_filename}.pkl"
             )
-        self.load_and_visualize_saved_data(current_run_filenames)
+        self.save_run_metadata_to_yaml(run_id, data_files)
+        self.load_and_visualize_saved_data(run_id)
 
         print("Done. Please check the results directory for the plots.")

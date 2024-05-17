@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 import json
 from dataclasses import dataclass, field
 from typing import List, Tuple, Dict, Any
@@ -29,12 +30,16 @@ HIDEABLE_PLOT_TYPES = [
 
 @dataclass
 class DirectorySettings:
-    data_dir: str = f"{os.getcwd()}/data"
-    evals_dir: str = f"{os.getcwd()}/data/evals"
-    results_dir: str = f"{os.getcwd()}/data/results"
-    pickle_dir: str = f"{os.getcwd()}/data/results/pickle_files"
-    viz_dir: str = f"{os.getcwd()}/data/results/plots"
-    tables_dir: str = f"{os.getcwd()}/data/results/tables"
+    data_dir: str = str(Path.cwd() / "data")
+    evals_dir: str = str(Path.cwd() / "data" / "evals")
+    results_dir: str = str(Path.cwd() / "data" / "results")
+    pickle_dir: str = str(Path.cwd() / "data" / "results" / "pickle_files")
+    viz_dir: str = str(Path.cwd() / "data" / "results" / "plots")
+    tables_dir: str = str(Path.cwd() / "data" / "results" / "tables")
+    metadata_file: str = str(Path.cwd() / "data" / "results" / "metadata_for_runs.yaml")
+    data_file_mapping: str = str(
+        Path.cwd() / "data" / "results" / "data_file_mapping.yaml"
+    )  # preventing duplicate data files
 
 
 @dataclass
@@ -42,7 +47,6 @@ class DataSettings:
     datasets: List[str] = field(default_factory=lambda: ["all"])
     n_statements: int = 5000
     new_generation: bool = False
-    random_state: int = 42
     reuse_data: List[str] = field(default_factory=lambda: ["all"])
     reuse_embedding_clustering: bool = False
     reuse_joint_embeddings: bool = False
@@ -183,8 +187,14 @@ class PlotSettings:
 
 @dataclass
 class ClusteringSettings:
+    main_clustering_algorithm: str = "KMeans"
     n_clusters: int = 200
-    cluster_type: str = "spectral"
+    all_clustering_algorithms: List[str] = [
+        "KMeans",
+        "SpectralClustering",
+        "AgglomerativeClustering",
+        "OPTICS",
+    ]
     min_cluster_size: int = 2
     max_cluster_size: int = 10
     affinity: str = "nearest_neighbors"
@@ -198,48 +208,19 @@ class TsneSettings:
     perplexity: int = 30
     learning_rate: float = 200.0
     n_iter: int = 1000
-    tsne_init: str = "pca"
+    init: str = "pca"
     verbose: int = 0
-    random_state: int = 42
     dimensions: int = 2
     tsne_method: str = "barnes_hut"
     angle: float = 0.5
     pca_components: int = 50
-
-
-# @dataclass
-# class ModelMetadata:
-#     model_id: str
-#     temperature: float
-#     max_tokens: int
-#     other_params: Dict[str, Any]  # Include any other model-specific parameters
-
-
-# @dataclass
-# class StatementResponses:
-#     metadata: ModelMetadata
-#     response_file: str  # Path to the .jsonl file with responses
-
-#     def save_responses(self, statements, responses):
-#         with open(self.response_file, "w") as f:
-#             for statement, response in zip(statements, responses):
-#                 json.dump({"statement": statement, "response": response}, f)
-#                 f.write("\n")
-
-#     @staticmethod
-#     def load_responses(filepath):
-#         statements, responses = [], []
-#         with open(filepath, "r") as f:
-#             for line in f:
-#                 data = json.loads(line)
-#                 statements.append(data["statement"])
-#                 responses.append(data["response"])
-#         return statements, responses
+    early_exaggeration: float = 12.0
 
 
 @dataclass
 class RunSettings:
     name: str
+    random_state: int = 42
     directory_settings: DirectorySettings = field(default_factory=DirectorySettings)
     model_settings: ModelSettings = field(default_factory=ModelSettings)
     embedding_settings: EmbeddingSettings = field(default_factory=EmbeddingSettings)

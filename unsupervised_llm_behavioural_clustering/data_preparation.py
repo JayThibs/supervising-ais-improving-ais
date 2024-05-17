@@ -44,14 +44,37 @@ class DataPreparation:
             folder_path = self.evals_dir
         return [f.name for f in os.scandir(self.evals_dir) if f.is_dir()]
 
-    def _get_jsonl_file_paths(self, folder_path: str = None) -> List[str]:
-        """Find all .jsonl files within the specified folder and subfolders."""
-        subfolders = self._get_subfolders()
+    def _get_jsonl_file_paths(
+        self, folder_path: str = None, datasets: Union[List[str], str, None] = None
+    ) -> List[str]:
+        """Find all .jsonl files within the specified folder and subfolders, filtered by datasets if provided."""
+        if folder_path is None:
+            folder_path = self.evals_dir
         file_paths = []
-        for subfolder in subfolders:
-            file_paths.extend(
-                glob.glob(f"{self.evals_dir}/{subfolder}/**/**/*.jsonl", recursive=True)
-            )
+        if datasets is None:
+            datasets = ["all"]
+        if datasets == ["all"]:
+            file_paths = [
+                path
+                for path in glob.iglob(f"{folder_path}/**/**/*.jsonl", recursive=True)
+            ]
+        elif isinstance(datasets, list):
+            for dataset in datasets:
+                file_paths.extend(
+                    [
+                        path
+                        for path in glob.iglob(
+                            f"{folder_path}/{dataset}/**/**/*.jsonl", recursive=True
+                        )
+                    ]
+                )
+        else:  # Single dataset specified
+            file_paths = [
+                path
+                for path in glob.iglob(
+                    f"{folder_path}/{datasets}/**/**/*.jsonl", recursive=True
+                )
+            ]
         return file_paths
 
     def load_evaluation_data(self, file_paths: List[str]) -> List[List[str]]:
@@ -77,30 +100,7 @@ class DataPreparation:
 
     def load_and_preprocess_data(self, data_settings: DataSettings) -> List[str]:
         """Load and preprocess evaluation data. Return a subset of texts."""
-        # Determine file paths based on user input
-        if data_settings.datasets == ["all"]:
-            file_paths = [
-                path for path in glob.iglob("data/evals/**/**/*.jsonl", recursive=True)
-            ]
-        elif isinstance(data_settings.datasets, list):
-            file_paths = []
-            for dataset in data_settings.datasets:
-                file_paths.extend(
-                    [
-                        path
-                        for path in glob.iglob(
-                            f"data/evals/{dataset}/**/**/*.jsonl", recursive=True
-                        )
-                    ]
-                )
-        else:  # Single dataset specified
-            file_paths = [
-                path
-                for path in glob.iglob(
-                    f"data/evals/{data_settings.datasets}/**/**/*.jsonl", recursive=True
-                )
-            ]
-
+        file_paths = self._get_jsonl_file_paths(datasets=data_settings.datasets)
         print(f"Found {len(file_paths)} files.")
         all_texts = self.load_evaluation_data(file_paths)
         short_texts = self.load_short_texts(all_texts)
