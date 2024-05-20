@@ -33,7 +33,7 @@ def main(args):
     run_config_manager = RunConfigurationManager()
     if args.run:
         # Useful to add flag to non-default run config in command-line instead of retyping it each time
-        # example: python main.py --run quick_full_test
+        # example: python unsupervised_llm_behavioural_clustering/main.py --run quick_full_test
         selected_run = args.run
     else:
         selected_run = input(

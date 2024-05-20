@@ -326,13 +326,18 @@ class EvaluatorPipeline:
     def visualize_results(
         self, dim_reduce_tsne, joint_embeddings_all_llms, model_names, tsne_filename
     ):
-        if "tsne" not in self.run_settings.plot_settings.hide_plots:
-            self.viz.plot_embedding_responses(
-                dim_reduce_tsne,
-                joint_embeddings_all_llms,
-                model_names,
-                tsne_filename,
-            )
+        # Check if 'tsne' plots are set to be hidden
+        if "tsne" in self.run_settings.plot_settings.hide_plots:
+            print("Skipping t-SNE plot visualization as per settings.")
+            return
+
+        # Proceed with visualization if not hidden
+        self.viz.plot_embedding_responses(
+            dim_reduce_tsne,
+            joint_embeddings_all_llms,
+            model_names,
+            tsne_filename,
+        )
 
     def embed_responses(self, query_results_per_model):
         print("Embedding responses...")
@@ -343,7 +348,7 @@ class EvaluatorPipeline:
         )
         if not file_loaded:
             joint_embeddings_all_llms = self.create_embeddings(
-                query_results_per_model, self.llms
+                query_results_per_model, self.llms, self.run_settings.embedding_settings
             )
 
         combined_embeddings = np.array(
@@ -363,7 +368,7 @@ class EvaluatorPipeline:
         self,
         query_results_per_model,
         llms,
-        embedding_model="text-embedding-ada-002",
+        embedding_settings,
         combine_statements=False,
         save=True,
     ):
@@ -381,7 +386,7 @@ class EvaluatorPipeline:
             if i == 0:
                 inputs_embeddings = embed_texts(
                     texts=inputs,
-                    embedding_settings=self.run_settings.embedding_settings,
+                    embedding_settings=embedding_settings,
                 )
                 n_statements = len(inputs)
                 with open(
@@ -397,12 +402,12 @@ class EvaluatorPipeline:
                         input + " " + response
                         for input, response in zip(inputs, responses)
                     ],
-                    embedding_settings=self.run_settings.embedding_settings,
+                    embedding_settings=embedding_settings,
                 )
             else:
                 responses_embeddings = embed_texts(
                     texts=responses,
-                    embedding_settings=self.run_settings.embedding_settings,
+                    embedding_settings=embedding_settings,
                 )
                 joint_embeddings = [
                     inp + r for inp, r in zip(inputs_embeddings, responses_embeddings)
@@ -596,22 +601,27 @@ class EvaluatorPipeline:
         - hierarchy_data: The hierarchical data to be visualized.
         - plot_type: The type of plot to generate ('approval' or 'awareness').
         """
-        if plot_type not in self.run_settings.plot_settings.hide_plots:
-            for model_name in model_names:
-                filename = (
-                    f"{self.viz_dir}/hierarchical_clustering_{plot_type}_{model_name}"
-                )
-                print(f"Visualizing hierarchical cluster for {model_name}...")
-                self.viz.visualize_hierarchical_cluster(
-                    hierarchy_data,
-                    plot_type=plot_type,
-                    filename=filename,
-                    labels=labels,
-                    bar_height=0.7,
-                    bb_width=40,
-                    x_leftshift=0,
-                    y_downshift=0,
-                )
+        if plot_type in self.run_settings.plot_settings.hide_plots:
+            print(
+                f"Skipping hierarchical cluster visualization for {plot_type} as per settings."
+            )
+            return
+
+        for model_name in model_names:
+            filename = (
+                f"{self.viz_dir}/hierarchical_clustering_{plot_type}_{model_name}"
+            )
+            print(f"Visualizing hierarchical cluster for {model_name}...")
+            self.viz.visualize_hierarchical_cluster(
+                hierarchy_data,
+                plot_type=plot_type,
+                filename=filename,
+                labels=labels,
+                bar_height=0.7,
+                bb_width=40,
+                x_leftshift=0,
+                y_downshift=0,
+            )
 
     def visualize_approval_embeddings(
         self,
@@ -620,6 +630,12 @@ class EvaluatorPipeline:
         approval_data,
         prompt_approver_type,  # "personas", "awareness", etc.
     ):
+        if prompt_approver_type in self.run_settings.plot_settings.hide_plots:
+            print(
+                f"Skipping approval embeddings visualization for {prompt_approver_type} as per settings."
+            )
+            return
+
         for model_name in model_names:
             for condition in [1, 0, -1]:
                 condition_title = {
@@ -986,7 +1002,9 @@ class EvaluatorPipeline:
         self.save_data(data_file_paths["combined_embeddings"], combined_embeddings)
         self.save_data(data_file_paths["chosen_clustering"], chosen_clustering)
         self.save_data(data_file_paths["rows"], rows)
+        # To make it easier to find the results of a specific run, we will save the run metadata to a yaml file
         self.save_run_metadata_to_yaml(run_id, data_file_paths)
-        self.load_and_visualize_saved_data(run_id)
+        if self.run_settings.plot_settings.visualize_at_end:
+            self.load_and_visualize_saved_data(run_id)
 
         print("Done. Please check the results directory for the plots.")

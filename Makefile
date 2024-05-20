@@ -8,10 +8,10 @@ conda:
 	echo "RUN THE FOLLOWING COMMAND: conda activate supervising-ais"
 
 test-run:
-	python unsupervised_llm_behavioural_clustering/main.py --model_family="openai" --model="gpt-3.5-turbo" --test_mode
+	python behavioural_clustering/main.py --model_family="openai" --model="gpt-3.5-turbo" --test_mode
 
 full-run:
-	python unsupervised_llm_behavioural_clustering/main.py --model_family="openai" --model="gpt-3.5-turbo"
+	python behavioural_clustering/main.py --model_family="openai" --model="gpt-3.5-turbo"
 
 # Lint
 lint:

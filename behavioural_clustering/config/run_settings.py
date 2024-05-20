@@ -156,7 +156,6 @@ class PlotSettings:
             },
         }
     )
-
     hide_tsne: bool = False
     hide_approval: bool = False
     hide_awareness: bool = False
