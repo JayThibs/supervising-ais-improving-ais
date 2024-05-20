@@ -116,7 +116,7 @@ class PlotSettings:
     hide_plots: List[str] = field(default_factory=lambda: ["none"])
     visualize_at_end: bool = True
     plot_dim: Tuple[int, int] = (16, 16)
-    save_path: str = f"{os.getcwd()}/data/results/plots"
+    save_path: str = str(Path.cwd() / "data" / "results" / "plots")
     colors: List[str] = field(
         default_factory=lambda: [
             "red",

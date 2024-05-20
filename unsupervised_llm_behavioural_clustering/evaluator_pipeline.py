@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 import json
 import yaml
 import numpy as np
@@ -19,7 +20,6 @@ from utils import (
     check_gpu_memory,
 )
 from typing import List, Dict, Any, Tuple
-from config.run_configuration_manager import RunConfigurationManager
 from config.run_settings import RunSettings
 
 
@@ -185,7 +185,7 @@ class EvaluatorPipeline:
             "data_files": data_files,
         }
 
-        with open(self.run_settings.directory_settings.run_metadata, "a") as f:
+        with open(self.run_settings.directory_settings.metadata_file, "a") as f:
             yaml.dump([metadata], f)
             f.write("\n")  # Add a newline separator between runs
 
@@ -326,7 +326,7 @@ class EvaluatorPipeline:
     def visualize_results(
         self, dim_reduce_tsne, joint_embeddings_all_llms, model_names, tsne_filename
     ):
-        if "tsne" not in self.run_settings.plot_settings.hide_plot_types:
+        if "tsne" not in self.run_settings.plot_settings.hide_plots:
             self.viz.plot_embedding_responses(
                 dim_reduce_tsne,
                 joint_embeddings_all_llms,
@@ -596,7 +596,7 @@ class EvaluatorPipeline:
         - hierarchy_data: The hierarchical data to be visualized.
         - plot_type: The type of plot to generate ('approval' or 'awareness').
         """
-        if plot_type not in self.run_settings.plot_settings.hide_plot_types:
+        if plot_type not in self.run_settings.plot_settings.hide_plots:
             for model_name in model_names:
                 filename = (
                     f"{self.viz_dir}/hierarchical_clustering_{plot_type}_{model_name}"
@@ -644,6 +644,75 @@ class EvaluatorPipeline:
                     filename=f"{approval_filename}",
                     title=f"Embeddings of {condition_title} for {model_name} {prompt_approver_type} responses",
                 )
+
+    def create_data_file_paths(self) -> Dict[str, str]:
+        # Generate filenames based on relevant parameters
+        joint_embeddings_filename = self.get_or_create_data_file_path(
+            "joint_embeddings",
+            self.run_settings.directory_settings.pickle_dir,
+            self.run_settings.directory_settings.data_file_mapping,
+            models="_".join(self.model_names),
+            embedding_model=self.embedding_model_name,
+            n_statements=self.n_statements,
+            dataset=self.datasets_filename,
+            random_seed=self.run_settings.random_state,
+        )
+
+        combined_embeddings_filename = self.get_or_create_data_file_path(
+            "combined_embeddings",
+            self.run_settings.directory_settings.pickle_dir,
+            self.run_settings.directory_settings.data_file_mapping,
+            models="_".join(self.model_names),
+            embedding_model=self.embedding_model_name,
+            n_statements=self.n_statements,
+            dataset=self.datasets_filename,
+            random_seed=self.run_settings.random_state,
+        )
+
+        chosen_clustering_filename = self.get_or_create_data_file_path(
+            "chosen_clustering",
+            self.run_settings.directory_settings.pickle_dir,
+            self.run_settings.directory_settings.data_file_mapping,
+            clustering_algorithm=self.run_settings.clustering_settings.main_clustering_algorithm,
+            n_clusters=self.run_settings.clustering_settings.n_clusters,
+            random_seed=self.run_settings.random_state,
+            dataset=self.datasets_filename,
+        )
+
+        rows_filename = self.get_or_create_data_file_path(
+            "rows",
+            self.run_settings.directory_settings.pickle_dir,
+            self.run_settings.directory_settings.data_file_mapping,
+            clustering_algorithm=self.run_settings.clustering_settings.main_clustering_algorithm,
+            n_clusters=self.run_settings.clustering_settings.n_clusters,
+            random_seed=self.run_settings.random_state,
+            dataset=self.datasets_filename,
+        )
+
+        # Load and visualize saved data for the current run
+        data_file_paths = {
+            "joint_embeddings": joint_embeddings_filename,
+            "combined_embeddings": combined_embeddings_filename,
+            "chosen_clustering": chosen_clustering_filename,
+            "rows": rows_filename,
+        }
+
+        for prompt_type in self.approval_prompts.keys():
+            data_file_paths[f"approvals_{prompt_type}"] = (
+                self.get_or_create_data_file_path(
+                    f"approvals_{prompt_type}",
+                    self.pickle_dir,
+                    self.run_settings.directory_settings.data_file_mapping,
+                )
+            )
+            data_file_paths[f"hierarchy_data_{prompt_type}"] = (
+                self.get_or_create_data_file_path(
+                    f"hierarchy_data_{prompt_type}",
+                    self.pickle_dir,
+                    self.run_settings.directory_settings.data_file_mapping,
+                )
+            )
+        return data_file_paths
 
     def load_and_visualize_saved_data(self, run_id):
         with open(self.run_settings.directory_settings.metadata_file, "r") as f:
@@ -787,63 +856,6 @@ class EvaluatorPipeline:
         # At the end, we'll plot the results for all models.
         self.text_subset, query_results_per_model = self.generate_responses()
         self.model_info_list = self.collect_model_info(query_results_per_model)
-        # run id should include model names, dataset name, number of statements, and timestamp
-        run_id = (
-            "_".join(self.model_names)
-            + "_"
-            + self.dataset_name
-            + "_"
-            + str(self.n_statements)
-            + "_"
-            + datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
-        )
-        # Generate filenames based on relevant parameters
-        joint_embeddings_filename = self.get_or_create_data_file_path(
-            "joint_embeddings",
-            self.run_settings.directory_settings.pickle_dir,
-            self.run_settings.directory_settings.data_file_mapping,
-            models="_".join(self.model_names),
-            embedding_model=self.embedding_model_name,
-            n_statements=self.n_statements,
-            dataset=self.datasets_filename,
-            random_seed=self.run_settings.random_state,
-        )
-
-        combined_embeddings_filename = self.get_or_create_data_file_path(
-            "combined_embeddings",
-            self.run_settings.directory_settings.pickle_dir,
-            self.run_settings.directory_settings.data_file_mapping,
-            models="_".join(self.model_names),
-            embedding_model=self.embedding_model_name,
-            n_statements=self.n_statements,
-            dataset=self.datasets_filename,
-            random_seed=self.run_settings.random_state,
-        )
-
-        chosen_clustering_filename = self.get_or_create_data_file_path(
-            "chosen_clustering",
-            self.run_settings.directory_settings.pickle_dir,
-            self.run_settings.directory_settings.data_file_mapping,
-            clustering_algorithm=self.run_settings.clustering_settings.main_clustering_algorithm,
-            n_clusters=self.run_settings.clustering_settings.n_clusters,
-            random_seed=self.run_settings.random_state,
-            dataset=self.datasets_filename,
-        )
-
-        rows_filename = self.get_or_create_data_file_path(
-            "rows",
-            self.run_settings.directory_settings.pickle_dir,
-            self.run_settings.directory_settings.data_file_mapping,
-            clustering_algorithm=self.run_settings.clustering_settings.main_clustering_algorithm,
-            n_clusters=self.run_settings.clustering_settings.n_clusters,
-            random_seed=self.run_settings.random_state,
-            dataset=self.datasets_filename,
-        )
-
-        self.save_data(joint_embeddings_filename, joint_embeddings_all_llms)
-        self.save_data(combined_embeddings_filename, combined_embeddings)
-        self.save_data(chosen_clustering_filename, chosen_clustering)
-        self.save_data(rows_filename, rows)
 
         if "model_comparison" not in self.run_settings.skip_sections:
             # Embed model responses to statement prompts
@@ -924,7 +936,7 @@ class EvaluatorPipeline:
                         n_clusters=n_clusters,
                         multiple=False,
                     )
-                if "spectral" not in self.run_settings.plot_settings.hide_plot_types:
+                if "spectral" not in self.run_settings.plot_settings.hide_plots:
                     self.viz.plot_spectral_clustering(
                         statement_clustering.labels_,
                         n_clusters=n_clusters,
@@ -959,22 +971,22 @@ class EvaluatorPipeline:
                         labels=prompt_labels,
                     )
 
-        # Load and visualize saved data for the current run
-        data_files = {
-            "joint_embeddings": joint_embeddings_filename,
-            "combined_embeddings": combined_embeddings_filename,
-            "chosen_clustering": chosen_clustering_filename,
-            "rows": rows_filename,
-        }
-
-        for prompt_type in self.approval_prompts.keys():
-            data_files[f"approvals_{prompt_type}"] = (
-                f"approvals_{prompt_type}_{'_'.join(self.model_names)}_{self.embedding_model_name}_{self.n_statements}_{self.datasets_filename}.pkl"
-            )
-            data_files[f"hierarchy_data_{prompt_type}"] = (
-                f"hierarchy_data_{prompt_type}_{'_'.join(self.model_names)}_{self.embedding_model_name}_{self.n_statements}_{self.datasets_filename}.pkl"
-            )
-        self.save_run_metadata_to_yaml(run_id, data_files)
+        # run id should include model names, dataset name, number of statements, and timestamp
+        run_id = (
+            "_".join(self.model_names)
+            + "_"
+            + self.datasets_filename
+            + "_"
+            + str(self.n_statements)
+            + "_"
+            + datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+        )
+        data_file_paths = self.create_data_file_paths()
+        self.save_data(data_file_paths["joint_embeddings"], joint_embeddings_all_llms)
+        self.save_data(data_file_paths["combined_embeddings"], combined_embeddings)
+        self.save_data(data_file_paths["chosen_clustering"], chosen_clustering)
+        self.save_data(data_file_paths["rows"], rows)
+        self.save_run_metadata_to_yaml(run_id, data_file_paths)
         self.load_and_visualize_saved_data(run_id)
 
         print("Done. Please check the results directory for the plots.")
