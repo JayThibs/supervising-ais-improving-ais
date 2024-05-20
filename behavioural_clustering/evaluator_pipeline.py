@@ -46,6 +46,7 @@ class EvaluatorPipeline:
         )
 
         # Load approval prompts from same directory as this file
+        self.test_mode = self.run_settings.test_mode
         self.n_statements = (
             300 if self.test_mode else self.run_settings.data_settings.n_statements
         )
@@ -66,25 +67,24 @@ class EvaluatorPipeline:
         self.plot_statement_clustering = False
 
         # Set up objects
-        self.model_eval = ModelEvaluation(self.run_settings, self.llms, self)
+        self.model_eval = ModelEvaluation(self.run_settings, self.llms)
         self.viz = Visualization(self.run_settings.plot_settings)
         self.clustering_obj = Clustering(self.run_settings.clustering_settings)
 
         if self.run_settings.data_settings.new_generation:
             self.saved_query_results = None
-            if "query_results_per_model.pkl" in os.listdir(self.pickle_dir):
+            if (self.pickle_dir / "query_results_per_model.pkl").exists():
                 timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
-                os.rename(
-                    f"{self.pickle_dir}/query_results_per_model.pkl",
-                    f"{self.pickle_dir}/query_results_per_model_{timestamp}.pkl",
+                (self.pickle_dir / "query_results_per_model.pkl").rename(
+                    self.pickle_dir / f"query_results_per_model_{timestamp}.pkl"
                 )
         else:
-            if "query_results_per_model.pkl" in os.listdir(self.pickle_dir):
+            if (self.pickle_dir / "query_results_per_model.pkl").exists():
                 self.saved_query_results = self.load_results(
                     "query_results_per_model.pkl", "pickle_files"
                 )
             else:
-                self.query_results = None
+                self.saved_query_results = None
 
     def setup_evaluations(self):
         self.setup_directories()
@@ -138,26 +138,26 @@ class EvaluatorPipeline:
             ]
 
         for repo_url, folder_name in repos:
-            if not os.path.exists(os.path.join(self.evals_dir, folder_name)):
+            if not (self.evals_dir / folder_name).exists():
                 DataPreparation.clone_repo(self, repo_url, folder_name)
 
     def load_evaluation_data(self, dataset_names: List[str] = ["anthropic"]):
-        self.datasets_filename: str = "_".join(dataset_names)
+        self.dataset_names_filename: str = "_".join(dataset_names)
         self.data_prep = DataPreparation()
         all_texts = self.data_prep.load_evaluation_data(self.data_prep.file_paths)
         return all_texts
 
     def save_results(self, data, file_name, sub_dir):
         # Save data to a pickle file
-        if not os.path.exists(f"{self.results_dir}/{sub_dir}"):
-            os.makedirs(f"{self.results_dir}/{sub_dir}")
-        with open(f"{self.results_dir}/{sub_dir}/{file_name}", "wb") as f:
+        if not os.path.exists(self.results_dir / sub_dir):
+            os.makedirs(self.results_dir / sub_dir)
+        with open(self.results_dir / sub_dir / file_name, "wb") as f:
             pickle.dump(data, f)
 
     def load_results(self, file_name, sub_dir):
         # Load data from a pickle file
         try:
-            with open(f"{self.results_dir}/{sub_dir}/{file_name}", "rb") as f:
+            with open(self.results_dir / sub_dir / file_name, "rb") as f:
                 return pickle.load(f)
         except FileNotFoundError:
             return None
@@ -169,7 +169,7 @@ class EvaluatorPipeline:
     ):
         metadata = {
             "run_id": run_id,
-            "dataset_name": self.datasets_filename,
+            "dataset_names": self.dataset_names_filename,
             "model_names": self.model_names,
             "n_statements": self.n_statements,
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -190,7 +190,7 @@ class EvaluatorPipeline:
             f.write("\n")  # Add a newline separator between runs
 
     def get_or_create_data_file_path(
-        self, data_file_id, data_file_dir, mapping_file, **kwargs
+        self, data_file_id: str, data_file_dir: Path, mapping_file: Path, **kwargs
     ):
         with open(mapping_file, "r") as f:
             data_file_mapping = yaml.safe_load(f)
@@ -205,7 +205,7 @@ class EvaluatorPipeline:
             return data_file_mapping[filename]
         else:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            file_path = f"{data_file_dir}/{filename}_{timestamp}.pkl"
+            file_path = data_file_dir / f"{filename}_{timestamp}.pkl"
             data_file_mapping[filename] = file_path
 
             with open(mapping_file, "w") as f:
@@ -216,7 +216,7 @@ class EvaluatorPipeline:
     def generate_plot_filename(self, model_names: list, plot_type: str):
         # timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
         plot_type = plot_type.replace(" ", "_")
-        filename = f"{self.viz_dir}/"
+        filename = f"{str(self.viz_dir)}/"
         for model in model_names:
             filename += f"{model}-"
         filename += f"{plot_type}.png"
@@ -283,7 +283,7 @@ class EvaluatorPipeline:
         query_results_per_model = []
         for model_family, model in llms:
             print(f"Generating responses for {model} from {model_family}...")
-            file_name = f"{model_family}_{model}_reaction_to_{n_statements}_{self.dataset_name}_statements.pkl"
+            file_name = f"{model_family}_{model}_reaction_to_{n_statements}_{self.dataset_names_filename}_statements.pkl"
             query_results = query_model_on_statements(
                 text_subset, model_family, model, prompt_template, system_message
             )  # dictionary of inputs, responses, and model instance
@@ -359,7 +359,7 @@ class EvaluatorPipeline:
             print("Embeddings contain non-finite values.")
 
         # save combined embeddings
-        with open(f"{self.pickle_dir}/combined_embeddings.pkl", "wb") as f:
+        with open(self.pickle_dir / "combined_embeddings.pkl", "wb") as f:
             pickle.dump(combined_embeddings, f)
 
         return joint_embeddings_all_llms, combined_embeddings
@@ -390,7 +390,8 @@ class EvaluatorPipeline:
                 )
                 n_statements = len(inputs)
                 with open(
-                    f"{self.pickle_dir}/{self.dataset_name}_{n_statements}_statements_embs.pkl",
+                    self.pickle_dir
+                    / f"{self.dataset_names_filename}_{n_statements}_statements_embs.pkl",
                     "wb",
                 ) as f:
                     pickle.dump(inputs_embeddings, f)
@@ -416,7 +417,7 @@ class EvaluatorPipeline:
                 joint_embeddings_all_llms.append([i, input, response, embedding, model])
 
         if save:
-            with open(f"{self.pickle_dir}/joint_embeddings_all_llms.pkl", "wb") as f:
+            with open(self.pickle_dir / "joint_embeddings_all_llms.pkl", "wb") as f:
                 pickle.dump(joint_embeddings_all_llms, f)
         return joint_embeddings_all_llms
 
@@ -433,7 +434,7 @@ class EvaluatorPipeline:
             )
             print("Choosing clustering method... (KMeans is default)")
             chosen_clustering = clustering_results["KMeans"]
-            with open(f"{self.pickle_dir}/chosen_clustering.pkl", "wb") as f:
+            with open(self.pickle_dir / "chosen_clustering.pkl", "wb") as f:
                 pickle.dump(chosen_clustering, f)
         return chosen_clustering
 
@@ -453,13 +454,13 @@ class EvaluatorPipeline:
                 "joint_embeddings",
                 model_info_list,
             )
-            with open(f"{self.pickle_dir}/rows.pkl", "wb") as f:
+            with open(self.pickle_dir / "rows.pkl", "wb") as f:
                 pickle.dump(rows, f)
         # Save and display the results
         # Save chosen clustering and rows using pickle for later use
         print("Saving results...")
-        clustering_file_path = f"{self.pickle_dir}/latest_clustering_reaction.pkl"
-        rows_file_path = f"{self.pickle_dir}/latest_clustering_rows.pkl"
+        clustering_file_path = self.pickle_dir / "latest_clustering_reaction.pkl"
+        rows_file_path = self.pickle_dir / "latest_clustering_rows.pkl"
         with open(clustering_file_path, "wb") as f:
             pickle.dump(chosen_clustering, f)
         with open(rows_file_path, "wb") as f:
@@ -490,7 +491,8 @@ class EvaluatorPipeline:
 
             # load statement embeddings
             with open(
-                f"{self.pickle_dir}/{self.dataset_name}_{self.n_statements}_statements_embs.pkl",
+                self.pickle_dir
+                / f"{self.dataset_names_filename}_{self.n_statements}_statements_embs.pkl",
                 "rb",
             ) as f:
                 statement_embeddings = pickle.load(f)
@@ -523,13 +525,14 @@ class EvaluatorPipeline:
                         model_approvals  # {model_1: [approval1, approval2, ...], model_2: [approval1, approval2, ...], ... }
                     )
 
-                if not os.path.exists(
-                    f"{self.pickle_dir}/approval_results_per_model_{approvals_type}.pkl"
-                ):
+                if not (
+                    self.pickle_dir / f"approval_results_per_model_{approvals_type}.pkl"
+                ).exists():
                     pickle.dump(
                         approval_results_per_model,
                         open(
-                            f"{self.pickle_dir}/approval_results_per_model_{approvals_type}.pkl",
+                            self.pickle_dir
+                            / f"approval_results_per_model_{approvals_type}.pkl",
                             "wb",
                         ),
                     )
@@ -556,7 +559,7 @@ class EvaluatorPipeline:
                 pickle.dump(
                     approvals_statements_and_embeddings,
                     open(
-                        f"{self.pickle_dir}/{pickle_filename}",
+                        self.pickle_dir / pickle_filename,
                         "wb",
                     ),
                 )
@@ -584,7 +587,7 @@ class EvaluatorPipeline:
                 rows,
             )
             with open(
-                f"{self.pickle_dir}/hierarchy_approval_data_{prompt_type}.pkl", "wb"
+                self.pickle_dir / f"hierarchy_approval_data_{prompt_type}.pkl", "wb"
             ) as f:
                 pickle.dump(hierarchy_data, f)
 
@@ -609,7 +612,7 @@ class EvaluatorPipeline:
 
         for model_name in model_names:
             filename = (
-                f"{self.viz_dir}/hierarchical_clustering_{plot_type}_{model_name}"
+                self.viz_dir / f"hierarchical_clustering_{plot_type}_{model_name}"
             )
             print(f"Visualizing hierarchical cluster for {model_name}...")
             self.viz.visualize_hierarchical_cluster(
@@ -665,44 +668,44 @@ class EvaluatorPipeline:
         # Generate filenames based on relevant parameters
         joint_embeddings_filename = self.get_or_create_data_file_path(
             "joint_embeddings",
-            self.run_settings.directory_settings.pickle_dir,
+            self.pickle_dir,
             self.run_settings.directory_settings.data_file_mapping,
             models="_".join(self.model_names),
             embedding_model=self.embedding_model_name,
             n_statements=self.n_statements,
-            dataset=self.datasets_filename,
+            dataset=self.dataset_names_filename,
             random_seed=self.run_settings.random_state,
         )
 
         combined_embeddings_filename = self.get_or_create_data_file_path(
             "combined_embeddings",
-            self.run_settings.directory_settings.pickle_dir,
+            self.pickle_dir,
             self.run_settings.directory_settings.data_file_mapping,
             models="_".join(self.model_names),
             embedding_model=self.embedding_model_name,
             n_statements=self.n_statements,
-            dataset=self.datasets_filename,
+            dataset=self.dataset_names_filename,
             random_seed=self.run_settings.random_state,
         )
 
         chosen_clustering_filename = self.get_or_create_data_file_path(
             "chosen_clustering",
-            self.run_settings.directory_settings.pickle_dir,
+            self.pickle_dir,
             self.run_settings.directory_settings.data_file_mapping,
             clustering_algorithm=self.run_settings.clustering_settings.main_clustering_algorithm,
             n_clusters=self.run_settings.clustering_settings.n_clusters,
             random_seed=self.run_settings.random_state,
-            dataset=self.datasets_filename,
+            dataset=self.dataset_names_filename,
         )
 
         rows_filename = self.get_or_create_data_file_path(
             "rows",
-            self.run_settings.directory_settings.pickle_dir,
+            self.pickle_dir,
             self.run_settings.directory_settings.data_file_mapping,
             clustering_algorithm=self.run_settings.clustering_settings.main_clustering_algorithm,
             n_clusters=self.run_settings.clustering_settings.n_clusters,
             random_seed=self.run_settings.random_state,
-            dataset=self.datasets_filename,
+            dataset=self.dataset_names_filename,
         )
 
         # Load and visualize saved data for the current run
@@ -803,7 +806,7 @@ class EvaluatorPipeline:
         clusters_desc_table = [
             ["ID", "N", "Inputs Themes", "Responses Themes", "Interaction Themes"]
         ]
-        table_pickle_path = f"{self.pickle_dir}/clusters_desc_table_personas.pkl"
+        table_pickle_path = self.pickle_dir / "clusters_desc_table_personas.pkl"
         self.clustering_obj.create_cluster_table(
             clusters_desc_table, rows, table_pickle_path, "response_comparisons"
         )
@@ -894,8 +897,8 @@ class EvaluatorPipeline:
                 print(
                     f"prompt_type: {prompt_type}"
                 )  # e.g. "personas", "awareness", etc.
-                approvals_filename = f"approvals_{prompt_type}_{'_'.join(self.model_names)}_{self.run_settings.embedding_settings.embedding_model}_{self.n_statements}_{self.dataset}.pkl"
-                hierarchy_data_filename = f"hierarchy_data_{prompt_type}_{'_'.join(self.model_names)}_{self.run_settings.embedding_settings.embedding_model}_{self.n_statements}_{self.dataset}.pkl"
+                approvals_filename = f"approvals_{prompt_type}_{'_'.join(self.model_names)}_{self.run_settings.embedding_settings.embedding_model}_{self.n_statements}_{self.dataset_names_filename}.pkl"
+                hierarchy_data_filename = f"hierarchy_data_{prompt_type}_{'_'.join(self.model_names)}_{self.run_settings.embedding_settings.embedding_model}_{self.n_statements}_{self.dataset_names_filename}.pkl"
 
                 if not self.load_results(approvals_filename, "pickle_files"):
                     self.save_data(
@@ -991,7 +994,7 @@ class EvaluatorPipeline:
         run_id = (
             "_".join(self.model_names)
             + "_"
-            + self.datasets_filename
+            + self.dataset_names_filename
             + "_"
             + str(self.n_statements)
             + "_"

@@ -145,8 +145,10 @@ class ModelEvaluation:
                 "Interaction Themes",  # LLM says the theme of the input and response together
             ]
         )
-        plot_settings = self.settings.plot_settings
-        csv_file_path = f"{plot_settings.save_path}/tables/cluster_results_table_statement_responses.csv"
+        csv_file_path = (
+            self.settings.directory_settings.tables_dir
+            / "cluster_results_table_statement_responses.csv"
+        )
         with open(csv_file_path, mode="w", newline="", encoding="utf-8") as file:
             writer = csv.writer(file)
             writer.writerow(table_headers)

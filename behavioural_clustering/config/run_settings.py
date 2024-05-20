@@ -30,14 +30,14 @@ HIDEABLE_PLOT_TYPES = [
 
 @dataclass
 class DirectorySettings:
-    data_dir: str = str(Path.cwd() / "data")
-    evals_dir: str = str(Path.cwd() / "data" / "evals")
-    results_dir: str = str(Path.cwd() / "data" / "results")
-    pickle_dir: str = str(Path.cwd() / "data" / "results" / "pickle_files")
-    viz_dir: str = str(Path.cwd() / "data" / "results" / "plots")
-    tables_dir: str = str(Path.cwd() / "data" / "results" / "tables")
-    metadata_file: str = str(Path.cwd() / "data" / "results" / "metadata_for_runs.yaml")
-    data_file_mapping: str = str(
+    data_dir: Path = Path.cwd() / "data"
+    evals_dir: Path = Path.cwd() / "data" / "evals"
+    results_dir: Path = Path.cwd() / "data" / "results"
+    pickle_dir: Path = Path.cwd() / "data" / "results" / "pickle_files"
+    viz_dir: Path = Path.cwd() / "data" / "results" / "plots"
+    tables_dir: Path = Path.cwd() / "data" / "results" / "tables"
+    metadata_file: Path = Path.cwd() / "data" / "results" / "metadata_for_runs.yaml"
+    data_file_mapping: Path = (
         Path.cwd() / "data" / "results" / "data_file_mapping.yaml"
     )  # preventing duplicate data files
 
@@ -46,6 +46,7 @@ class DirectorySettings:
 class DataSettings:
     datasets: List[str] = field(default_factory=lambda: ["all"])
     n_statements: int = 5000
+    random_state: int = 42
     new_generation: bool = False
     reuse_data: List[str] = field(default_factory=lambda: ["all"])
     reuse_embedding_clustering: bool = False
@@ -116,7 +117,7 @@ class PlotSettings:
     hide_plots: List[str] = field(default_factory=lambda: ["none"])
     visualize_at_end: bool = True
     plot_dim: Tuple[int, int] = (16, 16)
-    save_path: str = str(Path.cwd() / "data" / "results" / "plots")
+    save_path: Path = Path.cwd() / "data" / "results" / "plots"
     colors: List[str] = field(
         default_factory=lambda: [
             "red",
@@ -188,12 +189,14 @@ class PlotSettings:
 class ClusteringSettings:
     main_clustering_algorithm: str = "KMeans"
     n_clusters: int = 200
-    all_clustering_algorithms: List[str] = [
-        "KMeans",
-        "SpectralClustering",
-        "AgglomerativeClustering",
-        "OPTICS",
-    ]
+    all_clustering_algorithms: List[str] = field(
+        default_factory=lambda: [
+            "KMeans",
+            "SpectralClustering",
+            "AgglomerativeClustering",
+            "OPTICS",
+        ]
+    )
     min_cluster_size: int = 2
     max_cluster_size: int = 10
     affinity: str = "nearest_neighbors"

@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 import glob
 from typing import List, Tuple, Union
 import subprocess
@@ -12,12 +13,10 @@ from config.run_settings import DataSettings, RunSettings
 
 class DataPreparation:
     def __init__(self):
-        self.data_dir = os.getcwd() + "/data"
-        self.evals_dir = f"{self.data_dir}/evals"
-        print(self.evals_dir)
+        self.data_dir = Path.cwd() / "data"
+        self.evals_dir = self.data_dir / "evals"
         self.file_paths = self._get_jsonl_file_paths(self.evals_dir)
         print("Grabbed file paths.")
-        self.folder_path = self.evals_dir
 
     @staticmethod
     def load_api_key(self, api_key_name: str) -> str:
@@ -34,18 +33,10 @@ class DataPreparation:
     def clone_repo(self, repo_url: str, folder_name: str) -> None:
         """Clone a GitHub repository."""
         # Using subprocess instead of os.system for better control
-        subprocess.run(
-            ["git", "clone", repo_url, os.path.join(self.evals_dir, folder_name)]
-        )
-
-    def _get_subfolders(self, folder_path: str = None) -> List[str]:
-        """Find all subfolders within the specified folder."""
-        if folder_path is None:
-            folder_path = self.evals_dir
-        return [f.name for f in os.scandir(self.evals_dir) if f.is_dir()]
+        subprocess.run(["git", "clone", repo_url, self.evals_dir / folder_name])
 
     def _get_jsonl_file_paths(
-        self, folder_path: str = None, datasets: Union[List[str], str, None] = None
+        self, folder_path: Path = None, datasets: Union[List[str], str, None] = None
     ) -> List[str]:
         """Find all .jsonl files within the specified folder and subfolders, filtered by datasets if provided."""
         if folder_path is None:
@@ -54,26 +45,18 @@ class DataPreparation:
         if datasets is None:
             datasets = ["all"]
         if datasets == ["all"]:
-            file_paths = [
-                path
-                for path in glob.iglob(f"{folder_path}/**/**/*.jsonl", recursive=True)
-            ]
+            file_paths = [str(path) for path in folder_path.rglob("*.jsonl")]
         elif isinstance(datasets, list):
             for dataset in datasets:
                 file_paths.extend(
                     [
-                        path
-                        for path in glob.iglob(
-                            f"{folder_path}/{dataset}/**/**/*.jsonl", recursive=True
-                        )
+                        str(path)
+                        for path in folder_path.joinpath(dataset).rglob("*.jsonl")
                     ]
                 )
         else:  # Single dataset specified
             file_paths = [
-                path
-                for path in glob.iglob(
-                    f"{folder_path}/{datasets}/**/**/*.jsonl", recursive=True
-                )
+                str(path) for path in folder_path.joinpath(datasets).rglob("*.jsonl")
             ]
         return file_paths
 
@@ -105,7 +88,7 @@ class DataPreparation:
         all_texts = self.load_evaluation_data(file_paths)
         short_texts = self.load_short_texts(all_texts)
         print(f"Sample short texts: {short_texts[:2]}")
-        text_subset = self.create_text_subset(short_texts, data_settings.n_statements)
+        text_subset = self.create_text_subset(short_texts, data_settings)
         print(f"Sample text subset: {text_subset[:2]}")
         print(f"Loaded {len(all_texts)} texts.")
         print(f"Loaded {len(short_texts)} short texts.")
@@ -123,13 +106,13 @@ class DataPreparation:
         return rng.permutation(texts)[: data_settings.n_statements]
 
     def save_to_pickle(self, data, filename, run_settings: RunSettings):
-        pickle_dir = f"{run_settings.results_dir}/pickle_files"
+        pickle_dir = run_settings.directory_settings.pickle_dir
         if not os.path.exists(pickle_dir):
             os.makedirs(pickle_dir)
-        with open(os.path.join(pickle_dir, filename), "wb") as f:
+        with open(pickle_dir / filename, "wb") as f:
             pickle.dump(data, f)
 
     def load_from_pickle(self, filename):
-        pickle_dir = "data/intermediate/pickle_files"
-        with open(os.path.join(pickle_dir, filename), "rb") as f:
+        pickle_dir = self.run_settings.directory_settings.pickle_dir
+        with open(pickle_dir / filename, "rb") as f:
             return pickle.load(f)
