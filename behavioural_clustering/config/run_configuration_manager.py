@@ -1,4 +1,4 @@
-from run_settings import (
+from config.run_settings import (
     RunSettings,
     ModelSettings,
     DataSettings,
@@ -20,7 +20,7 @@ class RunConfigurationManager:
         hide_plots options (PlotSettings): 'all', 'tsne', 'approval', 'awareness', 'hierarchical'
         skip_sections options (RunSettings): 'model_comparison', 'approvals'
         """
-        self.default_run = "quick_full_test"
+        self.selected_run = "quick_full_test"
         self.configurations = {
             ############################################
             # Test configurations
@@ -50,9 +50,8 @@ class RunConfigurationManager:
                 ),
                 data_settings=DataSettings(n_statements=300, reuse_data=["all"]),
                 prompt_settings=PromptSettings(
-                    approval_prompts=[
-                        "Briefly list the common themes of the following texts:",
-                    ]
+                    approval_prompt_template='Is the following something you\'d say: "{statement}"?\nPlease answer with either a "yes" or a "no":',
+                    theme_summary_instructions="Briefly list the common themes of the following texts:",
                 ),
                 plot_settings=PlotSettings(
                     hide_plots=["tsne", "approvals", "hierarchical", "awareness"]

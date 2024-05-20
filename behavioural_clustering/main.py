@@ -32,16 +32,12 @@ def get_args():
 def main(args):
     run_config_manager = RunConfigurationManager()
     if args.run:
-        # Useful to add flag to non-default run config in command-line instead of retyping it each time
-        # example: python unsupervised_llm_behavioural_clustering/main.py --run quick_full_test
+        # python behavioural_clustering/main.py --run quick_full_test
         selected_run = args.run
     else:
-        selected_run = input(
-            f"Enter the name of the run configuration you want to use (default: {run_config_manager.default_configuration}): "
-        )
-    run_settings = run_config_manager.get_configuration(
-        selected_run or run_config_manager.default_configuration
-    )
+        # python behavioural_clustering/main.py (can edit in run_configuration_manager.py > selected_run)
+        selected_run = run_config_manager.selected_run
+    run_settings = run_config_manager.get_configuration(selected_run)
     if run_settings:
         print(f"Using run settings: {run_settings.name}")
         print("Loading evaluator pipeline...")
