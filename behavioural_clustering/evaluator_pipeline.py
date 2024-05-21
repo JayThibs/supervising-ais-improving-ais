@@ -7,7 +7,7 @@ import pickle
 from datetime import datetime
 import pdb
 from matplotlib import pyplot as plt
-from data_preparation import DataPreparation
+from data_preparation import DataPreparation, DataHandler
 from models import LocalModel
 from model_evaluation import ModelEvaluation
 from visualization import Visualization
@@ -167,23 +167,6 @@ class EvaluatorPipeline:
         run_id: str,
         data_files: Dict[str, str],
     ):
-        metadata = {
-            "run_id": run_id,
-            "dataset_names": self.dataset_names_filename,
-            "model_names": self.model_names,
-            "n_statements": self.n_statements,
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "data_settings": self.run_settings.data_settings.__dict__,
-            "model_settings": self.run_settings.model_settings.__dict__,
-            "embedding_settings": self.run_settings.embedding_settings.__dict__,
-            "prompt_settings": self.run_settings.prompt_settings.__dict__,
-            "plot_settings": self.run_settings.plot_settings.__dict__,
-            "clustering_settings": self.run_settings.clustering_settings.__dict__,
-            "tsne_settings": self.run_settings.tsne_settings.__dict__,
-            "test_mode": self.run_settings.test_mode,
-            "skip_sections": self.run_settings.skip_sections,
-            "data_files": data_files,
-        }
 
         with open(self.run_settings.directory_settings.metadata_file, "a") as f:
             yaml.dump([metadata], f)
@@ -258,7 +241,7 @@ class EvaluatorPipeline:
                 models,
             )
         else:
-            query_results_per_model = [self.saved_query_results]
+            query_results_per_model = self.saved_query_results
 
         return text_subset, query_results_per_model
 
@@ -304,24 +287,6 @@ class EvaluatorPipeline:
         for key in model_info_list[0].keys():
             print(key)
         return model_info_list
-
-    def perform_tsne_dimensionality_reduction(
-        self, combined_embeddings, perplexity=None
-    ):
-        print("Performing t-SNE dimensionality reduction...")
-        perplexity = perplexity or self.run_settings.tsne_settings.perplexity
-        dim_reduce_tsne = self.model_eval.tsne_dimension_reduction(
-            combined_embeddings, iterations=300, perplexity=perplexity
-        )
-        self.check_tsne_values(dim_reduce_tsne)
-        return dim_reduce_tsne
-
-    def check_tsne_values(self, dim_reduce_tsne):
-        if not np.isfinite(dim_reduce_tsne).all():
-            print("dim_reduce_tsne contains non-finite values.")
-        if np.isnan(dim_reduce_tsne).any() or np.isinf(dim_reduce_tsne).any():
-            print("dim_reduce_tsne contains NaN or inf values.")
-        print("dim_reduce_tsne:", dim_reduce_tsne.dtype)
 
     def visualize_results(
         self, dim_reduce_tsne, joint_embeddings_all_llms, model_names, tsne_filename
@@ -792,8 +757,10 @@ class EvaluatorPipeline:
         tsne_filename = self.generate_plot_filename(
             self.model_names, "tsne_embedding_responses"
         )
-        dim_reduce_tsne = self.perform_tsne_dimensionality_reduction(
-            combined_embeddings
+        dim_reduce_tsne = self.clustering_obj.perform_tsne_dimensionality_reduction(
+            combined_embeddings,
+            tsne_settings=self.run_settings.tsne_settings,
+            random_state=self.run_settings.random_state,
         )
         self.visualize_results(
             dim_reduce_tsne, joint_embeddings_all_llms, self.model_names, tsne_filename
@@ -991,22 +958,38 @@ class EvaluatorPipeline:
                     )
 
         # run id should include model names, dataset name, number of statements, and timestamp
-        run_id = (
-            "_".join(self.model_names)
-            + "_"
-            + self.dataset_names_filename
-            + "_"
-            + str(self.n_statements)
-            + "_"
-            + datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+        data_handler = DataHandler(
+            base_dir=self.run_settings.directory_settings.results_dir,
+            model_name=self.model_names,
+            dataset_names_filename=self.dataset_names_filename,
         )
-        data_file_paths = self.create_data_file_paths()
-        self.save_data(data_file_paths["joint_embeddings"], joint_embeddings_all_llms)
-        self.save_data(data_file_paths["combined_embeddings"], combined_embeddings)
-        self.save_data(data_file_paths["chosen_clustering"], chosen_clustering)
-        self.save_data(data_file_paths["rows"], rows)
+        run_id = data_handler.generate_run_id()
+        data_file_paths = (
+            self.create_data_file_paths()
+        )  # joint_embeddings, combined_embeddings, chosen_clustering, rows, approvals_personas, hierarchy_data_personas, approvals_awareness, hierarchy_data_awareness
+        data_handler.save_pickles(
+            data_file_paths,
+            [joint_embeddings_all_llms, combined_embeddings, chosen_clustering, rows],
+        )
         # To make it easier to find the results of a specific run, we will save the run metadata to a yaml file
-        self.save_run_metadata_to_yaml(run_id, data_file_paths)
+        metadata = {
+            "run_id": run_id,
+            "dataset_names": self.dataset_names_filename,
+            "model_names": self.model_names,
+            "n_statements": self.n_statements,
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "data_settings": self.run_settings.data_settings.__dict__,
+            "model_settings": self.run_settings.model_settings.__dict__,
+            "embedding_settings": self.run_settings.embedding_settings.__dict__,
+            "prompt_settings": self.run_settings.prompt_settings.__dict__,
+            "plot_settings": self.run_settings.plot_settings.__dict__,
+            "clustering_settings": self.run_settings.clustering_settings.__dict__,
+            "tsne_settings": self.run_settings.tsne_settings.__dict__,
+            "test_mode": self.run_settings.test_mode,
+            "skip_sections": self.run_settings.skip_sections,
+            "data_files": data_file_paths,
+        }
+        data_handler.save_run_metadata_to_yaml(run_id, metadata)
         if self.run_settings.plot_settings.visualize_at_end:
             self.load_and_visualize_saved_data(run_id)
 
