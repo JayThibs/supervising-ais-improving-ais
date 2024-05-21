@@ -1,12 +1,15 @@
 import os
 from pathlib import Path
 import glob
-from typing import List, Tuple, Union
+from typing import List, Tuple, Union, Dict, Any
 import subprocess
+from threading import Lock
 import pandas as pd
 import numpy as np
 import json
+import yaml
 import pickle
+from datetime import datetime
 from dotenv import load_dotenv
 from config.run_settings import DataSettings, RunSettings
 
@@ -116,3 +119,71 @@ class DataPreparation:
         pickle_dir = self.run_settings.directory_settings.pickle_dir
         with open(pickle_dir / filename, "rb") as f:
             return pickle.load(f)
+
+
+class DataHandler:
+    def __init__(self, base_dir, model_name, dataset_names_filename):
+        self.base_dir = base_dir
+        self.model_name = model_name
+        self.dataset_names_filename = dataset_names_filename
+        self.run_id = self.generate_run_id()
+
+    def generate_run_id(self):
+        metadata_file = self.results_dir / "run_metadata.yaml"
+        if metadata_file.exists():
+            with open(metadata_file, "r") as file:
+                existing_metadata = yaml.safe_load(file) or {}
+            # Extract run IDs and find the maximum
+            last_run_id = max(
+                (int(run_id.split("_")[1]) for run_id in existing_metadata.keys()),
+                default=0,
+            )
+        else:
+            last_run_id = 0
+        new_run_id = f"run_{last_run_id + 1}"
+        return new_run_id
+
+    def save_data(self, data, filename):
+        path = os.path.join(self.base_dir, self.run_id, filename)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as f:
+            pickle.dump(data, f)
+
+    def save_pickles(
+        self,
+        data_file_paths: Dict[str, str],
+        data: List[Any],
+    ):
+        for key, path in data_file_paths.items():
+            self.save_data(data[key], path)
+            print(f"Saved data to {path}.")
+
+    def save_run_metadata_to_yaml(self, run_id, metadata):
+        metadata_file = self.results_dir / "run_metadata.yaml"
+        lock = Lock()
+        with lock:
+            if metadata_file.exists():
+                with open(metadata_file, "r") as file:
+                    existing_metadata = yaml.safe_load(file) or {}
+            else:
+                existing_metadata = {}
+
+            existing_metadata[run_id] = metadata
+
+            with open(metadata_file, "w") as file:
+                yaml.safe_dump(existing_metadata, file)
+
+    def load_data(self, filename):
+        path = os.path.join(self.base_dir, self.run_id, filename)
+        if os.path.exists(path):
+            with open(path, "rb") as f:
+                return pickle.load(f)
+        return None
+
+    def get_run_metadata(self):
+        return {
+            "run_id": self.run_id,
+            "model_name": self.model_name,
+            "dataset_name": self.dataset_name,
+            "data_path": os.path.join(self.base_dir, self.run_id),
+        }
