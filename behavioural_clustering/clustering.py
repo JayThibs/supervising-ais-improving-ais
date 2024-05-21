@@ -6,9 +6,10 @@ import pdb
 import pickle
 from terminaltables import AsciiTable
 from sklearn.cluster import OPTICS, SpectralClustering, AgglomerativeClustering, KMeans
+from sklearn.manifold import TSNE
 from scipy.cluster.hierarchy import dendrogram, linkage, to_tree
 from utils import lookup_cid_pos_in_rows, identify_theme, compare_response_pair
-from config.run_settings import ClusteringSettings
+from config.run_settings import ClusteringSettings, TsneSettings
 
 
 class Clustering:
@@ -75,6 +76,49 @@ class Clustering:
             print("n_clusters:", n_clusters or "Auto")
 
             return clustering
+
+    def perform_tsne_dimensionality_reduction(
+        self,
+        combined_embeddings,
+        tsne_settings: TsneSettings = None,
+        n_components=2,
+        perplexity=50,
+        n_iter=2000,
+        angle=0.0,
+        init="pca",
+        early_exaggeration=1.0,
+        learning_rate="auto",
+        random_state=42,
+    ):
+        print("Performing t-SNE dimensionality reduction...")
+        if tsne_settings:
+            n_components = tsne_settings.dimensions
+            perplexity = tsne_settings.perplexity
+            n_iter = tsne_settings.n_iter
+            angle = tsne_settings.angle
+            init = tsne_settings.init
+            early_exaggeration = tsne_settings.early_exaggeration
+            learning_rate = tsne_settings.learning_rate
+        tsne = TSNE(
+            n_components=n_components,
+            perplexity=perplexity,
+            n_iter=n_iter,
+            angle=angle,
+            init=init,
+            early_exaggeration=early_exaggeration,
+            learning_rate=learning_rate,
+            random_state=random_state,
+        )
+        dim_reduce_tsne = tsne.fit_transform(X=combined_embeddings)
+        self.check_tsne_values(dim_reduce_tsne)
+        return dim_reduce_tsne
+
+    def check_tsne_values(self, dim_reduce_tsne):
+        if not np.isfinite(dim_reduce_tsne).all():
+            print("dim_reduce_tsne contains non-finite values.")
+        if np.isnan(dim_reduce_tsne).any() or np.isinf(dim_reduce_tsne).any():
+            print("dim_reduce_tsne contains NaN or inf values.")
+        print("dim_reduce_tsne:", dim_reduce_tsne.dtype)
 
     def get_cluster_centroids(self, embeddings, cluster_labels):
         centroids = []
