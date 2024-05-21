@@ -66,36 +66,6 @@ class ModelEvaluation:
 
         return approvals
 
-    def tsne_dimension_reduction(self, embeddings):
-        """
-        Performs dimensionality reduction on embeddings using t-SNE.
-
-        Parameters:
-        embeddings (list): A list of embeddings to reduce.
-        dimensions (int): The number of dimensions to reduce to. Default is 2.
-        perplexity (int): The perplexity parameter for t-SNE. Default is 50.
-        iterations (int): The number of iterations for optimization. Default is 2000.
-        random_state (int): The seed for random number generator. Default is 42.
-
-        Returns:
-        np.ndarray: The reduced embeddings as a NumPy array.
-        """
-        # Perform the t-SNE dimensionality reduction
-        tsne_settings = self.settings.tsne_settings
-        tsne = TSNE(
-            n_components=tsne_settings.dimensions,
-            perplexity=tsne_settings.perplexity,
-            n_iter=tsne_settings.n_iter,
-            angle=tsne_settings.angle,
-            init=tsne_settings.init,
-            early_exaggeration=tsne_settings.early_exaggeration,
-            learning_rate=tsne_settings.learning_rate,
-            random_state=self.settings.random_state,
-        )
-        reduced_embeddings = tsne.fit_transform(X=embeddings)
-
-        return reduced_embeddings
-
     def perform_clustering(
         self, combined_embeddings: np.array, n_clusters: int = 200
     ) -> KMeans:
