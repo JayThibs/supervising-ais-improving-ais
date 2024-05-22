@@ -122,13 +122,16 @@ class DataPreparation:
 
 
 class DataHandler:
-    def __init__(self, base_dir, model_name, dataset_names_filename):
-        self.base_dir = base_dir
-        self.model_name = model_name
-        self.dataset_names_filename = dataset_names_filename
+    def __init__(self, results_dir: Path, pickle_dir: Path, data_file_mapping: Path):
+        self.results_dir = results_dir
+        self.pickle_dir = pickle_dir
         self.run_id = self.generate_run_id()
+        self.data_file_mapping = data_file_mapping
+        if not self.data_file_mapping.exists():
+            with open(self.data_file_mapping, "w") as f:
+                yaml.safe_dump({}, f)
 
-    def generate_run_id(self):
+    def generate_run_id(self) -> str:
         metadata_file = self.results_dir / "run_metadata.yaml"
         if metadata_file.exists():
             with open(metadata_file, "r") as file:
@@ -143,8 +146,8 @@ class DataHandler:
         new_run_id = f"run_{last_run_id + 1}"
         return new_run_id
 
-    def save_data(self, data, filename):
-        path = os.path.join(self.base_dir, self.run_id, filename)
+    def save_data(self, data: Any, filename: str):
+        path = self.pickle_dir / filename
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "wb") as f:
             pickle.dump(data, f)
@@ -158,7 +161,7 @@ class DataHandler:
             self.save_data(data[key], path)
             print(f"Saved data to {path}.")
 
-    def save_run_metadata_to_yaml(self, run_id, metadata):
+    def save_run_metadata_to_yaml(self, run_id: str, metadata: Dict[str, Any]):
         metadata_file = self.results_dir / "run_metadata.yaml"
         lock = Lock()
         with lock:
@@ -173,17 +176,42 @@ class DataHandler:
             with open(metadata_file, "w") as file:
                 yaml.safe_dump(existing_metadata, file)
 
-    def load_data(self, filename):
-        path = os.path.join(self.base_dir, self.run_id, filename)
+    def get_or_create_data_file_path(
+        self, data_type: str, data_file_dir: Path, mapping_file: Path, **kwargs
+    ) -> Path:
+        with open(mapping_file, "r") as f:
+            try:
+                data_file_mapping = yaml.safe_load(f) or {}
+            except yaml.YAMLError as e:
+                data_file_mapping = {}
+
+        # Generate the filename based on the provided arguments
+        filename_parts = [data_type]
+        for key, value in kwargs.items():
+            filename_parts.append(f"{key}_{value}")
+        filename = "_".join(filename_parts) + ".pkl"
+
+        if filename in data_file_mapping:
+            return Path(data_file_mapping[filename])
+        else:
+            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            file_path = str(data_file_dir / f"{filename}_{timestamp}.pkl")
+            data_file_mapping[filename] = file_path
+
+            with open(mapping_file, "w") as f:
+                yaml.safe_dump(data_file_mapping, f)
+
+            return Path(file_path)
+
+    def load_data(self, filename: str) -> Any:
+        path = self.pickle_dir / filename
         if os.path.exists(path):
             with open(path, "rb") as f:
                 return pickle.load(f)
         return None
 
-    def get_run_metadata(self):
-        return {
-            "run_id": self.run_id,
-            "model_name": self.model_name,
-            "dataset_name": self.dataset_name,
-            "data_path": os.path.join(self.base_dir, self.run_id),
-        }
+    def get_run_metadata(self, run_id: str) -> Dict[str, Any]:
+        metadata_file = self.results_dir / "run_metadata.yaml"
+        with open(metadata_file, "r") as file:
+            metadata = yaml.safe_load(file)
+        return metadata.get(run_id, {})

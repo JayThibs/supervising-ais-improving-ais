@@ -162,40 +162,6 @@ class EvaluatorPipeline:
         except FileNotFoundError:
             return None
 
-    def save_run_metadata_to_yaml(
-        self,
-        run_id: str,
-        data_files: Dict[str, str],
-    ):
-
-        with open(self.run_settings.directory_settings.metadata_file, "a") as f:
-            yaml.dump([metadata], f)
-            f.write("\n")  # Add a newline separator between runs
-
-    def get_or_create_data_file_path(
-        self, data_file_id: str, data_file_dir: Path, mapping_file: Path, **kwargs
-    ):
-        with open(mapping_file, "r") as f:
-            data_file_mapping = yaml.safe_load(f)
-
-        # Generate the filename based on the provided arguments
-        filename_parts = [data_file_id]
-        for key, value in kwargs.items():
-            filename_parts.append(f"{key}_{value}")
-        filename = "_".join(filename_parts) + ".pkl"
-
-        if filename in data_file_mapping:
-            return data_file_mapping[filename]
-        else:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            file_path = data_file_dir / f"{filename}_{timestamp}.pkl"
-            data_file_mapping[filename] = file_path
-
-            with open(mapping_file, "w") as f:
-                yaml.dump(data_file_mapping, f)
-
-            return file_path
-
     def generate_plot_filename(self, model_names: list, plot_type: str):
         # timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
         plot_type = plot_type.replace(" ", "_")
@@ -629,75 +595,6 @@ class EvaluatorPipeline:
                     title=f"Embeddings of {condition_title} for {model_name} {prompt_approver_type} responses",
                 )
 
-    def create_data_file_paths(self) -> Dict[str, str]:
-        # Generate filenames based on relevant parameters
-        joint_embeddings_filename = self.get_or_create_data_file_path(
-            "joint_embeddings",
-            self.pickle_dir,
-            self.run_settings.directory_settings.data_file_mapping,
-            models="_".join(self.model_names),
-            embedding_model=self.embedding_model_name,
-            n_statements=self.n_statements,
-            dataset=self.dataset_names_filename,
-            random_seed=self.run_settings.random_state,
-        )
-
-        combined_embeddings_filename = self.get_or_create_data_file_path(
-            "combined_embeddings",
-            self.pickle_dir,
-            self.run_settings.directory_settings.data_file_mapping,
-            models="_".join(self.model_names),
-            embedding_model=self.embedding_model_name,
-            n_statements=self.n_statements,
-            dataset=self.dataset_names_filename,
-            random_seed=self.run_settings.random_state,
-        )
-
-        chosen_clustering_filename = self.get_or_create_data_file_path(
-            "chosen_clustering",
-            self.pickle_dir,
-            self.run_settings.directory_settings.data_file_mapping,
-            clustering_algorithm=self.run_settings.clustering_settings.main_clustering_algorithm,
-            n_clusters=self.run_settings.clustering_settings.n_clusters,
-            random_seed=self.run_settings.random_state,
-            dataset=self.dataset_names_filename,
-        )
-
-        rows_filename = self.get_or_create_data_file_path(
-            "rows",
-            self.pickle_dir,
-            self.run_settings.directory_settings.data_file_mapping,
-            clustering_algorithm=self.run_settings.clustering_settings.main_clustering_algorithm,
-            n_clusters=self.run_settings.clustering_settings.n_clusters,
-            random_seed=self.run_settings.random_state,
-            dataset=self.dataset_names_filename,
-        )
-
-        # Load and visualize saved data for the current run
-        data_file_paths = {
-            "joint_embeddings": joint_embeddings_filename,
-            "combined_embeddings": combined_embeddings_filename,
-            "chosen_clustering": chosen_clustering_filename,
-            "rows": rows_filename,
-        }
-
-        for prompt_type in self.approval_prompts.keys():
-            data_file_paths[f"approvals_{prompt_type}"] = (
-                self.get_or_create_data_file_path(
-                    f"approvals_{prompt_type}",
-                    self.pickle_dir,
-                    self.run_settings.directory_settings.data_file_mapping,
-                )
-            )
-            data_file_paths[f"hierarchy_data_{prompt_type}"] = (
-                self.get_or_create_data_file_path(
-                    f"hierarchy_data_{prompt_type}",
-                    self.pickle_dir,
-                    self.run_settings.directory_settings.data_file_mapping,
-                )
-            )
-        return data_file_paths
-
     def load_and_visualize_saved_data(self, run_id):
         with open(self.run_settings.directory_settings.metadata_file, "r") as f:
             runs_metadata = yaml.safe_load(f)
@@ -757,7 +654,7 @@ class EvaluatorPipeline:
         tsne_filename = self.generate_plot_filename(
             self.model_names, "tsne_embedding_responses"
         )
-        dim_reduce_tsne = self.clustering_obj.perform_tsne_dimensionality_reduction(
+        dim_reduce_tsne = self.clustering_obj.tsne_dimension_reduction(
             combined_embeddings,
             tsne_settings=self.run_settings.tsne_settings,
             random_state=self.run_settings.random_state,
@@ -779,6 +676,75 @@ class EvaluatorPipeline:
         )
 
         return dim_reduce_tsne, labels
+
+    def create_data_file_paths(self) -> Dict[str, str]:
+        # Generate filenames based on relevant parameters
+        joint_embeddings_filename = self.data_handler.get_or_create_data_file_path(
+            data_type="joint_embeddings",
+            data_file_dir=self.pickle_dir,
+            mapping_file=self.run_settings.directory_settings.data_file_mapping,
+            models="_".join(self.model_names),
+            embedding_model=self.embedding_model_name,
+            n_statements=self.n_statements,
+            dataset=self.dataset_names_filename,
+            random_seed=self.run_settings.random_state,
+        )
+
+        combined_embeddings_filename = self.data_handler.get_or_create_data_file_path(
+            data_type="combined_embeddings",
+            data_file_dir=self.pickle_dir,
+            mapping_file=self.run_settings.directory_settings.data_file_mapping,
+            models="_".join(self.model_names),
+            embedding_model=self.embedding_model_name,
+            n_statements=self.n_statements,
+            dataset=self.dataset_names_filename,
+            random_seed=self.run_settings.random_state,
+        )
+
+        chosen_clustering_filename = self.data_handler.get_or_create_data_file_path(
+            data_type="chosen_clustering",
+            data_file_dir=self.pickle_dir,
+            mapping_file=self.run_settings.directory_settings.data_file_mapping,
+            clustering_algorithm=self.run_settings.clustering_settings.main_clustering_algorithm,
+            n_clusters=self.run_settings.clustering_settings.n_clusters,
+            random_seed=self.run_settings.random_state,
+            dataset=self.dataset_names_filename,
+        )
+
+        rows_filename = self.data_handler.get_or_create_data_file_path(
+            data_type="rows",
+            data_file_dir=self.pickle_dir,
+            mapping_file=self.run_settings.directory_settings.data_file_mapping,
+            clustering_algorithm=self.run_settings.clustering_settings.main_clustering_algorithm,
+            n_clusters=self.run_settings.clustering_settings.n_clusters,
+            random_seed=self.run_settings.random_state,
+            dataset=self.dataset_names_filename,
+        )
+
+        # Load and visualize saved data for the current run
+        data_file_paths = {
+            "joint_embeddings": joint_embeddings_filename,
+            "combined_embeddings": combined_embeddings_filename,
+            "chosen_clustering": chosen_clustering_filename,
+            "rows": rows_filename,
+        }
+
+        for prompt_type in self.approval_prompts.keys():
+            data_file_paths[f"approvals_{prompt_type}"] = (
+                self.data_handler.get_or_create_data_file_path(
+                    data_type=f"approvals_{prompt_type}",
+                    data_file_dir=self.pickle_dir,
+                    mapping_file=self.run_settings.directory_settings.data_file_mapping,
+                )
+            )
+            data_file_paths[f"hierarchy_data_{prompt_type}"] = (
+                self.data_handler.get_or_create_data_file_path(
+                    data_type=f"hierarchy_data_{prompt_type}",
+                    data_file_dir=self.pickle_dir,
+                    mapping_file=self.run_settings.directory_settings.data_file_mapping,
+                )
+            )
+        return data_file_paths
 
     def run_evaluations(self):
         # Load data
@@ -840,6 +806,12 @@ class EvaluatorPipeline:
         # For each loop, we'll run the entire pipeline for that model.
         # Then, we'll remove that model from the GPU and load the next model.
         # At the end, we'll plot the results for all models.
+        self.data_handler = DataHandler(
+            results_dir=self.results_dir,
+            pickle_dir=self.pickle_dir,
+            data_file_mapping=self.run_settings.directory_settings.data_file_mapping,
+        )
+        run_id = self.data_handler.generate_run_id()
         self.text_subset, query_results_per_model = self.generate_responses()
         self.model_info_list = self.collect_model_info(query_results_per_model)
 
@@ -864,15 +836,18 @@ class EvaluatorPipeline:
                 print(
                     f"prompt_type: {prompt_type}"
                 )  # e.g. "personas", "awareness", etc.
-                approvals_filename = f"approvals_{prompt_type}_{'_'.join(self.model_names)}_{self.run_settings.embedding_settings.embedding_model}_{self.n_statements}_{self.dataset_names_filename}.pkl"
-                hierarchy_data_filename = f"hierarchy_data_{prompt_type}_{'_'.join(self.model_names)}_{self.run_settings.embedding_settings.embedding_model}_{self.n_statements}_{self.dataset_names_filename}.pkl"
-
-                if not self.load_results(approvals_filename, "pickle_files"):
-                    self.save_data(
-                        approvals_filename, approvals_statements_and_embeddings
+                approvals_filename = self.data_handler.get_or_create_data_file_path(
+                    f"approvals_{prompt_type}",
+                    self.pickle_dir,
+                    self.run_settings.directory_settings.data_file_mapping,
+                )
+                hierarchy_data_filename = (
+                    self.data_handler.get_or_create_data_file_path(
+                        f"hierarchy_data_{prompt_type}",
+                        self.pickle_dir,
+                        self.run_settings.directory_settings.data_file_mapping,
                     )
-                if not self.load_results(hierarchy_data_filename, "pickle_files"):
-                    self.save_data(hierarchy_data_filename, hierarchy_data)
+                )
                 # approvals_statements_and_embeddings: # [ [{model_1: [approval1, approval2, ...], model_2: [approval1, approval2, ...], ...}, statement, embedding], ... ]
                 # get boolean from run_settings to determine if we should reuse the hierarchical approvals for whichever prompt type we are currently evaluating
                 reuse_approvals = self.run_settings.data_settings.reuse_approvals
@@ -881,6 +856,10 @@ class EvaluatorPipeline:
                         approvals_type=prompt_type, reuse_approvals=reuse_approvals
                     )
                 )
+                if not self.load_results(approvals_filename, "pickle_files"):
+                    self.data_handler.save_data(
+                        approvals_statements_and_embeddings, approvals_filename
+                    )
                 if "statement_embeddings" not in locals():
                     statement_embeddings = np.array(
                         [
@@ -891,15 +870,15 @@ class EvaluatorPipeline:
 
                 if "dim_reduce_tsne" not in locals():
                     print("Performing dimensionality reduction...")
-                    dim_reduce_tsne = self.model_eval.tsne_dimension_reduction(
+                    dim_reduce_tsne = self.clustering_obj.tsne_dimension_reduction(
                         statement_embeddings,
-                        iterations=2000,
-                        perplexity=self.run_settings.tsne_settings.perplexity,
+                        tsne_settings=self.run_settings.tsne_settings,
+                        random_state=self.run_settings.random_state,
                     )
 
                 # Visualize approval embeddings
                 if (
-                    prompt_type not in self.run_settings.plot_settings.hide_approval
+                    self.run_settings.plot_settings.hide_approval
                     and not self.run_settings.plot_settings.visualize_at_end
                 ):
                     self.visualize_approval_embeddings(
@@ -922,7 +901,10 @@ class EvaluatorPipeline:
                         n_clusters=n_clusters,
                         multiple=False,
                     )
-                if "spectral" not in self.run_settings.plot_settings.hide_plots:
+                if (
+                    self.run_settings.plot_settings.hide_spectral
+                    and not self.run_settings.plot_settings.visualize_at_end
+                ):
                     self.viz.plot_spectral_clustering(
                         statement_clustering.labels_,
                         n_clusters=n_clusters,
@@ -945,6 +927,8 @@ class EvaluatorPipeline:
                     prompt_type,
                     reuse_hierarchical_approvals=self.run_settings.data_settings.reuse_hierarchical_approvals,
                 )
+                if not self.load_results(hierarchy_data_filename, "pickle_files"):
+                    self.data_handler.save_data(hierarchy_data, hierarchy_data_filename)
                 print(f"Visualizing hierarchical cluster for {prompt_type} prompts...")
                 if (
                     self.run_settings.plot_settings.hide_hierarchical
@@ -957,17 +941,10 @@ class EvaluatorPipeline:
                         labels=prompt_labels,
                     )
 
-        # run id should include model names, dataset name, number of statements, and timestamp
-        data_handler = DataHandler(
-            base_dir=self.run_settings.directory_settings.results_dir,
-            model_name=self.model_names,
-            dataset_names_filename=self.dataset_names_filename,
-        )
-        run_id = data_handler.generate_run_id()
         data_file_paths = (
             self.create_data_file_paths()
         )  # joint_embeddings, combined_embeddings, chosen_clustering, rows, approvals_personas, hierarchy_data_personas, approvals_awareness, hierarchy_data_awareness
-        data_handler.save_pickles(
+        self.data_handler.save_pickles(
             data_file_paths,
             [joint_embeddings_all_llms, combined_embeddings, chosen_clustering, rows],
         )
@@ -989,7 +966,7 @@ class EvaluatorPipeline:
             "skip_sections": self.run_settings.skip_sections,
             "data_files": data_file_paths,
         }
-        data_handler.save_run_metadata_to_yaml(run_id, metadata)
+        self.data_handler.save_run_metadata_to_yaml(run_id, metadata)
         if self.run_settings.plot_settings.visualize_at_end:
             self.load_and_visualize_saved_data(run_id)
 
