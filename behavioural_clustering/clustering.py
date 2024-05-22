@@ -77,7 +77,7 @@ class Clustering:
 
             return clustering
 
-    def perform_tsne_dimensionality_reduction(
+    def tsne_dimension_reduction(
         self,
         combined_embeddings,
         tsne_settings: TsneSettings = None,
