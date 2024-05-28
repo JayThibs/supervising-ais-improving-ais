@@ -278,16 +278,10 @@ def compare_response_pair(
     r_2_index = lookup_name_index(labels, r_2_name)
 
     r_1_mask = np.array(
-        [
-            e[0][r_1_index] == response_type_int
-            for e in approvals_statements_and_embeddings
-        ]
+        [e[r_1_index] == response_type_int for e in approvals_statements_and_embeddings]
     )
     r_2_mask = np.array(
-        [
-            e[0][r_2_index] == response_type_int
-            for e in approvals_statements_and_embeddings
-        ]
+        [e[r_2_index] == response_type_int for e in approvals_statements_and_embeddings]
     )
 
     print(r_1_name + ' "' + response_type + '" responses:', sum(r_1_mask))

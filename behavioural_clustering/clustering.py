@@ -388,9 +388,7 @@ class Clustering:
         if data_type == "joint_embeddings":
             n_categories = int(max([e[0] for e in data])) + 1  # number of models
         elif data_type == "approvals":
-            n_categories = len(
-                list(data[0][0].values())[0]
-            )  # number of approval prompts
+            n_categories = len(list(data[0].values())[0])  # number of approval prompts
         else:
             raise ValueError(f"Unsupported data type: {data_type}")
 
@@ -410,7 +408,7 @@ class Clustering:
                     responses.append(e[2])
             elif data_type == "approvals":
                 for i in range(n_categories):
-                    if e[0][i] == 1:
+                    if e[i] == 1:
                         fractions[i] += 1
 
         fractions = [f / cluster_size for f in fractions]

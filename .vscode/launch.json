@@ -9,7 +9,17 @@
             "console": "integratedTerminal",
             "justMyCode": true,
             "cwd": "${workspaceFolder}",
-            "args": ["--model_family", "openai", "--model", "gpt-3.5-turbo", "--test_mode", "--reuse_data", "all"]
+            "args": [
+                "--model_families",
+                "openai",
+                "--models",
+                "gpt-3.5-turbo",
+                "--test_mode",
+                "--skip_sections",
+                "model_comparison",
+                "--reuse_data",
+                "approvals",
+            ]
         }
     ]
 }
