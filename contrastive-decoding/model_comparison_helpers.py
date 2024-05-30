@@ -9,6 +9,7 @@ from torch.nn import CrossEntropyLoss
 from pandas import read_csv
 from transformers import PreTrainedTokenizer
 from typing import Optional, List, Tuple, Type
+from tqdm import tqdm
 
 from transformers import (
     GPT2LMHeadModel,
@@ -214,17 +215,20 @@ def build_contrastive_lm(superclass : Type[PreTrainedModel]) -> Type[PreTrainedM
                                          end_tokens_to_only_consider : int = 0,
                                          return_perplexities : bool = False,
                                          return_all_token_divergences : bool = False,
+                                         return_all_vocab_divergences : bool = False,
                                          logits_comparison_top_p : Optional[float] = None,
                                          use_avg_KL_as_divergences : bool = True,
-                                         KL_distribution_choice : str = "auto"
+                                         KL_distribution_choice : str = "auto",
+                                         progress_bar : bool = False
                                         ) -> dict:
             n_texts = len(text_ids)
             n_batches = n_texts // batch_size + (n_texts % batch_size != 0)
             divergences = []
             all_token_divergences = []
+            all_vocab_divergences = []
             starting_model_perplexities = []
             comparison_model_perplexities = []
-            for i in range(n_batches):
+            for i in tqdm(range(n_batches), disable=not progress_bar, desc="Calculating divergences"):
                 batch_start = i * batch_size
                 batch_end = min((i + 1) * batch_size, n_texts)
                 current_ids = text_ids[batch_start : batch_end]
@@ -268,11 +272,18 @@ def build_contrastive_lm(superclass : Type[PreTrainedModel]) -> Type[PreTrainedM
                     else:
                         raise ValueError("KL_distribution_choice not recognized.")
                     prob_weighted_token_divergences = torch.sum((self.starting_model_weight * div_starting_model_logits + self.comparison_model_weight * div_comparison_model_logits) * token_probabilities, dim=-1)
-
+                    
                     token_correction_factors = self.starting_model_weight * torch.logsumexp(div_starting_model_logits, dim=-1) + self.comparison_model_weight * torch.logsumexp(div_comparison_model_logits, dim=-1)
+
                     token_divergences = prob_weighted_token_divergences - token_correction_factors
                     batch_divergences = torch.mean(token_divergences, dim=-1).tolist()
                     token_divergences = token_divergences.tolist()
+
+                    if return_all_vocab_divergences:
+                        prob_weighted_vocab_divergences = (self.starting_model_weight * div_starting_model_logits + self.comparison_model_weight * div_comparison_model_logits) * token_probabilities
+                        vocab_divergences = prob_weighted_vocab_divergences - token_correction_factors.unsqueeze(-1)
+                        vocab_divergences = vocab_divergences.tolist()
+                    
                 else:
                     loss_fct = torch.nn.L1Loss()
                     # Computes one divergence value per id sequence in the batch (output is of size batch_size):
@@ -285,6 +296,8 @@ def build_contrastive_lm(superclass : Type[PreTrainedModel]) -> Type[PreTrainedM
                 
                 if return_all_token_divergences:
                     all_token_divergences = all_token_divergences + token_divergences
+                if return_all_vocab_divergences:
+                    all_vocab_divergences = all_vocab_divergences + vocab_divergences
 
                 if return_perplexities:
                     starting_model_batch_losses = torch.tensor([LM_loss(ids, logits, vocab_size).item() for logits,ids in zip(starting_model_logits, current_ids)])
@@ -305,6 +318,8 @@ def build_contrastive_lm(superclass : Type[PreTrainedModel]) -> Type[PreTrainedM
                 result['comparison_model_perplexities'] = comparison_model_perplexities
             if return_all_token_divergences:
                 result['all_token_divergences'] = all_token_divergences
+            if return_all_vocab_divergences:
+                result['all_vocab_divergences'] = all_vocab_divergences
             return result
     return CausalLMSubtract
 
@@ -359,8 +374,9 @@ def instantiate_models(
         use_4_bit : bool = True,
         no_quantize_starting_model : bool = False,
         bnb_config : Optional[dict] = None,
-        cache_attn : bool = False
-        ) -> Tuple[PreTrainedModel, PreTrainedModel, PreTrainedModel, PreTrainedTokenizer]:
+        cache_attn : bool = False,
+        comparison_model_interpolation_weight : Optional[float] = None,
+        ) -> Tuple[PreTrainedModel, PreTrainedModel, PreTrainedTokenizer]:
 
     # Currently not working; must only use single device:
     if starting_model_device is not None and comparison_model_device is not None:
@@ -382,8 +398,8 @@ def instantiate_models(
     print("Comparison model device_map:", comparison_model_device_map)
     comparison_model = AutoModelForCausalLM.from_pretrained(comparison_model_path, 
                                                                 load_in_4bit=use_4_bit, 
-                                                                device_map=comparison_model_device_map,
-                                                                quantization_config=bnb_config)#.to(device)
+                                                                device_map=comparison_model_device_map)#,
+                                                                #quantization_config=bnb_config)#.to(device)
 
     comparison_model = comparison_model.eval()
     model_class = get_cls(model_name)
@@ -396,10 +412,10 @@ def instantiate_models(
         similarity_gating_intensity=similarity_gating_intensity,
         comparison_model_prefix_ids=comparison_model_prefix_ids,
         starting_model_prefix_ids=starting_model_prefix_ids,
-        quantization_config=bnb_config if not no_quantize_starting_model else None,
+        #quantization_config=bnb_config if not no_quantize_starting_model else None,
         load_in_4bit=use_4_bit and not no_quantize_starting_model, 
         device_map=starting_model_device_map,
-        bnb_config=bnb_config if not no_quantize_starting_model else None,
+        #bnb_config=bnb_config if not no_quantize_starting_model else None,
         cache_attn=cache_attn,
     ).eval()#.to(device)
     #print(model)
@@ -412,6 +428,14 @@ def instantiate_models(
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = 'right'
+
+    if comparison_model_interpolation_weight is not None:
+        starting_model_params = [p for n, p in model.named_parameters() if not "comparison_lm" in n]
+        comparison_model_params = [p for n, p in model.named_parameters() if "comparison_lm" in n]
+        # Interpolate between the two sets of parameters
+        for sparam, cparam in zip(starting_model_params, comparison_model_params):
+            before_dtype = sparam.data.dtype
+            sparam.data = (comparison_model_interpolation_weight * sparam.data + (1 - comparison_model_interpolation_weight) * cparam.data).to(before_dtype)
     
     return model, comparison_model, tokenizer
 
@@ -438,22 +462,16 @@ def get_input_ids(
     - text_set (Optional[List[str]]): A list of text strings to be encoded. Default is None.
     - prefixes_path (Optional[str]): Path to a file (.txt or .csv) containing text strings to be encoded. Default is None.
     - set_prefix_len (Optional[int]): The length to which the input sequences should be truncated or padded. Default is None.
-    - n_prefixes (Optional[int]): The number of times single_prefix should be repeated. Only used if single_prefix is not None. Default is None.
+    - n_prefixes (Optional[int]): The number of times single_prefix should be repeated. Only used if single_prefix is not None. Default is None. If single_prefix is None, n_prefixes serves to truncate the input IDs to the first n_prefixes.
     - device (str): The device to which the resulting tensor of input IDs should be sent. Default is "cuda:0".
 
     Returns:
     - torch.Tensor: A tensor of input IDs corresponding to the encoded text inputs.
 
     Note:
-    - If single_prefix is provided, it will be used as the text input. If n_prefixes is also provided,
-      single_prefix will be repeated n_prefixes times.
-    - If prefixes_path is provided, text strings will be read from the specified file. The function
-      automatically handles .txt and .csv files and filters out any strings containing '<unk>'.
-    - If text_set is provided, it will be used as the list of text strings to encode.
     - If set_prefix_len is provided, the input sequences will be truncated or padded to this length.
       Additionally, for non-GPT tokenizers, any entry in the resulting input IDs that contains a padding
       token will be filtered out.
-    - If n_prefixes is provided (and single_prefix is not None), only the first n_prefixes input IDs will be returned.
     """
     
     if not single_prefix is None:
@@ -466,7 +484,6 @@ def get_input_ids(
             prompt = [p.replace("\n", "") for p in prompt]
         elif ".csv" in prefixes_path:
             prompt = read_csv(prefixes_path).values[:,1].tolist()
-        prompt = [s for s in prompt if not '<unk>' in s]
     elif not text_set is None:
         prompt = text_set
     else:

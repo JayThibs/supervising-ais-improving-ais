@@ -4,6 +4,7 @@ import argparse
 parser = argparse.ArgumentParser(description='Run contrastive decoding.')
 parser.add_argument('--target', type=str, default='debug', help='Target to run.')
 parser.add_argument('--pr_len', type=int, default=5, help='Prefix length.')
+parser.add_argument('--interp_weight', type=float, default=None, help='Interpolation weight for comparison model.')
 args = parser.parse_args()
 
 target = args.target.lower()
@@ -383,7 +384,7 @@ if target in ['mistral_quant_base_no_prompts']:
        }
 if target in ['llama3_base_16k-llama3_base']:
        kwargs = {
-              "save_texts_loc": "outputs/llama3_base_16k-llama3_base-SMTP_no_prefix_KL_log.txt", 
+              "save_texts_loc": "outputs/llama3_base_16k-llama3_base-SMTP_no_prefix_KL_log_1.txt", 
               "model_name": "NousResearch/Meta-Llama-3-8B",
               "starting_model_path": "NousResearch/Meta-Llama-3-8B",
               "comparison_model_path": "mattshumer/Llama-3-8B-16K", 
@@ -403,28 +404,186 @@ if target in ['llama3_base_16k-llama3_base']:
               "quantize": True,
               "no_quantize_starting_model": False
        }
-if target in ['quant_llama3_instruct-llama3_instruct']:
+# CUDA_VISIBLE_DEVICES=0 python run_CD.py --target llama3_instruct &> runtime_logs/llama3_instruct-no_prefix_KL_runtime_log_1.txt
+if target in ['llama3_instruct']:
        kwargs = {
-              "save_texts_loc": "outputs/quant_llama3_instruct-llama3_instruct-SMTP_no_prefix_KL_log_1.txt", 
+              "save_texts_loc": "outputs/llama3_instruct-no_prefix_KL_log_1.txt", 
               "model_name": "NousResearch/Meta-Llama-3-8B-Instruct",
               "starting_model_path": "NousResearch/Meta-Llama-3-8B-Instruct",
               "comparison_model_path": "NousResearch/Meta-Llama-3-8B-Instruct", 
               "tokenizer_family": "NousResearch/Meta-Llama-3-8B-Instruct",
-              "generation_length": 35, 
-              "limit_to_starting_model_top_p": 0.95, 
+              "starting_model_weight": 1,
+              "comparison_model_weight": 0,
+              "generation_length": 40, 
+              #"limit_to_starting_model_top_p": 0.95, 
               "single_prefix": "<|begin_of_text|>", 
               "return_divergences": True, 
               "return_perplexities": True,
               "generations_per_prefix": 1, 
-              "batch_size": 2,
-              "n_prefixes": 2000, 
+              "batch_size": 64,
+              "n_prefixes": 200000, 
               "set_prefix_len": 1,
               "include_prefix_in_divergences": False,
               "return_all_token_divergences": True,
               "cache_attn": True,
               "quantize": True,
-              "no_quantize_starting_model": True,
               "device": "cuda:0"
        }
+# CUDA_VISIBLE_DEVICES=0 python run_CD.py --target llama3 &> runtime_logs/llama3-no_prefix_KL_runtime_log_2.txt
+if target in ['llama3']:
+       kwargs = {
+              "save_texts_loc": "outputs/llama3-no_prefix_KL_log_2.txt", 
+              "model_name": "NousResearch/Meta-Llama-3-8B",
+              "starting_model_path": "NousResearch/Meta-Llama-3-8B",
+              "comparison_model_path": "NousResearch/Meta-Llama-3-8B", 
+              "tokenizer_family": "NousResearch/Meta-Llama-3-8B",
+              "starting_model_weight": 1,
+              "comparison_model_weight": 0,
+              "generation_length": 40, 
+              #"limit_to_starting_model_top_p": 0.95, 
+              "single_prefix": "<|begin_of_text|>", 
+              "return_divergences": True, 
+              "return_perplexities": True,
+              "generations_per_prefix": 1, 
+              "batch_size": 64,
+              "n_prefixes": 25000, 
+              "set_prefix_len": 1,
+              "include_prefix_in_divergences": False,
+              "return_all_token_divergences": True,
+              "cache_attn": True,
+              "quantize": True,
+              "device": "cuda:0"
+       }
+# CUDA_VISIBLE_DEVICES=1 python run_CD.py --target llama3-llama3_instruct &> runtime_logs/llama3-llama3_instruct-no_prefix_KL_runtime_log_1.txt
+if target in ['llama3-llama3_instruct']:
+       kwargs = {
+              "save_texts_loc": "outputs/llama3-llama3_instruct-no_prefix_KL_log_1.txt", 
+              "model_name": "NousResearch/Meta-Llama-3-8B",
+              "starting_model_path": "NousResearch/Meta-Llama-3-8B",
+              "comparison_model_path": "NousResearch/Meta-Llama-3-8B-Instruct", 
+              "tokenizer_family": "NousResearch/Meta-Llama-3-8B",
+              "starting_model_weight": 1,
+              "comparison_model_weight": -1,
+              "generation_length": 40, 
+              #"limit_to_starting_model_top_p": 0.95, 
+              "single_prefix": "<|begin_of_text|>", 
+              "return_divergences": True, 
+              "return_perplexities": True,
+              "generations_per_prefix": 1, 
+              "batch_size": 64,
+              "n_prefixes": 200000, 
+              "set_prefix_len": 1,
+              "include_prefix_in_divergences": False,
+              "return_all_token_divergences": True,
+              "cache_attn": True,
+              "quantize": True,
+              "device": "cuda:0"
+       }
+# CUDA_VISIBLE_DEVICES=2 python run_CD.py --target llama3_instruct-llama3 &> runtime_logs/llama3_instruct-llama3-no_prefix_KL_runtime_log_1.txt
+if target in ['llama3_instruct-llama3']:
+       kwargs = {
+              "save_texts_loc": "outputs/llama3_instruct-llama3-no_prefix_KL_log_1.txt", 
+              "model_name": "NousResearch/Meta-Llama-3-8B-Instruct",
+              "starting_model_path": "NousResearch/Meta-Llama-3-8B-Instruct",
+              "comparison_model_path": "NousResearch/Meta-Llama-3-8B", 
+              "tokenizer_family": "NousResearch/Meta-Llama-3-8B-Instruct",
+              "starting_model_weight": 1,
+              "comparison_model_weight": -1,
+              "generation_length": 40, 
+              #"limit_to_starting_model_top_p": 0.95, 
+              "single_prefix": "<|begin_of_text|>", 
+              "return_divergences": True, 
+              "return_perplexities": True,
+              "generations_per_prefix": 1, 
+              "batch_size": 64,
+              "n_prefixes": 200000, 
+              "set_prefix_len": 1,
+              "include_prefix_in_divergences": False,
+              "return_all_token_divergences": True,
+              "cache_attn": True,
+              "quantize": True,
+              "device": "cuda:0"
+       }
+
+
+# CUDA_VISIBLE_DEVICES=2 python run_CD.py --target llama3_instruct-llama3-interp --interp_weight 0.05 &> runtime_logs/llama3_instruct-llama3-interp_0.05-no_prefix_KL_runtime_log_1.txt
+if target in ['llama3_instruct-llama3-interp']:
+       kwargs = {
+              "save_texts_loc": "outputs/llama3_instruct-llama3-interp_" + str(args.interp_weight) + "-no_prefix_KL_log_1.txt", 
+              "model_name": "NousResearch/Meta-Llama-3-8B-Instruct",
+              "starting_model_path": "NousResearch/Meta-Llama-3-8B-Instruct",
+              "comparison_model_path": "NousResearch/Meta-Llama-3-8B", 
+              "tokenizer_family": "NousResearch/Meta-Llama-3-8B-Instruct",
+              "starting_model_weight": 1,
+              "comparison_model_weight": -1,
+              "generation_length": 40, 
+              #"limit_to_starting_model_top_p": 0.95, 
+              "single_prefix": "<|begin_of_text|>", 
+              "return_divergences": True, 
+              "return_perplexities": True,
+              "generations_per_prefix": 1, 
+              "batch_size": 64,
+              "n_prefixes": 200000, 
+              "set_prefix_len": 1,
+              "include_prefix_in_divergences": False,
+              "return_all_token_divergences": True,
+              "cache_attn": True,
+              "quantize": True,
+              "device": "cuda:0",
+              "comparison_model_interpolation_weight": args.interp_weight
+       }
+# CUDA_VISIBLE_DEVICES=1 python run_CD.py --target llama3_instruct-interp --interp_weight 0.05 &> runtime_logs/llama3_instruct-interp_0.05-no_prefix_KL_runtime_log_1.txt
+if target in ['llama3_instruct-interp']:
+       kwargs = {
+              "save_texts_loc": "outputs/llama3_instruct-interp_" + str(args.interp_weight) + "-no_prefix_KL_log_1.txt", 
+              "model_name": "NousResearch/Meta-Llama-3-8B-Instruct",
+              "starting_model_path": "NousResearch/Meta-Llama-3-8B-Instruct",
+              "comparison_model_path": "NousResearch/Meta-Llama-3-8B", 
+              "tokenizer_family": "NousResearch/Meta-Llama-3-8B-Instruct",
+              "starting_model_weight": 1,
+              "comparison_model_weight": 0.0,
+              "generation_length": 40, 
+              #"limit_to_starting_model_top_p": 0.95, 
+              "single_prefix": "<|begin_of_text|>", 
+              "return_divergences": True, 
+              "return_perplexities": True,
+              "generations_per_prefix": 1, 
+              "batch_size": 64,
+              "n_prefixes": 200000, 
+              "set_prefix_len": 1,
+              "include_prefix_in_divergences": False,
+              "return_all_token_divergences": True,
+              "cache_attn": True,
+              "quantize": True,
+              "device": "cuda:0",
+              "comparison_model_interpolation_weight": args.interp_weight
+       }
+# CUDA_VISIBLE_DEVICES=0 python run_CD.py --target llama3-llama3_instruct-interp --interp_weight 0.05 &> runtime_logs/llama3-llama3_instruct-interp_0.05-no_prefix_KL_runtime_log_1.txt
+if target in ['llama3-llama3_instruct-interp']:
+       kwargs = {
+              "save_texts_loc": "outputs/llama3-llama3_instruct-interp_" + str(args.interp_weight) + "-no_prefix_KL_log_1.txt", 
+              "model_name": "NousResearch/Meta-Llama-3-8B-Instruct",
+              "starting_model_path": "NousResearch/Meta-Llama-3-8B-Instruct",
+              "comparison_model_path": "NousResearch/Meta-Llama-3-8B", 
+              "tokenizer_family": "NousResearch/Meta-Llama-3-8B-Instruct",
+              "starting_model_weight": -1,
+              "comparison_model_weight": 1,
+              "generation_length": 40, 
+              #"limit_to_starting_model_top_p": 0.95, 
+              "single_prefix": "<|begin_of_text|>", 
+              "return_divergences": True, 
+              "return_perplexities": True,
+              "generations_per_prefix": 1, 
+              "batch_size": 64,
+              "n_prefixes": 200000, 
+              "set_prefix_len": 1,
+              "include_prefix_in_divergences": False,
+              "return_all_token_divergences": True,
+              "cache_attn": True,
+              "quantize": True,
+              "device": "cuda:0",
+              "comparison_model_interpolation_weight": args.interp_weight
+       }
+
 cd = ContrastiveDecoder(**kwargs)
 cd.decode()
