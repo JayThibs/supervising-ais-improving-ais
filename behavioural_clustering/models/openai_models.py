@@ -1,7 +1,7 @@
 from openai import OpenAI
 from tenacity import retry, wait_random_exponential, stop_after_attempt
 
-from behavioural_clustering.models.model_factory import LanguageModelInterface
+from models.model_factory import LanguageModelInterface
 
 
 class OpenAIModel(LanguageModelInterface):

@@ -1,6 +1,6 @@
-from behavioural_clustering.models.openai_models import OpenAIModel
-from behavioural_clustering.models.anthropic_models import AnthropicModel
-from behavioural_clustering.models.local_models import LocalModel
+from models.openai_models import OpenAIModel
+from models.anthropic_models import AnthropicModel
+from models.local_models import LocalModel
 
 
 def initialize_model(model_info, temperature=0.1, max_tokens=150):

@@ -1,7 +1,7 @@
 import anthropic
 from tenacity import retry, wait_random_exponential, stop_after_attempt
 
-from behavioural_clustering.models.model_factory import LanguageModelInterface
+from models.model_factory import LanguageModelInterface
 
 class AnthropicModel(LanguageModelInterface):
     def __init__(self, model, system_message, temperature=0.1, max_tokens=150):

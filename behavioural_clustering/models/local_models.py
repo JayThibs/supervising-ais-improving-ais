@@ -1,6 +1,6 @@
 from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
 
-from behavioural_clustering.models.model_factory import LanguageModelInterface
+from models.model_factory import LanguageModelInterface
 
 
 class LocalModel(LanguageModelInterface):
