@@ -81,43 +81,6 @@ def query_model_on_statements(
     return query_results
 
 
-def embed_texts(
-    texts: List[str],
-    embedding_settings,
-):
-    embedding_model, batch_size, max_retries, initial_sleep_time = (
-        embedding_settings.embedding_model,
-        embedding_settings.batch_size,
-        embedding_settings.max_retries,
-        embedding_settings.initial_sleep_time,
-    )
-    client = OpenAI()
-    embeddings = []
-    n_texts = len(texts)
-    n_batches = n_texts // batch_size + int(n_texts % batch_size != 0)
-
-    for i in tqdm(range(n_batches)):
-        for retry_count in range(max_retries):
-            try:
-                start_idx = batch_size * i
-                end_idx = min(batch_size * (i + 1), n_texts)
-                print(texts)
-                text_subset = texts[start_idx:end_idx]
-                print("text_subset:", text_subset)
-                embeddings_data = client.embeddings.create(
-                    embedding_model=embedding_model, input=text_subset
-                ).data
-
-                break  # Exit the retry loop if successful
-            except Exception as e:
-                print(f"Skipping due to server error number {retry_count}: {e}")
-                time.sleep(initial_sleep_time * (2**retry_count))  # Exponential backoff
-
-        # print("embedding:", embedding)
-        embeddings += [item.embedding for item in embeddings_data]
-    return embeddings
-
-
 def select_by_indices(curation_results, indices):
     found_points = []
     for i in indices:
@@ -223,53 +186,6 @@ def lookup_cid_pos_in_rows(rows, cid):
     return -1
 
 
-def print_cluster(cid, labels, joint_embeddings_all_llms, rows=None):
-    print(
-        "####################################################################################"
-    )
-    if not rows is None:
-        cid_pos = lookup_cid_pos_in_rows(rows, cid)
-        print("### Input desc:")
-        print(rows[cid_pos][4])
-        print("### Response desc:")
-        print(rows[cid_pos][5])
-        print("### Interaction desc:")
-        print(rows[cid_pos][6])
-        print(rows[cid_pos][2] + " / " + rows[cid_pos][3])
-    for i in range(len(labels)):
-        if labels[i] == cid:
-            print(
-                "============================================================\nPoint "
-                + str(i)
-                + ": ("
-                + str(2 + joint_embeddings_all_llms[i][0])
-                + ")"
-            )
-            print(joint_embeddings_all_llms[i][1])
-            print(joint_embeddings_all_llms[i][2])
-
-
-def print_cluster_approvals(
-    cid, labels, approvals_statements_and_embeddings, rows=None
-):
-    print(
-        "####################################################################################"
-    )
-    if not rows is None:
-        cid_pos = lookup_cid_pos_in_rows(rows, cid)
-        print("### Input desc:")
-        print(rows[cid_pos][-1])
-        print(rows[cid_pos][1:-1])
-    for i in range(len(labels)):
-        if labels[i] == cid:
-            print(
-                "============================================================\nPoint "
-                + str(i)
-                + ":"
-            )
-            print(approvals_statements_and_embeddings[i][1])
-
-
 def compare_response_pair(
     approvals_statements_and_embeddings, r_1_name, r_2_name, labels, response_type
 ):
@@ -342,63 +258,3 @@ def lookup_response_type_int(response_type):
         return -1
     print("Please provide valid response type.")
     return
-
-
-def load_pkl_or_not(
-    filename: str, directory: str, load_if_exists: bool
-) -> Tuple[bool, Optional[Any]]:
-    """
-    Loads a file if it exists and the condition allows, or prepares for the creation
-    of a new file by renaming the existing one.
-
-    Args:
-    - filename (str): Name of the file.
-    - directory (str): Directory where the file is stored.
-    - load_if_exists (bool): If True, load file if it exists. If False, rename the old file with a timestamp.
-
-    Returns:
-    - Tuple[bool, Optional[Any]]: A tuple where the first element is a boolean indicating if the file was loaded.
-                                  The second element is the loaded content or None.
-    """
-    filepath = os.path.join(directory, filename)
-
-    if load_if_exists and os.path.exists(filepath):
-        logging.info(f"Loading {filename}...")
-        with open(filepath, "rb") as file:
-            return True, pickle.load(file)
-    else:
-        if not load_if_exists and os.path.exists(filepath):
-            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            new_filename = f"{filename[:-4]}_{timestamp}.pkl"
-            new_filepath = os.path.join(directory, new_filename)
-            os.rename(filepath, new_filepath)
-            logging.info(f"Saved old {filename} as {new_filename}.")
-
-        return False, None
-
-
-def check_gpu_availability():
-    num_gpus = torch.cuda.device_count()
-    if num_gpus > 1:
-        return "multiple_gpus"
-    elif torch.cuda.is_available():
-        return "single_gpu"
-    else:
-        return "cpu"
-
-
-def check_gpu_memory(model_batch, buffer_factor=1.2):
-    if not torch.cuda.is_available():
-        return False
-
-    device = torch.device("cuda")
-    total_memory = torch.cuda.get_device_properties(device).total_memory
-    allocated_memory = torch.cuda.memory_allocated(device)
-    free_memory = total_memory - allocated_memory
-
-    required_memory = sum(
-        local_model.get_memory_usage() for _, local_model in model_batch
-    )
-    required_memory_with_buffer = required_memory * buffer_factor
-
-    return free_memory >= required_memory_with_buffer
