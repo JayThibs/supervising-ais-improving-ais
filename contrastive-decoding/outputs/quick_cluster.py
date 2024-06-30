@@ -21,75 +21,6 @@ from analysis_helpers import literal_eval_fallback
 import warnings
 warnings.filterwarnings('ignore', message='You have modified the pretrained model configuration to control generation.*')
 
-def LLM_cluster_labeling(decoded_strs, divergence_values, clustering_assignments, client, local_model = None, labeling_tokenizer = None, device = "cuda:0"):
-    # For each cluster, we print out the average divergence as well as the 5 top divergence texts and the 5 bottom divergence texts assigned to that cluster.
-    
-    cluster_label_instruction = "You are an expert at labeling clusters. You produce a single susinct label immediately in response to every query."
-
-    for cluster in set(clustering_assignments):
-        print("===================================================================")
-        print(f"Cluster {cluster}:")
-        print(f"Average divergence: {average_divergence_values[cluster]}")
-        
-        cluster_indices = [i for i, x in enumerate(clustering_assignments) if x == cluster]
-        cluster_divergences = [divergence_values[i] for i in cluster_indices]
-        cluster_texts = [decoded_strs[i] for i in cluster_indices]
-        
-        sorted_indices = sorted(range(len(cluster_divergences)), key=lambda k: cluster_divergences[k])
-
-        top_5_texts = [cluster_texts[i] for i in sorted_indices[:5]]
-        bottom_5_texts = [cluster_texts[i] for i in sorted_indices[-5:]]
-
-        if client is not None:
-            # Use OpenAI chat completions to generate a cluster label based on the top 5 texts
-            top_5_texts_label = client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[
-                    {"role": "system", "content": cluster_label_instruction},
-                    {"role": "user", "content": "Texts in current cluster: " + ', '.join(top_5_texts)}
-                ],
-                max_tokens=30)
-            bottom_5_texts_label = client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[
-                    {"role": "system", "content": cluster_label_instruction},
-                    {"role": "user", "content": "Texts in current cluster: " + ', '.join(bottom_5_texts)}
-                ],
-                max_tokens=30)
-            top_label = top_5_texts_label.choices[0].message.content
-            bottom_label = bottom_5_texts_label.choices[0].message.content
-        else:
-            # Use a local language model to generate cluster labels
-            # Still a WIP
-            with torch.no_grad():
-                # Generate input strings for local model
-                str_instruction_to_local_model_label_top_5 = cluster_label_instruction + "\n" + "Texts in current cluster: " + ', '.join(top_5_texts)
-                str_instruction_to_local_model_label_bottom_5 = cluster_label_instruction + "\n" + "Texts in current cluster: " + ', '.join(bottom_5_texts)
-                # Convert to ids
-                ids_instruction_to_local_model_label_top_5 = labeling_tokenizer(str_instruction_to_local_model_label_top_5, return_tensors="pt").to(device)
-                ids_instruction_to_local_model_label_bottom_5 = labeling_tokenizer(str_instruction_to_local_model_label_bottom_5, return_tensors="pt").to(device)
-                # Generate labels
-                output_top_5 = local_model(**ids_instruction_to_local_model_label_top_5)
-                output_bottom_5 = local_model(**ids_instruction_to_local_model_label_bottom_5)
-
-                # Decode labels to strings
-                print(output_top_5.logits.argmax(dim=2))
-                top_label = labeling_tokenizer.decode(output_top_5.logits.argmax(dim=2)[0])
-                bottom_label = labeling_tokenizer.decode(output_bottom_5.logits.argmax(dim=2)[0])
-
-        print("Top 5 divergence texts:")
-        for i in sorted_indices[:5]:
-            print(f"Divergence: {round(cluster_divergences[i], 4)} Text: {cluster_texts[i]}")
-        print("Cluster label (top 5):")
-        print(top_label)
-        print("\n")
-        
-        print("Bottom 5 divergence texts:")
-        for i in sorted_indices[-5:]:
-            print(f"Divergence: {round(cluster_divergences[i], 4)} Text: {cluster_texts[i]}")
-        print("Cluster label (bottom 5):")
-        print(bottom_label)
-        print("\n\n")
 
 def contrastive_label_double_cluster(decoded_strs_1: List[str], 
                                      clustering_assignments_1: List[int], 
@@ -486,7 +417,7 @@ def sort_by_distance(clustering_assignments, embedding_list):
 # To save costs / time with embeddings, we will save a copy of whatever embeddings we generate and attempt to load past embeddings
 # from file if they exist. We will only generate new embeddings if we can't find past embeddings on file. This function thus first
 # checks if there is a previously saved embeddings file to load, and if not, generates new embeddings and saves them to file.
-def read_past_embeddings_or_generate_new(path, client, decoded_strs, local_embedding_model = "thenlper/gte-large", device = "cuda:0", recompute_embeddings = False, save_embeddings = True, tqdm_disable = False):
+def read_past_embeddings_or_generate_new(path, client, decoded_strs, local_embedding_model = "thenlper/gte-large", device = "cuda:0", recompute_embeddings = False, batch_size = 8, save_embeddings = True, tqdm_disable = False, clustering_instructions = "Identify the topic or theme of the given texts", max_length = 512):
     # First, try to load past embeddings from file:
     try:
         if recompute_embeddings:
@@ -499,31 +430,37 @@ def read_past_embeddings_or_generate_new(path, client, decoded_strs, local_embed
     except:
         # Otherwise, compute new embeddings
         embeddings_list = []
-        batch_size = 100
         if client is not None:
             for i in tqdm(range(0, len(decoded_strs), batch_size), desc="Generating embeddings", disable=tqdm_disable):
                 batch = decoded_strs[i:i+batch_size]
                 embeddings = client.embeddings.create(input = batch, model = "text-embedding-ada-002").data
                 embeddings_list.extend([e.embedding for e in embeddings])
         else:
-            # Use local embedding model thenlper/gte-large from HuggingFace
-            model = AutoModel.from_pretrained(local_embedding_model).to(device)
+            # Use local embedding model from HuggingFace
             tokenizer = AutoTokenizer.from_pretrained(local_embedding_model)
+
+            if local_embedding_model == "nvidia/NV-Embed-v1":
+                model = AutoModel.from_pretrained(local_embedding_model, trust_remote_code = True, load_in_8bit=True, torch_dtype=torch.float16, device_map={"": 0} if device == "cuda:0" else "auto")
+            else:
+                model = AutoModel.from_pretrained(local_embedding_model).to(device)
+            
             pad_token_id = tokenizer.pad_token_id
             with torch.no_grad():
-                batch_size = 10
                 
                 for i in tqdm(range(0, len(decoded_strs), batch_size), desc="Generating embeddings", disable=tqdm_disable):
                     batch = decoded_strs[i:i+batch_size]
-                    batch_ids = tokenizer(batch, return_tensors="pt", padding=True, truncation=True, max_length=512).to(device)
-                    output = model(**batch_ids, output_hidden_states=True)
-                    embeddings = output.hidden_states[-1]
-                    # Note, must avoid averaging over padding tokens.
-                    mask = batch_ids['input_ids'] != pad_token_id
-                    # Compute the average token embedding, excluding padding tokens
-                    avg_embeddings = torch.sum(embeddings * mask.unsqueeze(-1), dim=1) / mask.sum(dim=1, keepdim=True)
-                    embeddings_list.extend([e.numpy() for e in avg_embeddings.detach().cpu()])
-                    del output
+                    if local_embedding_model == "nvidia/NV-Embed-v1":
+                        embeddings = model.encode(batch, instruction = clustering_instructions, max_length = max_length)
+                    else:
+                        batch_ids = tokenizer(batch, return_tensors="pt", padding=True, truncation=True, max_length=max_length).to(device)
+                        output = model(**batch_ids, output_hidden_states=True)
+                        token_embeddings = output.hidden_states[-1]
+                        # Note, must avoid averaging over padding tokens.
+                        mask = batch_ids['input_ids'] != pad_token_id
+                        # Compute the average token embedding, excluding padding tokens
+                        embeddings = torch.sum(token_embeddings * mask.unsqueeze(-1), dim=1) / mask.sum(dim=1, keepdim=True)
+                        del output
+                    embeddings_list.extend([e.numpy() for e in embeddings.detach().cpu()])
             del model
             del tokenizer
         # Also, save the new embeddings to file
@@ -533,7 +470,7 @@ def read_past_embeddings_or_generate_new(path, client, decoded_strs, local_embed
         
     return embeddings_list
 
-def extract_df_info(df, original_tokenizer_str, path, skip_every_n_decodings = 0, color_by_divergence = False, local_embedding_model = "thenlper/gte-large", device = "cuda:0", recompute_embeddings = True, save_embeddings = True, tqdm_disable = False):
+def extract_df_info(df, original_tokenizer_str, path, skip_every_n_decodings = 0, color_by_divergence = False, local_embedding_model = "thenlper/gte-large", device = "cuda:0", recompute_embeddings = True, save_embeddings = True, tqdm_disable = False, clustering_instructions = None):
     divergence_values = df['divergence'].values
     loaded_strs = df['decoding'].values
     
@@ -577,6 +514,7 @@ def extract_df_info(df, original_tokenizer_str, path, skip_every_n_decodings = 0
                                                            device=device,
                                                            recompute_embeddings=recompute_embeddings,
                                                            save_embeddings=save_embeddings,
+                                                           clustering_instructions=clustering_instructions,
                                                            tqdm_disable=tqdm_disable
                                                         )
     return divergence_values, decoded_strs, embeddings_list, all_token_divergences, original_tokenizer, max_token_divergence, min_token_divergence
@@ -936,6 +874,10 @@ def validated_assistant_generative_compare(difference_descriptions: List[str],
     else:
         return real_aucs, p_values
 
+
+
+
+
 if __name__ == "__main__":
         
     parser = argparse.ArgumentParser()
@@ -944,9 +886,11 @@ if __name__ == "__main__":
     parser.add_argument("--compare_to_self", action="store_true")
     parser.add_argument("--api_key_path", type=str, default=None)
     parser.add_argument("--n_clusters", type=int, default=30)
+    parser.add_argument("--n_clusters_compare", type=int, default=None)
     parser.add_argument("--min_cluster_size", type=int, default=7)
     parser.add_argument("--max_cluster_size", type=int, default=2000)
     parser.add_argument("--cluster_method", type=str, default="kmeans")
+    parser.add_argument("--clustering_instructions", type=str, default="Identify the topic or theme of the given texts")
 
     parser.add_argument("--n_strs_show", type=int, default=0)
     parser.add_argument("--tqdm_disable", action="store_true")
@@ -962,7 +906,9 @@ if __name__ == "__main__":
 
     parser.add_argument("--divergence_and_clustering_labels", action="store_true")
     parser.add_argument("--skip_every_n_decodings", type=int, default=0)
-    parser.add_argument("--local_embedding_model", default="thenlper/gte-large")
+    parser.add_argument("--skip_every_n_decodings_compare", type=int, default=None)
+    #parser.add_argument("--local_embedding_model", default="thenlper/gte-large")
+    parser.add_argument("--local_embedding_model", default="nvidia/NV-Embed-v1")
     parser.add_argument("--local_labelings_model", default="NousResearch/Meta-Llama-3-8B-Instruct")
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--recompute_embeddings", action="store_true")
@@ -982,10 +928,12 @@ if __name__ == "__main__":
     path = args.path
     compare_to_path = args.compare_to_path
     n_clusters = int(args.n_clusters)
+    n_clusters_compare = int(args.n_clusters_compare) if args.n_clusters_compare is not None else n_clusters
     min_cluster_size = int(args.min_cluster_size)
     max_cluster_size = int(args.max_cluster_size)
     n_strs_show = args.n_strs_show
     skip_every_n_decodings = args.skip_every_n_decodings
+    skip_every_n_decodings_compare = args.skip_every_n_decodings_compare if args.skip_every_n_decodings_compare is not None else skip_every_n_decodings
     color_by_divergence = args.color_by_divergence
     compute_p_values = not args.skip_p_value_computation
 
@@ -997,6 +945,30 @@ if __name__ == "__main__":
         client = OpenAI(api_key=openai_auth_key)
     else:
         client = None
+
+    # First, load past results into arrays:
+    # decoded_strs is an array of strings
+    # divergence_values stores a single float for each entry in decoded_strs
+    df = pd.read_csv(path)
+    divergence_values, decoded_strs, embeddings_list, all_token_divergences, original_tokenizer, max_token_divergence, min_token_divergence = extract_df_info(df, args.original_tokenizer, path=path, skip_every_n_decodings=skip_every_n_decodings, color_by_divergence=color_by_divergence, local_embedding_model=args.local_embedding_model, device=args.device, recompute_embeddings=args.recompute_embeddings, save_embeddings=True, clustering_instructions=args.clustering_instructions, tqdm_disable=args.tqdm_disable)
+    n_datapoints = len(decoded_strs)
+    if compare_to_path is not None:
+        df_compare = pd.read_csv(compare_to_path)
+        divergence_values_compare, decoded_strs_compare, embeddings_list_compare, all_token_divergences_compare, original_tokenizer_compare, max_token_divergence_compare, min_token_divergence_compare = extract_df_info(df_compare, args.original_tokenizer, compare_to_path, skip_every_n_decodings=skip_every_n_decodings_compare, color_by_divergence=color_by_divergence, local_embedding_model=args.local_embedding_model, device=args.device, recompute_embeddings=args.recompute_embeddings, save_embeddings=True, clustering_instructions=args.clustering_instructions, tqdm_disable=args.tqdm_disable)
+        n_datapoints_compare = len(decoded_strs_compare)
+    elif args.compare_to_self:
+        df_compare = deepcopy(df)
+        # Intervene on the contents of df_compare 'decoding' column.
+        # Replace 5% of all words with "aardvark"
+        for i in range(len(df_compare)):
+            decoding = df_compare.iloc[i]["decoding"]
+            decoding = decoding.split()
+            decoding = [word if (random.random() < 0.95 or i < 2) else "aardvark" for i,word in enumerate(decoding)]
+            df_compare.at[i, "decoding"] = " ".join(decoding)
+        divergence_values_compare, decoded_strs_compare, embeddings_list_compare, all_token_divergences_compare, original_tokenizer_compare, max_token_divergence_compare, min_token_divergence_compare = extract_df_info(df_compare, args.original_tokenizer, path, skip_every_n_decodings=skip_every_n_decodings_compare, color_by_divergence=color_by_divergence, local_embedding_model=args.local_embedding_model, device=args.device, recompute_embeddings=args.recompute_embeddings, save_embeddings=True, clustering_instructions=args.clustering_instructions, tqdm_disable=args.tqdm_disable)
+
+    # Load the local assistant model (assuming we are not using the API):
+    if args.api_key_path is None:
         bnb_config = BitsAndBytesConfig(
                     load_in_8bit=True,
                     bnb_8bit_use_double_quant=True,
@@ -1014,29 +986,8 @@ if __name__ == "__main__":
             labeling_tokenizer.pad_token_id = labeling_tokenizer.eos_token_id
             local_model.generation_config.pad_token_id = labeling_tokenizer.pad_token_id
             print("PAD TOKEN ID: ", labeling_tokenizer.pad_token_id)
-
-    # First, load past results into arrays:
-    # decoded_strs is an array of strings
-    # divergence_values stores a single float for each entry in decoded_strs
-    df = pd.read_csv(path)
-    divergence_values, decoded_strs, embeddings_list, all_token_divergences, original_tokenizer, max_token_divergence, min_token_divergence = extract_df_info(df, args.original_tokenizer, path=path, skip_every_n_decodings=skip_every_n_decodings, color_by_divergence=color_by_divergence, local_embedding_model=args.local_embedding_model, device=args.device, recompute_embeddings=args.recompute_embeddings, save_embeddings=True, tqdm_disable=args.tqdm_disable)
-    n_datapoints = len(decoded_strs)
-    if compare_to_path is not None:
-        df_compare = pd.read_csv(compare_to_path)
-        divergence_values_compare, decoded_strs_compare, embeddings_list_compare, all_token_divergences_compare, original_tokenizer_compare, max_token_divergence_compare, min_token_divergence_compare = extract_df_info(df_compare, args.original_tokenizer, compare_to_path, skip_every_n_decodings=skip_every_n_decodings, color_by_divergence=color_by_divergence, local_embedding_model=args.local_embedding_model, device=args.device, recompute_embeddings=args.recompute_embeddings, save_embeddings=True, tqdm_disable=args.tqdm_disable)
-        n_datapoints_compare = len(decoded_strs_compare)
-    elif args.compare_to_self:
-        df_compare = deepcopy(df)
-        # Intervene on the contents of df_compare 'decoding' column.
-        # Replace 5% of all words with "aardvark"
-        for i in range(len(df_compare)):
-            decoding = df_compare.iloc[i]["decoding"]
-            decoding = decoding.split()
-            decoding = [word if (random.random() < 0.95 or i < 2) else "aardvark" for i,word in enumerate(decoding)]
-            df_compare.at[i, "decoding"] = " ".join(decoding)
-        divergence_values_compare, decoded_strs_compare, embeddings_list_compare, all_token_divergences_compare, original_tokenizer_compare, max_token_divergence_compare, min_token_divergence_compare = extract_df_info(df_compare, args.original_tokenizer, path, skip_every_n_decodings=skip_every_n_decodings, color_by_divergence=color_by_divergence, local_embedding_model=args.local_embedding_model, device=args.device, recompute_embeddings=args.recompute_embeddings, save_embeddings=True, tqdm_disable=args.tqdm_disable)
-
-    # Now, cluster the entries of embeddings_list
+    
+    # Cluster the entries of embeddings_list
     if not args.hierarchical:
         #clustering = SpectralClustering(n_clusters=n_clusters, assign_labels="discretize", random_state=0).fit(embeddings_list)
         print(f"Clustering with {args.cluster_method}")
@@ -1108,7 +1059,7 @@ if __name__ == "__main__":
             if compare_to_path is not None or args.compare_to_self:
                 print(f"Clustering comparison texts with {args.cluster_method}")
                 if args.cluster_method == "kmeans":
-                    clustering_compare =  KMeans(n_clusters=n_clusters, random_state=0, n_init=10).fit(embeddings_list_compare)
+                    clustering_compare =  KMeans(n_clusters=n_clusters_compare, random_state=0, n_init=10).fit(embeddings_list_compare)
                 elif args.cluster_method == "hdbscan":
                     clustering_compare =  HDBSCAN(min_cluster_size=min_cluster_size, max_cluster_size=max_cluster_size).fit(embeddings_list_compare)
                 clustering_assignments_compare = clustering_compare.labels_
@@ -1243,7 +1194,7 @@ if __name__ == "__main__":
                 validated_assistant_aucs, validated_assistant_p_values, generated_validation_texts_1, generated_validation_texts_2 = validated_assistant_generative_compare([r[0] for r in result_stats], local_model, labeling_tokenizer, model_1_str=args.model_1_str, model_2_str=args.model_2_str, common_tokenizer_str=args.common_tokenizer_str, device=args.device, num_generated_texts_per_description=args.num_generated_texts_per_description, return_generated_texts=True)
 
                 # Print the validated assistant labels AUCs and p-values
-                for i, description, cluster_pair, auc_score, p_value in enumerate(result_stats):
+                for i, (description, cluster_pair, auc_score, p_value) in enumerate(result_stats):
                     print(f"Description {i+1} (clusters {cluster_pair[0]} and {cluster_pair[1]}): {description}")
                     print(f"Intra-cluster AUC: {auc_score:.3f}, Intra-cluster P-value: {p_value:.3f}")
                     print(f"Generative model AUC: {validated_assistant_aucs[i]:.3f}, Generative model P-value: {validated_assistant_p_values[i]:.3f}")

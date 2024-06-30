@@ -10,6 +10,7 @@ from pandas import read_csv
 from transformers import PreTrainedTokenizer
 from typing import Optional, List, Tuple, Type
 from tqdm import tqdm
+from transformers import BitsAndBytesConfig
 
 from transformers import (
     GPT2LMHeadModel,
@@ -104,11 +105,12 @@ def build_contrastive_lm(superclass : Type[PreTrainedModel]) -> Type[PreTrainedM
                 starting_model_input['past_key_values'] = kwargs['starting_model_past_key_values']
                 comparison_model_input['past_key_values'] = kwargs['comparison_model_past_key_values']
             else:
-                if not self.comparison_model_prefix_ids is None and not self.comparison_model_prefix_ids_added:
-                    prepended_ids = self.comparison_model_prefix_ids.repeat(comparison_model_input['input_ids'].size()[0], 1)
-                    comparison_model_input['input_ids'] = torch.cat((prepended_ids, comparison_model_input['input_ids']), dim=1)
-                    #self.comparison_model_prefix_ids_added = True
-                comparison_model_input['input_ids'] = comparison_model_input['input_ids'].to(self.comparison_lm.device)
+                if self.comparison_lm is not None:
+                    if not self.comparison_model_prefix_ids is None and not self.comparison_model_prefix_ids_added:
+                        prepended_ids = self.comparison_model_prefix_ids.repeat(comparison_model_input['input_ids'].size()[0], 1)
+                        comparison_model_input['input_ids'] = torch.cat((prepended_ids, comparison_model_input['input_ids']), dim=1)
+                        #self.comparison_model_prefix_ids_added = True
+                    comparison_model_input['input_ids'] = comparison_model_input['input_ids'].to(self.comparison_lm.device)
 
                 if not self.starting_model_prefix_ids is None and not self.starting_model_prefix_ids_added:
                     prepended_ids = self.starting_model_prefix_ids.repeat(starting_model_input['input_ids'].size()[0], 1)
@@ -116,7 +118,9 @@ def build_contrastive_lm(superclass : Type[PreTrainedModel]) -> Type[PreTrainedM
                     #self.starting_model_prefix_ids_added = True
                 #print("starting_model_input['input_ids']", starting_model_input['input_ids'].size())
             starting_input_ids = starting_model_input['input_ids']
-            comparison_input_ids = comparison_model_input['input_ids']
+
+            if self.comparison_lm is not None:
+                comparison_input_ids = comparison_model_input['input_ids']
             
             # Instead, we use self.past_attn_storage to store past attention outputs, indexed by input_ids
             if self.cache_attn:
@@ -128,7 +132,7 @@ def build_contrastive_lm(superclass : Type[PreTrainedModel]) -> Type[PreTrainedM
                     del self.past_starting_attn_storage[starting_model_input_key_str]
                 
                 comparison_model_input_key_str = str(comparison_model_input['input_ids'][:, :-1].tolist())
-                if comparison_model_input_key_str in self.past_comparison_attn_storage:
+                if self.comparison_lm is not None and comparison_model_input_key_str in self.past_comparison_attn_storage:
                     comparison_model_input['past_key_values'] = self.past_comparison_attn_storage[comparison_model_input_key_str]
                     comparison_model_input['input_ids'] = comparison_model_input['input_ids'][:, -1:]
 
@@ -139,20 +143,25 @@ def build_contrastive_lm(superclass : Type[PreTrainedModel]) -> Type[PreTrainedM
             starting_model_probs = F.softmax(starting_model_output.logits, -1)
             starting_model_next_token_probs = starting_model_probs[:, -1, :]
             
-            comparison_model_output = self.comparison_lm(**comparison_model_input)
-            comparison_model_probs = F.softmax(comparison_model_output.logits, -1)
-            if comparison_model_probs.size()[-1] > starting_model_probs.size()[-1]:
-                comparison_model_probs = comparison_model_probs[:, :, :starting_model_probs.size()[-1]]
-            comparison_model_next_token_probs = comparison_model_probs[:, -1, :]
+            if self.comparison_lm is not None:
+                comparison_model_output = self.comparison_lm(**comparison_model_input)
+                comparison_model_probs = F.softmax(comparison_model_output.logits, -1)
+                if comparison_model_probs.size()[-1] > starting_model_probs.size()[-1]:
+                    comparison_model_probs = comparison_model_probs[:, :, :starting_model_probs.size()[-1]]
+                comparison_model_next_token_probs = comparison_model_probs[:, -1, :]
+            else:
+                comparison_model_probs = torch.zeros_like(starting_model_probs)
+                comparison_model_next_token_probs = torch.zeros_like(starting_model_next_token_probs)
 
             if self.cache_attn:
                 new_starting_model_input_key_str = str(starting_input_ids.tolist())
                 past_starting_keys = tuple(tuple(t.clone().detach() for t in layer_tuple) for layer_tuple in starting_model_output.past_key_values)
                 self.past_starting_attn_storage[new_starting_model_input_key_str] = past_starting_keys
                 
-                new_comparison_model_input_key_str = str(comparison_input_ids.tolist())
-                past_comparison_keys = tuple(tuple(t.clone().detach() for t in layer_tuple) for layer_tuple in comparison_model_output.past_key_values)
-                self.past_comparison_attn_storage[new_comparison_model_input_key_str] = past_comparison_keys
+                if self.comparison_lm is not None:
+                    new_comparison_model_input_key_str = str(comparison_input_ids.tolist())
+                    past_comparison_keys = tuple(tuple(t.clone().detach() for t in layer_tuple) for layer_tuple in comparison_model_output.past_key_values)
+                    self.past_comparison_attn_storage[new_comparison_model_input_key_str] = past_comparison_keys
             
             comparison_model_probs = comparison_model_probs.to(starting_model_probs.device)
             subtract_prob = self.starting_model_weight * starting_model_probs[:, self.n_starting_model_prefix_ids:, :] + \
@@ -189,18 +198,21 @@ def build_contrastive_lm(superclass : Type[PreTrainedModel]) -> Type[PreTrainedM
 
 
             output = CausalLMOutputWithPast(
-                loss=(starting_model_output.loss, comparison_model_output.loss),
+                loss=(starting_model_output.loss, comparison_model_output.loss) if self.comparison_lm is not None else (starting_model_output.loss, None),
                 logits=new_logits,
                 past_key_values=None, #\\\ (starting_model_output.past_key_values, comparison_model_output.past_key_values),
-                hidden_states=(starting_model_output.hidden_states, comparison_model_output.hidden_states),
-                attentions=(starting_model_output.attentions, comparison_model_output.attentions),
+                hidden_states=(starting_model_output.hidden_states, comparison_model_output.hidden_states) if self.comparison_lm is not None else (starting_model_output.hidden_states, None),
+                attentions=(starting_model_output.attentions, comparison_model_output.attentions) if self.comparison_lm is not None else (starting_model_output.attentions, None),
             )
             output['starting_model_logits'] = starting_model_output.logits[:, self.n_starting_model_prefix_ids:, :]
-            output['comparison_model_logits'] = comparison_model_output.logits[:, self.n_comparison_model_prefix_ids:, :]
+            if self.comparison_lm is not None:
+                output['comparison_model_logits'] = comparison_model_output.logits[:, self.n_comparison_model_prefix_ids:, :]
+                del comparison_model_output
+            else:
+                output['comparison_model_logits'] = torch.zeros_like(starting_model_output.logits)
             #output['starting_model_past_key_values'] = starting_model_output.past_key_values
             #output['comparison_model_past_key_values'] = comparison_model_output.past_key_values
             del starting_model_output
-            del comparison_model_output
             del starting_model_next_token_probs
             del comparison_model_next_token_probs
             del subtract_prob
@@ -394,16 +406,26 @@ def instantiate_models(
     else:
         raise ValueError("Device not specified.")
     
+    bnb_config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_compute_dtype=torch.bfloat16
+    )
+    
     print("Starting model device_map:", starting_model_device_map)
     print("Comparison model device_map:", comparison_model_device_map)
-    comparison_model = AutoModelForCausalLM.from_pretrained(comparison_model_path, 
+    if comparison_model_weight != 0 or (comparison_model_interpolation_weight is not None and comparison_model_interpolation_weight != 0):
+        comparison_model = AutoModelForCausalLM.from_pretrained(comparison_model_path, 
                                                                 load_in_4bit=use_4_bit, 
                                                                 device_map=comparison_model_device_map)#,
-                                                                #quantization_config=bnb_config)#.to(device)
+                                                                #quantization_config=bnb_config if not no_quantize_starting_model else None)#.to(device)
+        comparison_model = comparison_model.eval()
+    else:
+        comparison_model = None
 
-    comparison_model = comparison_model.eval()
     model_class = get_cls(model_name)
     set_verbosity_error()
+
     model = build_contrastive_lm(model_class).from_pretrained(
         starting_model_path,
         starting_model_weight=starting_model_weight, 
@@ -429,14 +451,25 @@ def instantiate_models(
         tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = 'right'
 
-    if comparison_model_interpolation_weight is not None:
+    if comparison_model_interpolation_weight is not None and comparison_model_interpolation_weight != 0:
         starting_model_params = [p for n, p in model.named_parameters() if not "comparison_lm" in n]
         comparison_model_params = [p for n, p in model.named_parameters() if "comparison_lm" in n]
         # Interpolate between the two sets of parameters
         for sparam, cparam in zip(starting_model_params, comparison_model_params):
             before_dtype = sparam.data.dtype
-            sparam.data = (comparison_model_interpolation_weight * sparam.data + (1 - comparison_model_interpolation_weight) * cparam.data).to(before_dtype)
-    
+            integer_dtype = before_dtype in [torch.int8, torch.int16, torch.int32, torch.int64, torch.uint8, torch.quint8, torch.qint8, torch.qint32, torch.quint2x4, torch.quint4x2]
+            full_precision_sparam = sparam.data.to(torch.float64) 
+            full_precision_cparam = cparam.data.to(torch.float64)
+            sparam.data = comparison_model_interpolation_weight * full_precision_sparam + (1 - comparison_model_interpolation_weight) * full_precision_cparam
+            if not integer_dtype:
+                sparam.data = sparam.data.to(before_dtype)
+            else:
+                # Round to the nearest integer before sending to the original dtype
+                sparam.data = sparam.data.round().to(before_dtype)
+        if comparison_model_weight == 0:
+            del model.comparison_lm
+            model.comparison_lm = None
+            comparison_model = None
     return model, comparison_model, tokenizer
 
 def get_input_ids(
