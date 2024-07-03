@@ -38,6 +38,7 @@ class ContrastiveDecoder:
         self.comparison_model_prefix_ids : Optional[List[int]] = None
         self.starting_model_prefix_ids : Optional[List[int]] = None
         self.return_divergences : bool = False
+        self.return_prefix_divergences : bool = False
         self.sort_by_divergences : bool = True
         self.return_perplexities : bool = False
         self.include_prefix_in_divergences : bool = True
@@ -89,6 +90,7 @@ class ContrastiveDecoder:
                     cache_attn = self.cache_attn,
                     comparison_model_interpolation_weight = self.comparison_model_interpolation_weight
                 )
+
     def decode(self, **kwargs) -> dict:
         if kwargs:
             if self.model is None or self.tokenizer is None or "starting_model" in kwargs or "comparison_model" in kwargs:
@@ -96,6 +98,15 @@ class ContrastiveDecoder:
             else:
                 for key, value in kwargs.items():
                     setattr(self, key, value)
+        self.tokenizer.padding_side = "left"
+        #print("text_set", self.text_set)
+        #print(self.tokenizer,
+        #      self.single_prefix,
+        #      self.text_set,
+        #      self.prefixes_path,
+        #      self.set_prefix_len,
+        #      self.n_prefixes,
+        #      self.device)
         
         input_ids = get_input_ids(
                 self.tokenizer,
@@ -106,6 +117,7 @@ class ContrastiveDecoder:
                 n_prefixes = self.n_prefixes,
                 device = self.device
             )
+        #print("input_tokens", self.tokenizer.decode(input_ids[0]))
         if self.set_prefix_len is None:
             self.set_prefix_len = input_ids.size()[1]
         marker_id = self.tokenizer.convert_tokens_to_ids("|")
@@ -128,11 +140,11 @@ class ContrastiveDecoder:
             with torch.no_grad():
                 text_ids = torch.tensor(generations).to(self.device)
                 div_output = self.model.calculate_current_divergence(text_ids, 
-                                                                batch_size = self.batch_size,
-                                                                end_tokens_to_only_consider = 0 if self.include_prefix_in_divergences else self.generation_length,
-                                                                return_perplexities = self.return_perplexities,
-                                                                return_all_token_divergences = self.return_all_token_divergences,
-                                                                use_avg_KL_as_divergences = self.use_avg_KL_as_divergences
+                                                                     batch_size = self.batch_size,
+                                                                     end_tokens_to_only_consider = 0 if self.include_prefix_in_divergences else self.generation_length,
+                                                                     return_perplexities = self.return_perplexities,
+                                                                     return_all_token_divergences = self.return_all_token_divergences,
+                                                                     use_avg_KL_as_divergences = self.use_avg_KL_as_divergences
                                                                 )                
                 divergences = torch.tensor(div_output['divergences'])
                 if self.return_perplexities:
@@ -174,7 +186,7 @@ class ContrastiveDecoder:
                     else:
                         _, indices = torch.topk(divergences, k = n_divergences)
                 elif self.beam_search_sort:
-                    print("Sorting by beam search")
+                    # Sorting by beam search
                     # Create indices for the original text ordering
                     original_indices = torch.tensor(range(len(generated_texts)))
 
@@ -190,6 +202,9 @@ class ContrastiveDecoder:
                         sorted_block_indices = torch.tensor([x for _, x in sorted(zip(block_texts, block_indices))])
                         original_indices[i:i+self.generations_per_prefix] = sorted_block_indices
                     indices = original_indices
+                else:
+                    # No sorting
+                    indices = torch.tensor(range(len(generated_texts)))
 
                 text_ids = text_ids[indices]
                 divergences = divergences[indices]
@@ -257,6 +272,12 @@ class ContrastiveDecoder:
         result = {"texts": generated_texts}
         if self.return_divergences:
             result["divergences"] = divergences
+        if self.return_prefix_divergences:
+            prefix_divergences = []
+            for j in range(0, n_divergences, self.generations_per_prefix):
+                block_mean = torch.mean(divergences[j:j+self.generations_per_prefix])
+                prefix_divergences.append(block_mean)
+            result["prefix_divergences"] = torch.tensor(prefix_divergences)
         if self.return_perplexities:
             result["starting_model_perplexities"] = starting_model_perplexities
             result["comparison_model_perplexities"] = comparison_model_perplexities
@@ -285,23 +306,24 @@ class ContrastiveDecoder:
             for i in tqdm.tqdm(range(0, n_inputs, batch_size)):
                 batch_ids = input_ids[i:min(i+batch_size, n_inputs)]
 
-                n_pads = torch.sum(batch_ids == tokenizer.pad_token_id)
-                if n_pads > 0 and not "gpt" in str(type(tokenizer)).lower():
-                    raise ValueError("input_ids should not contain any pad tokens")
+                # Input could be left padded, so we need to create an attention mask
+                attention_mask = torch.ones_like(batch_ids)
+                attention_mask[batch_ids == self.tokenizer.pad_token_id] = 0
                 if not num_beams is None:
                     generations_batch = model.generate(batch_ids, 
-                                                    do_sample=sampling, 
-                                                    max_new_tokens=generation_length, 
-                                                    min_length=output_len, 
-                                                    top_k=None, 
-                                                    top_p=top_p, 
-                                                    num_return_sequences=generations_per_prefix,
-                                                    num_beams=num_beams,
-                                                    num_beam_groups=num_beam_groups,
-                                                    diversity_penalty=diversity_penalty,
-                                                    temperature=temperature,
-                                                    return_dict_in_generate=True
-                                                    ).sequences.tolist()
+                                                       attention_mask=attention_mask,
+                                                       do_sample=sampling, 
+                                                       max_new_tokens=generation_length, 
+                                                       min_length=output_len, 
+                                                       top_k=None, 
+                                                       top_p=top_p, 
+                                                       num_return_sequences=generations_per_prefix,
+                                                       num_beams=num_beams,
+                                                       num_beam_groups=num_beam_groups,
+                                                       diversity_penalty=diversity_penalty,
+                                                       temperature=temperature,
+                                                       return_dict_in_generate=True
+                                                      ).sequences.tolist()
                 else:
                     generations_batch = model.generate(batch_ids, 
                                                     do_sample=sampling, 

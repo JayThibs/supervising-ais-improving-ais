@@ -520,15 +520,11 @@ def get_input_ids(
     elif not text_set is None:
         prompt = text_set
     else:
-        return None
-    input_ids = tokenizer.batch_encode_plus(prompt, padding=True, truncation=True, return_tensors="pt")['input_ids'].to(device)
-    if not set_prefix_len is None:
-        input_ids = input_ids[:, :set_prefix_len]
-        # Filter out any entry in input_ids that has padding
-        if not "gpt" in str(type(tokenizer)).lower():
-            input_ids = input_ids[~(input_ids.eq(tokenizer.pad_token_id)).any(dim=1)]
+        raise ValueError("No input method specified.")
+    input_ids = tokenizer.batch_encode_plus(prompt, padding=True, truncation=True, return_tensors="pt", max_length=set_prefix_len)['input_ids'].to(device)
     if not n_prefixes is None:
         input_ids = input_ids[:n_prefixes]
+    print(input_ids[:3])
     return input_ids
 
 # Color tokens red in proportion to token_scores
