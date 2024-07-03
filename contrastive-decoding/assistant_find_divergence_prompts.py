@@ -7,10 +7,38 @@ import re
 from random import sample
 from contrastive_decoding import ContrastiveDecoder
 import numpy as np
-from transformers import BitsAndBytesConfig, AutoModelForCausalLM, AutoTokenizer, PreTrainedModel, PreTrainedTokenizer
+from transformers import BitsAndBytesConfig, AutoModelForCausalLM, AutoTokenizer, PreTrainedModel, PreTrainedTokenizer, AutoModel
 from terminaltables import AsciiTable
 import textwrap
+import pickle
 from typing import Optional, List, Tuple
+import sys
+sys.path.append("outputs/")
+from quick_cluster import read_past_embeddings_or_generate_new
+
+def get_results_embeddings_and_divergences(texts : List[str],
+                                           local_embedding_model_str : str,
+                                           local_embedding_model : PreTrainedModel,
+                                           local_tokenizer : PreTrainedTokenizer,
+                                           device : str
+                                           ) -> List[List[float]]:
+    embeddings_list = read_past_embeddings_or_generate_new(path = None, 
+                                                           client = None, 
+                                                           decoded_strs = texts, 
+                                                           local_embedding_model_str = local_embedding_model_str, 
+                                                           local_embedding_model = local_embedding_model, 
+                                                           tokenizer = local_tokenizer, 
+                                                           device = device, 
+                                                           recompute_embeddings = True, 
+                                                           batch_size = 8, 
+                                                           save_embeddings = False, 
+                                                           tqdm_disable = True, 
+                                                           clustering_instructions = "Identify the topic or theme of the given texts", 
+                                                           max_length = 512)
+    embeddings_list = torch.tensor([e.tolist() for e in embeddings_list])
+    embeddings_list = embeddings_list.tolist()
+    return embeddings_list
+    
 
 class DivergenceFinder:
     def __init__(self, **kwargs):
@@ -20,12 +48,14 @@ class DivergenceFinder:
         self.n_cycles_ask_assistant : int = 2
         self.max_failed_cycles : int = 20
         self.openai_model_str : Optional[str] = None
-        self.local_model_str : str = "Upstage/SOLAR-10.7B-Instruct-v1.0"
+        self.local_model_str : str = "NousResearch/Meta-Llama-3-8B-Instruct"
         self.generations_per_prefix : int = 5
-        self.starting_model_path : str = "gpt2-xl"
-        self.comparison_model_path : str = "gpt2-xl"
+        self.starting_model_path : str = "NousResearch/Meta-Llama-3-8B-Instruct"
+        self.comparison_model_path : str = "NousResearch/Meta-Llama-3-8B"
         self.starting_model_weight : float = 1
         self.comparison_model_weight : float = -1
+        self.comparison_model_interpolation_weight : float = 0.0
+        self.decode_only_from_comparison_model : bool = True
         self.tokenizer_family : str = "gpt2"
         self.set_prefix_len : int = 30
         self.device : str = "cuda:0"
@@ -47,6 +77,13 @@ class DivergenceFinder:
         self.use_custom_selection_criterion : bool = True
         self.use_custom_selection_criterion_examples : bool = False
         self.use_custom_selection_criterion_for_scoring : bool = False
+        self.require_custom_selection_for_inclusion : bool = False
+        self.require_unique_additional_texts : bool = True
+        self.use_embeddings_diversity_score : bool = False
+        self.divergence_weight : float = 1.0
+        self.custom_selection_criterion_weight : float = 1.0
+        self.embedding_diversity_weight : float = 1.0
+        self.local_embedding_model_str : str = "nvidia/NV-Embed-v1"
         self.n_repeat : int = 1
         self.temperature : float = 1.0
 
@@ -68,8 +105,8 @@ class DivergenceFinder:
                 local_device_map = "auto"
             self.local_model = AutoModelForCausalLM.from_pretrained(self.local_model_str,
                                                                     load_in_8bit=True, 
-                                                                    device_map=local_device_map,
-                                                                    quantization_config=self.bnb_config)
+                                                                    device_map=local_device_map)#,
+                                                                    #quantization_config=self.bnb_config)
             self.local_tokenizer = AutoTokenizer.from_pretrained(self.local_model_str)
         elif self.openai_model_str is not None and self.local_model_str is not None:
             raise ValueError("You cannot specify both openai_model_str and local_model_str.")
@@ -92,6 +129,18 @@ class DivergenceFinder:
             starting_model_prefix_ids = self.starting_model_prefix_ids,
             bnb_config = self.bnb_config,
         )
+        if self.use_embeddings_diversity_score:
+            # Load local embedding model from HuggingFace
+            self.local_embedding_tokenizer = AutoTokenizer.from_pretrained(self.local_embedding_model_str)
+
+            if self.local_embedding_model_str == "nvidia/NV-Embed-v1":
+                self.local_embedding_model = AutoModel.from_pretrained(self.local_embedding_model_str, trust_remote_code = True, load_in_8bit=True, torch_dtype=torch.float16, device_map={"": 0} if self.device == "cuda:0" else "auto")
+            else:
+                self.local_embedding_model = AutoModel.from_pretrained(self.local_embedding_model_str).to(self.device)
+        else:
+            self.local_embedding_model = None
+            self.local_embedding_tokenizer = None
+    
         # Load system prompt, user instructions, and any seed demonstrations from prompts_json_path:
         with open(self.prompts_json_path, 'r') as f:
             self.prompts_data = json.load(f)
@@ -128,8 +177,12 @@ class DivergenceFinder:
             "comparison_model_prefix_ids": self.comparison_model_prefix_ids,
             "starting_model_prefix_ids": self.starting_model_prefix_ids,
             "return_divergences": True,
+            "return_prefix_divergences": True,
+            "sort_by_divergence": False,
             "include_prefix_in_divergences": self.include_prefix_in_divergences,
             "quantize": self.quantize,
+            "comparison_model_interpolation_weight": self.comparison_model_interpolation_weight,
+            "cache_attn": True
         }
         self.contrastive_decoder = ContrastiveDecoder(**contrastive_decoder_params)
         # Read OpenAI auth key from a file
@@ -151,7 +204,7 @@ class DivergenceFinder:
                          device : str, 
                          verbose_continuations : bool = True,
                          temperature : float = 0.0,
-                         max_tokens : int = 1000
+                         max_tokens : int = 500
                          ) -> str:
         if verbose_continuations:
             print("messages:", messages)
@@ -176,14 +229,16 @@ class DivergenceFinder:
                 print("prompt:", prompt)
             prompt_tokens = local_tokenizer.encode(prompt, return_tensors="pt").to(device)
             n_prompt_tokens = prompt_tokens.shape[1]
+            #json_stopping_tokens = local_tokenizer.encode("}")
+            #json_stopping_criteria = StoppingCriteria(stop=json_stopping_tokens)
             with torch.no_grad():
                 if temperature > 0.0:
                     output = local_model.generate(
                         input_ids=prompt_tokens,
-                        max_length=max_tokens,
+                        max_new_tokens=max_tokens,
                         temperature=temperature,
                         do_sample=True,
-                        top_p=0.9,
+                        top_p=0.95,
                         top_k=0,
                         num_return_sequences=1,
                         return_dict_in_generate=True
@@ -191,7 +246,7 @@ class DivergenceFinder:
                 else:
                     output = local_model.generate(
                         input_ids=prompt_tokens,
-                        max_length=max_tokens,
+                        max_new_tokens=max_tokens,
                         do_sample=False,
                         num_return_sequences=1,
                         return_dict_in_generate=True
@@ -205,7 +260,7 @@ class DivergenceFinder:
     # where each score either 0 or 1, indicating whether each prompt satisfied the custom 
     # selection criterion.
     def score_by_custom_selection_criterion(self, 
-                                            prompts_and_responses : List[Tuple[int, str, str, int]], 
+                                            prompts_and_responses : List[Tuple[int, str, str, int, List[float]]], 
                                             openai_model_str : Optional[str], 
                                             client : Optional[OpenAI], 
                                             local_model : PreTrainedModel, 
@@ -218,7 +273,7 @@ class DivergenceFinder:
                                             ) -> List[int]:
         scores = []
         #print(prompts_and_responses)
-        for _, prompt, response, _, _ in prompts_and_responses:
+        for _, prompt, response, _, _, _ in prompts_and_responses:
             # Combine the prompt and response into a single string
             combined_text = f"Prompt: {prompt}\nResponse: {response}"
             # Create the messages
@@ -288,41 +343,67 @@ class DivergenceFinder:
         additional_texts = self.interpret_assistant_outputs(output_text)
         print("additional_texts:", additional_texts)
 
+        additional_divergences_and_texts = []
         if len(additional_texts) > 0:
             # Compute divergences for additional_texts
             with torch.no_grad():
                 result = self.contrastive_decoder.decode(text_set = additional_texts)
-            additional_divergences = result['divergences'].tolist()
-            comparison_model_responses = []
-            with torch.no_grad():
-                for text in additional_texts:
-                    encoded_prompt = self.tokenizer.encode(text, return_tensors="pt").to(self.device)
-                    n_prompt_tokens = encoded_prompt.shape[1]
-                    generated = self.comparison_model.generate(
-                        input_ids=encoded_prompt,
-                        max_length=self.generation_length + n_prompt_tokens,
-                        temperature=1.0,
-                        top_p=0.9,
-                        num_return_sequences=1,
-                        return_dict_in_generate=True
-                    )
-                    returned_ids = generated.sequences[0][n_prompt_tokens:]
-                    decoded_output = self.tokenizer.decode(returned_ids, skip_special_tokens=True)
-                    comparison_model_responses.append(decoded_output)
+            additional_divergences = result['prefix_divergences'].tolist()
+            target_distribution_decodings = []
+            if self.decode_only_from_comparison_model:
+                with torch.no_grad():
+                    # Decode from JUST the comparison model
+                    for text in additional_texts:
+                        encoded_prompt = self.tokenizer.encode(text, return_tensors="pt").to(self.device)
+                        n_prompt_tokens = encoded_prompt.shape[1]
+                        generated = self.comparison_model.generate(
+                            input_ids=encoded_prompt,
+                            max_length=self.generation_length + n_prompt_tokens,
+                            temperature=1.0,
+                            top_p=0.9,
+                            num_return_sequences=1,
+                            return_dict_in_generate=True
+                        )
+                        returned_ids = generated.sequences[0][n_prompt_tokens:]
+                        decoded_output = self.tokenizer.decode(returned_ids, skip_special_tokens=True)
+                        target_distribution_decodings.append(decoded_output)
+            else:
+                # Use the texts generated from the contrastive decoding, selecting one text for every generations_per_prefix texts
+                target_distribution_decodings = result['texts'][::self.generations_per_prefix]
+            
+            # Compute embeddings to allow for diversity scores
+            if self.use_embeddings_diversity_score:
+                embeddings_list = get_results_embeddings_and_divergences(additional_texts, self.local_embedding_model_str, self.local_embedding_model, self.local_embedding_tokenizer, self.device)
+                
+                print("len(embeddings_list):", len(embeddings_list))
+                print("len(additional_divergences):", len(additional_divergences))
+                print("len(additional_texts):", len(additional_texts))
+                print("len(target_distribution_decodings):", len(target_distribution_decodings))
+            else:
+                embeddings_list = [None for _ in additional_texts]
+            
+            # Compute scores based on custom prompts given to the assistant
             custom_scores = [0 for _ in additional_divergences]
-            additional_divergences_and_texts = list(zip(additional_divergences, additional_texts, comparison_model_responses, custom_scores, [cycle_count for _ in additional_divergences]))
-            if self.use_custom_selection_criterion:
+            additional_divergences_and_texts = list(zip(additional_divergences, additional_texts, target_distribution_decodings, custom_scores, [cycle_count for _ in additional_divergences], embeddings_list))
+            if self.use_custom_selection_criterion or self.require_custom_selection_for_inclusion:
                 custom_scores = self.score_by_custom_selection_criterion(additional_divergences_and_texts, self.openai_model_str, self.client, self.local_model, self.local_tokenizer, self.custom_selection_criterion, self.custom_selection_criterion_yes_response, self.custom_selection_criterion_no_response, self.custom_selection_criterion_examples, self.device)
                 # if self.verbose:
                 #     table_data = [["#", "Prompt", "Response", "Custom Score Boolean"]]
-                #     for i, (_, prompt, response, custom_score) in enumerate(zip(additional_divergences, additional_texts, comparison_model_responses, custom_scores)):
+                #     for i, (_, prompt, response, custom_score) in enumerate(zip(additional_divergences, additional_texts, target_distribution_decodings, custom_scores)):
                 #         custom_score_boolean = custom_score != 0
                 #         row = [str(i+1), textwrap.fill(prompt.replace("\n", "\\n"), width=self.max_width), textwrap.fill(response.replace("\n", "\\n"), width=self.max_width), str(custom_score_boolean)]
                 #         table_data.append(row)
                 #     table = AsciiTable(table_data)
                 #     table.inner_row_border = True
                 #     print(table.table)
-                additional_divergences_and_texts = list(zip(additional_divergences, additional_texts, comparison_model_responses, custom_scores, [cycle_count for _ in additional_divergences]))
+                additional_divergences_and_texts = list(zip(additional_divergences, additional_texts, target_distribution_decodings, custom_scores, [cycle_count for _ in additional_divergences], embeddings_list))
+                if self.require_custom_selection_for_inclusion:
+                    additional_divergences_and_texts = [e for e in additional_divergences_and_texts if e[3] != 0]
+            
+            if self.require_unique_additional_texts:
+                # Only include additional texts that haven't been previously generated
+                additional_divergences_and_texts = [e for e in additional_divergences_and_texts if e[1] not in [t[1] for t in self.all_divergences_and_texts]]
+
             # Expand combined_loop_divergences_and_texts with results:
             self.combined_loop_divergences_and_texts = self.combined_loop_divergences_and_texts + additional_divergences_and_texts
         # Assemble a new query from the assistant's responses / additional_texts.
@@ -334,31 +415,55 @@ class DivergenceFinder:
             # then feed the assistant responses from combined_loop_divergences_and_texts
             # Subsample from combined_loop_divergences_and_texts
             
-            self.round_divergences_and_texts = divergence_weighted_subsample(self.combined_loop_divergences_and_texts, self.n_past_texts_subsampled, self.subsampling_randomness_temperature, self.use_custom_selection_criterion_for_scoring)
+            print([type(e[5]) for e in self.combined_loop_divergences_and_texts])
 
-        n_additional_texts = len(additional_texts)
+            self.round_divergences_and_texts, self.round_subsample_divergence_stats, self.round_subsample_diversity_stats, self.round_full_divergence_stats, self.round_full_diversity_stats, subsample_diversity_weights, full_diversity_weights = divergence_weighted_subsample(divergences_and_texts = self.combined_loop_divergences_and_texts, 
+                                                                   n_past_texts_subsampled = self.n_past_texts_subsampled, 
+                                                                   subsampling_randomness_temperature = self.subsampling_randomness_temperature, 
+                                                                   use_custom_selection_criterion_for_scoring = self.use_custom_selection_criterion_for_scoring, 
+                                                                   divergence_weight = self.divergence_weight, 
+                                                                   custom_selection_criterion_weight = self.custom_selection_criterion_weight, 
+                                                                   embedding_diversity_weight = self.embedding_diversity_weight
+                                                                )
+            
+        self.combined_loop_subsample_divergence_stats.append(self.round_subsample_divergence_stats)
+        self.combined_loop_subsample_diversity_stats.append(self.round_subsample_diversity_stats)
+        self.combined_loop_full_divergence_stats.append(self.round_full_divergence_stats)
+        self.combined_loop_full_diversity_stats.append(self.round_full_diversity_stats)
+        n_additional_texts = len(additional_divergences_and_texts)
         print("Num total texts     :", len(self.combined_loop_divergences_and_texts))
         print("Num additional texts:", n_additional_texts)
         if self.verbose:
             print("round_divergences_and_texts:")
-            print_texts_with_divergences(self.round_divergences_and_texts, max_width = self.max_width)
+            print_texts_with_divergences(self.round_divergences_and_texts, max_width = self.max_width, diversity_weights = subsample_diversity_weights)
         return n_additional_texts
     
     def search_loop(self) -> None:
         if len(self.seed_demonstrations_list) > 0:
             # Compute divergences for seed_demonstrations_list
             with torch.no_grad():
-                result = self.contrastive_decoder.decode()
-            divergences = result['divergences'].tolist()
+                result = self.contrastive_decoder.decode(text_set = self.seed_demonstrations_list)
+            divergences = result['prefix_divergences'].tolist()
+            embeddings_list = get_results_embeddings_and_divergences(self.seed_demonstrations_list, self.local_embedding_model_str, self.local_embedding_model, self.local_embedding_tokenizer, self.device)
 
-            self.combined_loop_divergences_and_texts = [(d,s,"", 0,0) for d,s in zip(divergences, self.seed_demonstrations_list)]
-            self.round_divergences_and_texts = divergence_weighted_subsample(self.combined_loop_divergences_and_texts, self.n_past_texts_subsampled, self.subsampling_randomness_temperature)
+            self.combined_loop_divergences_and_texts = [(d, s, "", 1, 0, e) for d, s, e in zip(divergences, self.seed_demonstrations_list, embeddings_list)]
+            #print(self.combined_loop_divergences_and_texts)
+            print("len(divergences):", len(divergences))
+            print("len(embeddings_list):", len(embeddings_list))
+            print("len(self.seed_demonstrations_list):", len(self.seed_demonstrations_list))
+            print("len(result['texts']):", len(result['texts']))
+            print("len(self.combined_loop_divergences_and_texts):", len(self.combined_loop_divergences_and_texts))
+            self.round_divergences_and_texts, self.round_subsample_divergence_stats, self.round_subsample_diversity_stats, self.round_full_divergence_stats, self.round_full_diversity_stats, subsample_diversity_weights, full_diversity_weights = divergence_weighted_subsample(self.combined_loop_divergences_and_texts, self.n_past_texts_subsampled, self.subsampling_randomness_temperature)
             if self.verbose:
                 print("round_divergences_and_texts:")
-                print_texts_with_divergences(self.round_divergences_and_texts, max_width = self.max_width)
+                print_texts_with_divergences(self.round_divergences_and_texts, max_width = self.max_width, diversity_weights = subsample_diversity_weights)
         else:
             self.combined_loop_divergences_and_texts = []
             self.round_divergences_and_texts = []
+        self.combined_loop_subsample_divergence_stats = []
+        self.combined_loop_subsample_diversity_stats = []
+        self.combined_loop_full_divergence_stats = []
+        self.combined_loop_full_diversity_stats = []
 
         cycle_count = 0
         failed_cycle_count = 0
@@ -375,7 +480,6 @@ class DivergenceFinder:
                     raise ValueError("Maximum number of failed cycles reached. Exiting search loop.")
         try:
             # Sort the list by divergence values in descending order
-            self.combined_loop_divergences_and_texts.sort(key=lambda x: x[0], reverse=True)
             self.combined_loop_divergences_and_texts.sort(key=lambda x: x[0], reverse=True)
 
             # Print the 10 texts with the highest divergence values
@@ -406,23 +510,43 @@ class DivergenceFinder:
         if kwargs:
             for key, value in kwargs.items():
                 setattr(self, key, value)
-        all_divergences_and_texts = []
+        self.all_divergences_and_texts = []
+        all_full_divergence_stats = []
+        all_subsample_divergence_stats = []
+        all_full_diversity_stats = []
+        all_subsample_diversity_stats = []
         for _ in range(self.n_repeat):
             self.search_loop()
-            all_divergences_and_texts += self.combined_loop_divergences_and_texts
+            self.all_divergences_and_texts += self.combined_loop_divergences_and_texts
+            all_full_divergence_stats.append(self.combined_loop_full_divergence_stats)
+            all_full_diversity_stats.append(self.combined_loop_full_diversity_stats)
+            all_subsample_divergence_stats.append(self.combined_loop_subsample_divergence_stats)
+            all_subsample_diversity_stats.append(self.combined_loop_subsample_diversity_stats)
 
         if self.results_save_path is not None:
             print("Saving results to", self.results_save_path)
+            combined_stats = {
+                "full_divergence_stats": all_full_divergence_stats,
+                "subsample_divergence_stats": all_subsample_divergence_stats,
+                "full_diversity_stats": all_full_diversity_stats,
+                "subsample_diversity_stats": all_subsample_diversity_stats
+            }
             # If the path ends in tsv, save as a tsv file. Otherwise, assume a json file.
             if self.results_save_path.endswith(".tsv"):
-                df = pd.DataFrame(all_divergences_and_texts, columns=["Divergence", "Text", "Response", "CSB", "Cycle"])
+                df = pd.DataFrame(self.all_divergences_and_texts, columns=["Divergence", "Text", "Response", "CSB", "Cycle", "Embedding"])
+                df.drop(columns=["Embedding"], inplace=True)
                 df.to_csv(self.results_save_path, index=False, sep="\t")
+                with open(self.results_save_path.replace(".tsv", "_stats.pkl"), "wb") as f:
+                    pickle.dump(combined_stats, f)
+            
             elif self.results_save_path.endswith(".json"):
-                    with open(self.results_save_path, "w") as f:
-                        json.dump(all_divergences_and_texts, f)
+                with open(self.results_save_path, "w") as f:
+                    json.dump(self.all_divergences_and_texts, f)
+                with open(self.results_save_path.replace(".json", "_stats.json"), "w") as f:
+                    json.dump(combined_stats, f)
             else:
                 raise ValueError("Results save path must end with .tsv or .json")
-        return all_divergences_and_texts
+        return self.all_divergences_and_texts
     
     # This function takes in a string of text and interprets it as a json object, returning a list of texts.
     # If the json parsing fails, it tries to interpret the text as a list of texts separated by newlines, and returns a list of texts.
@@ -485,32 +609,65 @@ class DivergenceFinder:
 # It returns a list of tuples of divergences / texts / response / custom_score tuples, where the texts are the same as the input texts.
 #
 # divergences_and_texts: A list of tuples of divergences / texts / response / custom_score tuples.
-def rescale_divergences(divergences_and_texts : List[Tuple[float, str, str, int]]) -> List[Tuple[float, str, str, int]]:
+def rescale_divergences(divergences_and_texts : List[Tuple[float, str, str, int, int, List[float]]], max_div : float = 10) -> List[Tuple[float, str]]:
     max_divergence = max(divergences_and_texts, key=lambda x: x[0])[0]
     min_divergence = min(divergences_and_texts, key=lambda x: x[0])[0]
-    rescaled_round_divergences_and_texts = [(10 * (div - min_divergence) / max((max_divergence - min_divergence), 0.0001), text) for div, text, _, _, _ in divergences_and_texts]
+    rescaled_round_divergences_and_texts = [(max_div * (div - min_divergence) / max((max_divergence - min_divergence), 0.0001), text) for div, text, _, _, _, _ in divergences_and_texts]
     return rescaled_round_divergences_and_texts
 
 
 
     
 
-# This function takes in a list of divergences and texts, and returns a list of pairs of divergences and texts, where 
-# the texts are a random subsample of the input texts, weighted by the divergence values, with subsampling_randomness_temperature
-# scaling the degree of randomness.
+# This function takes in a divergences_and_texts list, and returns a random subsample of that list,
+# weighted by the divergence values, with subsampling_randomness_temperature scaling the degree of randomness.
 # Optionally takes in a boolean to use scores from a custom selection criterion to bias selection process.
-def divergence_weighted_subsample(divergence_and_texts : List[Tuple[float, str, str, int, int]], 
+# It also optionally can use the embeddings in the divergences_and_texts list to select diverse texts,
+# operationalized as a preference for texts whose embeddings are far from other texts' embeddings using 
+# the L 1/2 norm.
+def divergence_weighted_subsample(divergences_and_texts : List[Tuple[float, str, str, int, int, List[float]]], 
                                   n_past_texts_subsampled : int = 5, 
                                   subsampling_randomness_temperature : float = 0.5, 
-                                  select_high_divergence : bool = False, 
-                                  use_custom_selection_criterion_for_scoring : bool = False
-                                  ) -> List[Tuple[float, str, str, int, int]]:
-    if len(divergence_and_texts) == 0:
+                                  select_high_divergence : bool = True, 
+                                  use_custom_selection_criterion_for_scoring : bool = False,
+                                  use_embeddings_for_diversity : bool = True,
+                                  divergence_weight : float = 1.0,
+                                  embedding_diversity_weight : float = 1.0,
+                                  custom_selection_criterion_weight : float = 1.0,
+                                  sort_output : bool = True
+                                  ) -> List[Tuple[float, str, str, int, int, List[float]]]:
+    if len(divergences_and_texts) == 0:
         return []
+    
+    # First, get the divergence's contribution to the weights, rescaled to be between 0 and 1
+    weights = [t[0] * divergence_weight for t in rescale_divergences(divergences_and_texts, max_div = 1)]
+
+    # Add the custom selection criterion to the weights
     if use_custom_selection_criterion_for_scoring:
-        weights = [entry[0] + entry[3] for entry in divergence_and_texts]
-    else:
-        weights = [entry[0] for entry in divergence_and_texts]
+        weights = [w + custom_selection_criterion_weight * entry[3] for w, entry in zip(weights, divergences_and_texts)]
+    
+    # Calculate the all-pairs L2 distances between the embeddings
+    print([len(entry[5]) for entry in divergences_and_texts])
+    embeddings = np.array([entry[5] for entry in divergences_and_texts])
+    embedding_distances_matrix = np.linalg.norm(embeddings[:, np.newaxis] - embeddings[np.newaxis, :], ord=2, axis=-1)
+    # Compute the harmonic mean of each embedding's distance to all other embeddings
+    # (We use the harmonic mean to prevent large distances from having a disproportionately large weight)
+    # Need to deal with diagonal elements of the matrix, which will otherwise throw off the estimates.
+    # The harmonic mean is dominated by the *smallest* values, so we set them to inf.
+    embedding_distances_matrix[np.diag_indices_from(embedding_distances_matrix)] = np.inf
+    embedding_diversity_weights = np.reciprocal(np.mean(np.reciprocal(embedding_distances_matrix + 1e-8), axis=1))
+    print("embedding_distances_matrix[0]", embedding_distances_matrix[0])
+    # Rescale the diversity weights to be between 0 and 1
+    embedding_diversity_weights_scaled = (embedding_diversity_weights - np.min(embedding_diversity_weights)) / (np.max(embedding_diversity_weights) - np.min(embedding_diversity_weights))
+    
+    if use_embeddings_for_diversity:
+        # Add the diversity contribution to the weights
+        weights = [w + embedding_diversity_weight * ed for w, ed in zip(weights, embedding_diversity_weights_scaled)]
+
+    # Scale the weights to ensure they fall into [0, 1]
+    min_weight = min(weights)
+    max_weight = max(weights)
+    weights = [(w - min_weight) / max(max_weight - min_weight, 1e-7) for w in weights]
 
     if subsampling_randomness_temperature > 0:
         if select_high_divergence:
@@ -519,10 +676,10 @@ def divergence_weighted_subsample(divergence_and_texts : List[Tuple[float, str, 
             weights = np.exp(-np.array(weights) / subsampling_randomness_temperature)
         weights /= np.sum(weights)
 
-        n_samples = min(n_past_texts_subsampled, len(divergence_and_texts))
+        n_samples = min(n_past_texts_subsampled, len(divergences_and_texts))
         # Randomly choose indices based on weights without repetition
         try:
-            chosen_indices = np.random.choice(len(divergence_and_texts), size=n_samples, p=weights, replace=False)
+            chosen_indices = np.random.choice(len(divergences_and_texts), size=n_samples, p=weights, replace=False)
         except:
             print("weights:", weights)
             print("n_samples:", n_samples)
@@ -532,20 +689,56 @@ def divergence_weighted_subsample(divergence_and_texts : List[Tuple[float, str, 
         chosen_indices = np.argsort(weights)[-n_samples:]
 
     # Select the subsampled pairs
-    subsample = [divergence_and_texts[i] for i in chosen_indices]
+    subsample = [divergences_and_texts[i] for i in chosen_indices]
+    if sort_output:
+        # Sort the subsample by divergence
+        subsample = sorted(subsample, key=lambda x: x[0], reverse=True)
+    
+    subsample_diversity_weights = embedding_diversity_weights[chosen_indices]
 
-    # Sort the subsample by divergence
-    subsample = sorted(subsample, key=lambda x: x[0], reverse=True)
+    # Compute divergence and diversity stats
+    subsample_divergence_stats = [
+        np.mean([entry[0] for entry in subsample]),
+        np.std([entry[0] for entry in subsample]),
+        np.max([entry[0] for entry in subsample]),
+        np.min([entry[0] for entry in subsample])
+    ]
+    subsample_diversity_stats = [
+        np.mean(subsample_diversity_weights),
+        np.std(subsample_diversity_weights),
+        np.max(subsample_diversity_weights),
+        np.min(subsample_diversity_weights)
+    ]
+
+    full_divergence_stats = [
+        np.mean([entry[0] for entry in divergences_and_texts]),
+        np.std([entry[0] for entry in divergences_and_texts]),
+        np.max([entry[0] for entry in divergences_and_texts]),
+        np.min([entry[0] for entry in divergences_and_texts])
+    ]
+    full_diversity_stats = [
+        np.mean(embedding_diversity_weights),
+        np.std(embedding_diversity_weights),
+        np.max(embedding_diversity_weights),
+        np.min(embedding_diversity_weights)
+    ]
 
     # Return the subsample
-    return subsample
+    return subsample, subsample_divergence_stats, subsample_diversity_stats, full_divergence_stats, full_diversity_stats, subsample_diversity_weights, embedding_diversity_weights
 
-def print_texts_with_divergences(divergences_and_texts : List[Tuple[float, str, str, int]], max_width : int = 50) -> None:
-    table_data = [["Div", "Text", "Response", "CSB", "Cycle"]]
-    for div, text, response, custom_score, cycle in divergences_and_texts:
+def print_texts_with_divergences(divergences_and_texts : List[Tuple[float, str, str, int, int, List[float]]], max_width : int = 50, diversity_weights : List[float] = None) -> None:
+    if diversity_weights is None:
+        table_data = [["Div", "Text", "Response", "CSB", "Cycle"]]
+        for div, text, response, custom_score, cycle, _ in divergences_and_texts:
             wrapped_text = "\n".join(textwrap.wrap(text, width=max_width))
             wrapped_response = "\n".join(textwrap.wrap(response, width=max_width))
             table_data.append([round(div, 3), wrapped_text, wrapped_response, str(custom_score != 0), str(cycle)])
+    else:
+        table_data = [["Div", "Text", "Response", "CSB", "Cycle", "Diversity"]]
+        for (div, text, response, custom_score, cycle, _), diversity_weights in zip(divergences_and_texts, diversity_weights):
+            wrapped_text = "\n".join(textwrap.wrap(text, width=max_width))
+            wrapped_response = "\n".join(textwrap.wrap(response, width=max_width))
+            table_data.append([round(div, 3), wrapped_text, wrapped_response, str(custom_score != 0), str(cycle), str(round(diversity_weights, 3))])
     table = AsciiTable(table_data)
     table.inner_row_border = True
     print(table.table)
