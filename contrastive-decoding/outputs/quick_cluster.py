@@ -8,6 +8,8 @@ from tqdm import tqdm
 import numpy as np
 import pickle
 import scipy.stats as stats
+from scipy.spatial.distance import cdist
+from scipy.optimize import linear_sum_assignment
 import torch
 from transformers import AutoModelForCausalLM, AutoModel, AutoTokenizer, BitsAndBytesConfig
 from copy import deepcopy
@@ -417,60 +419,68 @@ def sort_by_distance(clustering_assignments, embedding_list):
 # To save costs / time with embeddings, we will save a copy of whatever embeddings we generate and attempt to load past embeddings
 # from file if they exist. We will only generate new embeddings if we can't find past embeddings on file. This function thus first
 # checks if there is a previously saved embeddings file to load, and if not, generates new embeddings and saves them to file.
-def read_past_embeddings_or_generate_new(path, client, decoded_strs, local_embedding_model = "thenlper/gte-large", device = "cuda:0", recompute_embeddings = False, batch_size = 8, save_embeddings = True, tqdm_disable = False, clustering_instructions = "Identify the topic or theme of the given texts", max_length = 512):
+def read_past_embeddings_or_generate_new(path, client, decoded_strs, local_embedding_model_str = "thenlper/gte-large", local_embedding_model = None, tokenizer = None, device = "cuda:0", recompute_embeddings = False, batch_size = 8, save_embeddings = True, tqdm_disable = False, clustering_instructions = "Identify the topic or theme of the given texts", max_length = 512):
     # First, try to load past embeddings from file:
-    try:
-        if recompute_embeddings:
-            raise ValueError("Recomputing embeddings.")
-        with open(path + "_embeddings.pkl", "rb") as f:
-            embeddings_list = pickle.load(f)
-            # Check that embeddings_list has the expected dimensions
-            if len(embeddings_list) != len(decoded_strs):
-                raise ValueError("The loaded embeddings have the wrong dimensions.")
-    except:
-        # Otherwise, compute new embeddings
-        embeddings_list = []
-        if client is not None:
+    if not recompute_embeddings:
+        try:
+            with open(path + "_embeddings.pkl", "rb") as f:
+                embeddings_list = pickle.load(f)
+                # Check that embeddings_list has the expected dimensions
+                if len(embeddings_list) != len(decoded_strs):
+                    raise ValueError("The loaded embeddings have the wrong dimensions.")
+                return embeddings_list
+        except:
+            print("Could not load past embeddings. Generating new embeddings.")
+    
+    # Otherwise, compute new embeddings
+    embeddings_list = []
+    if client is not None:
+        for i in tqdm(range(0, len(decoded_strs), batch_size), desc="Generating embeddings", disable=tqdm_disable):
+            batch = decoded_strs[i:i+batch_size]
+            embeddings = client.embeddings.create(input = batch, model = "text-embedding-ada-002").data
+            embeddings_list.extend([e.embedding for e in embeddings])
+    else:
+        if local_embedding_model is None:
+            # Load local embedding model from HuggingFace
+            tokenizer = AutoTokenizer.from_pretrained(local_embedding_model_str)
+
+            if local_embedding_model_str == "nvidia/NV-Embed-v1":
+                local_embedding_model = AutoModel.from_pretrained(local_embedding_model_str, trust_remote_code = True, load_in_8bit=True, torch_dtype=torch.float16, device_map={"": 0} if device == "cuda:0" else "auto")
+            else:
+                local_embedding_model = AutoModel.from_pretrained(local_embedding_model_str).to(device)
+            keep_embedding_model = False
+        else:
+            if tokenizer is None:
+                raise ValueError("The tokenizer must be provided if the local embedding model is provided.")
+            keep_embedding_model = True
+        
+        pad_token_id = tokenizer.pad_token_id
+        with torch.no_grad():
             for i in tqdm(range(0, len(decoded_strs), batch_size), desc="Generating embeddings", disable=tqdm_disable):
                 batch = decoded_strs[i:i+batch_size]
-                embeddings = client.embeddings.create(input = batch, model = "text-embedding-ada-002").data
-                embeddings_list.extend([e.embedding for e in embeddings])
-        else:
-            # Use local embedding model from HuggingFace
-            tokenizer = AutoTokenizer.from_pretrained(local_embedding_model)
-
-            if local_embedding_model == "nvidia/NV-Embed-v1":
-                model = AutoModel.from_pretrained(local_embedding_model, trust_remote_code = True, load_in_8bit=True, torch_dtype=torch.float16, device_map={"": 0} if device == "cuda:0" else "auto")
-            else:
-                model = AutoModel.from_pretrained(local_embedding_model).to(device)
-            
-            pad_token_id = tokenizer.pad_token_id
-            with torch.no_grad():
-                
-                for i in tqdm(range(0, len(decoded_strs), batch_size), desc="Generating embeddings", disable=tqdm_disable):
-                    batch = decoded_strs[i:i+batch_size]
-                    if local_embedding_model == "nvidia/NV-Embed-v1":
-                        embeddings = model.encode(batch, instruction = clustering_instructions, max_length = max_length)
-                    else:
-                        batch_ids = tokenizer(batch, return_tensors="pt", padding=True, truncation=True, max_length=max_length).to(device)
-                        output = model(**batch_ids, output_hidden_states=True)
-                        token_embeddings = output.hidden_states[-1]
-                        # Note, must avoid averaging over padding tokens.
-                        mask = batch_ids['input_ids'] != pad_token_id
-                        # Compute the average token embedding, excluding padding tokens
-                        embeddings = torch.sum(token_embeddings * mask.unsqueeze(-1), dim=1) / mask.sum(dim=1, keepdim=True)
-                        del output
-                    embeddings_list.extend([e.numpy() for e in embeddings.detach().cpu()])
-            del model
+                if local_embedding_model_str == "nvidia/NV-Embed-v1":
+                    embeddings = local_embedding_model.encode(batch, instruction = clustering_instructions, max_length = max_length)
+                else:
+                    batch_ids = tokenizer(batch, return_tensors="pt", padding=True, truncation=True, max_length=max_length).to(device)
+                    output = local_embedding_model(**batch_ids, output_hidden_states=True)
+                    token_embeddings = output.hidden_states[-1]
+                    # Note, must avoid averaging over padding tokens.
+                    mask = batch_ids['input_ids'] != pad_token_id
+                    # Compute the average token embedding, excluding padding tokens
+                    embeddings = torch.sum(token_embeddings * mask.unsqueeze(-1), dim=1) / mask.sum(dim=1, keepdim=True)
+                    del output
+                embeddings_list.extend([e.numpy() for e in embeddings.detach().cpu()])
+        if not keep_embedding_model:
+            del local_embedding_model
             del tokenizer
-        # Also, save the new embeddings to file
-        if save_embeddings:
-            with open(path + "_embeddings.pkl", "wb") as f:
-                pickle.dump(embeddings_list, f)
+    # Also, save the new embeddings to file
+    if save_embeddings:
+        with open(path + "_embeddings.pkl", "wb") as f:
+            pickle.dump(embeddings_list, f)
         
     return embeddings_list
 
-def extract_df_info(df, original_tokenizer_str, path, skip_every_n_decodings = 0, color_by_divergence = False, local_embedding_model = "thenlper/gte-large", device = "cuda:0", recompute_embeddings = True, save_embeddings = True, tqdm_disable = False, clustering_instructions = None):
+def extract_df_info(df, original_tokenizer_str, path, skip_every_n_decodings = 0, color_by_divergence = False, local_embedding_model_str = "thenlper/gte-large", device = "cuda:0", recompute_embeddings = True, save_embeddings = True, tqdm_disable = False, clustering_instructions = None):
     divergence_values = df['divergence'].values
     loaded_strs = df['decoding'].values
     
@@ -510,7 +520,7 @@ def extract_df_info(df, original_tokenizer_str, path, skip_every_n_decodings = 0
     embeddings_list = read_past_embeddings_or_generate_new(path, 
                                                            client, 
                                                            decoded_strs, 
-                                                           local_embedding_model=local_embedding_model, 
+                                                           local_embedding_model_str=local_embedding_model_str, 
                                                            device=device,
                                                            recompute_embeddings=recompute_embeddings,
                                                            save_embeddings=save_embeddings,
@@ -742,9 +752,6 @@ def get_validated_contrastive_cluster_labels(decoded_strs_1: List[str],
 
 # Takes two sets of clusterings and returns the optimal pairwise matching of clusters between the two sets, seeking to minimize the sum of the squared Euclidean distances between the centroids of each pair of matching clusters.
 def match_clusterings(clustering_assignments_1: List[int], embeddings_list_1: List[List[float]], clustering_assignments_2: List[int], embeddings_list_2: List[List[float]]) -> List[Tuple[int, int]]:
-    from scipy.spatial.distance import cdist
-    from scipy.optimize import linear_sum_assignment
-
     # Calculate centroids for each cluster in both sets
     centroids_1 = [np.mean([embeddings_list_1[i] for i in range(len(clustering_assignments_1)) if clustering_assignments_1[i] == cluster], axis=0) for cluster in range(max(clustering_assignments_1) + 1)]
     centroids_2 = [np.mean([embeddings_list_2[i] for i in range(len(clustering_assignments_2)) if clustering_assignments_2[i] == cluster], axis=0) for cluster in range(max(clustering_assignments_2) + 1)]
@@ -907,8 +914,8 @@ if __name__ == "__main__":
     parser.add_argument("--divergence_and_clustering_labels", action="store_true")
     parser.add_argument("--skip_every_n_decodings", type=int, default=0)
     parser.add_argument("--skip_every_n_decodings_compare", type=int, default=None)
-    #parser.add_argument("--local_embedding_model", default="thenlper/gte-large")
-    parser.add_argument("--local_embedding_model", default="nvidia/NV-Embed-v1")
+    #parser.add_argument("--local_embedding_model_str", default="thenlper/gte-large")
+    parser.add_argument("--local_embedding_model_str", default="nvidia/NV-Embed-v1")
     parser.add_argument("--local_labelings_model", default="NousResearch/Meta-Llama-3-8B-Instruct")
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--recompute_embeddings", action="store_true")
@@ -950,11 +957,11 @@ if __name__ == "__main__":
     # decoded_strs is an array of strings
     # divergence_values stores a single float for each entry in decoded_strs
     df = pd.read_csv(path)
-    divergence_values, decoded_strs, embeddings_list, all_token_divergences, original_tokenizer, max_token_divergence, min_token_divergence = extract_df_info(df, args.original_tokenizer, path=path, skip_every_n_decodings=skip_every_n_decodings, color_by_divergence=color_by_divergence, local_embedding_model=args.local_embedding_model, device=args.device, recompute_embeddings=args.recompute_embeddings, save_embeddings=True, clustering_instructions=args.clustering_instructions, tqdm_disable=args.tqdm_disable)
+    divergence_values, decoded_strs, embeddings_list, all_token_divergences, original_tokenizer, max_token_divergence, min_token_divergence = extract_df_info(df, args.original_tokenizer, path=path, skip_every_n_decodings=skip_every_n_decodings, color_by_divergence=color_by_divergence, local_embedding_model_str=args.local_embedding_model_str, device=args.device, recompute_embeddings=args.recompute_embeddings, save_embeddings=True, clustering_instructions=args.clustering_instructions, tqdm_disable=args.tqdm_disable)
     n_datapoints = len(decoded_strs)
     if compare_to_path is not None:
         df_compare = pd.read_csv(compare_to_path)
-        divergence_values_compare, decoded_strs_compare, embeddings_list_compare, all_token_divergences_compare, original_tokenizer_compare, max_token_divergence_compare, min_token_divergence_compare = extract_df_info(df_compare, args.original_tokenizer, compare_to_path, skip_every_n_decodings=skip_every_n_decodings_compare, color_by_divergence=color_by_divergence, local_embedding_model=args.local_embedding_model, device=args.device, recompute_embeddings=args.recompute_embeddings, save_embeddings=True, clustering_instructions=args.clustering_instructions, tqdm_disable=args.tqdm_disable)
+        divergence_values_compare, decoded_strs_compare, embeddings_list_compare, all_token_divergences_compare, original_tokenizer_compare, max_token_divergence_compare, min_token_divergence_compare = extract_df_info(df_compare, args.original_tokenizer, compare_to_path, skip_every_n_decodings=skip_every_n_decodings_compare, color_by_divergence=color_by_divergence, local_embedding_model_str=args.local_embedding_model_str, device=args.device, recompute_embeddings=args.recompute_embeddings, save_embeddings=True, clustering_instructions=args.clustering_instructions, tqdm_disable=args.tqdm_disable)
         n_datapoints_compare = len(decoded_strs_compare)
     elif args.compare_to_self:
         df_compare = deepcopy(df)
@@ -965,7 +972,7 @@ if __name__ == "__main__":
             decoding = decoding.split()
             decoding = [word if (random.random() < 0.95 or i < 2) else "aardvark" for i,word in enumerate(decoding)]
             df_compare.at[i, "decoding"] = " ".join(decoding)
-        divergence_values_compare, decoded_strs_compare, embeddings_list_compare, all_token_divergences_compare, original_tokenizer_compare, max_token_divergence_compare, min_token_divergence_compare = extract_df_info(df_compare, args.original_tokenizer, path, skip_every_n_decodings=skip_every_n_decodings_compare, color_by_divergence=color_by_divergence, local_embedding_model=args.local_embedding_model, device=args.device, recompute_embeddings=args.recompute_embeddings, save_embeddings=True, clustering_instructions=args.clustering_instructions, tqdm_disable=args.tqdm_disable)
+        divergence_values_compare, decoded_strs_compare, embeddings_list_compare, all_token_divergences_compare, original_tokenizer_compare, max_token_divergence_compare, min_token_divergence_compare = extract_df_info(df_compare, args.original_tokenizer, path, skip_every_n_decodings=skip_every_n_decodings_compare, color_by_divergence=color_by_divergence, local_embedding_model_str=args.local_embedding_model_str, device=args.device, recompute_embeddings=args.recompute_embeddings, save_embeddings=True, clustering_instructions=args.clustering_instructions, tqdm_disable=args.tqdm_disable)
 
     # Load the local assistant model (assuming we are not using the API):
     if args.api_key_path is None:
