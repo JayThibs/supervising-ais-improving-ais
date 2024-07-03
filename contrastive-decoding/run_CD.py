@@ -1,4 +1,5 @@
 from contrastive_decoding import ContrastiveDecoder
+import pandas as pd
 import argparse
 
 parser = argparse.ArgumentParser(description='Run contrastive decoding.')
@@ -906,6 +907,68 @@ if target in ['llama3-instruct-woman-bias']:
               "device": "cuda:0",
        }
 
+
+
+
+
+# CUDA_VISIBLE_DEVICES=2 python run_CD.py --target llama3_instruct-llama3-interp-social-bias --interp_weight 0.01 &> runtime_logs/llama3_instruct-llama3-interp_0.01-social-bias_prefix_fix_interp_KL_runtime_log_2.txt
+if target in ['llama3_instruct-llama3-interp-social-bias']:
+       prompts_df = pd.read_csv("find_high_div_prompts_outputs/social_bias_find_high_div_prompt_llama_3_use_cus_crit_examples_results_1.tsv", sep="\t")
+       text_set = prompts_df["Text"].tolist()
+       kwargs = {
+              "text_set": text_set,
+              "save_texts_loc": "outputs/llama3_instruct-llama3-interp_" + str(args.interp_weight) + "-social-bias_prefix_fix_interp_KL_log_2.txt", 
+              "model_name": "NousResearch/Meta-Llama-3-8B-Instruct",
+              "starting_model_path": "NousResearch/Meta-Llama-3-8B-Instruct",
+              "comparison_model_path": "NousResearch/Meta-Llama-3-8B", 
+              "tokenizer_family": "NousResearch/Meta-Llama-3-8B-Instruct",
+              "starting_model_weight": 1,
+              "comparison_model_weight": -1,
+              "generation_length": 30, 
+              #"limit_to_starting_model_top_p": 0.95, 
+              "single_prefix": None, 
+              "return_divergences": True, 
+              "return_perplexities": True,
+              "generations_per_prefix": 50, 
+              "batch_size": 4,
+              "set_prefix_len": 7,
+              "include_prefix_in_divergences": False,
+              "return_all_token_divergences": True,
+              "cache_attn": True,
+              "quantize": True,
+              "device": "cuda:0",
+              "comparison_model_interpolation_weight": args.interp_weight,
+              "print_texts": False
+       }
+
+# CUDA_VISIBLE_DEVICES=2 python run_CD.py --target llama3-social-bias &> runtime_logs/llama3-social-bias_prefix_fix_interp_KL_runtime_log_2.txt
+if target in ['llama3-social-bias']:
+       prompts_df = pd.read_csv("find_high_div_prompts_outputs/social_bias_find_high_div_prompt_llama_3_use_cus_crit_examples_results_2.tsv", sep="\t")
+       text_set = prompts_df["Text"].tolist()
+       kwargs = {
+              "text_set": text_set,
+              "save_texts_loc": "outputs/llama3-social-bias_prefix_fix_interp_KL_log_1.txt", 
+              "model_name": "NousResearch/Meta-Llama-3-8B",
+              "starting_model_path": "NousResearch/Meta-Llama-3-8B",
+              "comparison_model_path": "NousResearch/Meta-Llama-3-8B", 
+              "tokenizer_family": "NousResearch/Meta-Llama-3-8B",
+              "starting_model_weight": 1,
+              "comparison_model_weight": 0,
+              "generation_length": 30, 
+              #"limit_to_starting_model_top_p": 0.95, 
+              "single_prefix": None, 
+              "return_divergences": True, 
+              "return_perplexities": True,
+              "generations_per_prefix": 50, 
+              "batch_size": 4,
+              "set_prefix_len": 7,
+              "include_prefix_in_divergences": False,
+              "return_all_token_divergences": True,
+              "cache_attn": True,
+              "quantize": True,
+              "device": "cuda:0",
+              "print_texts": False
+       }
 
 
 cd = ContrastiveDecoder(**kwargs)
