@@ -1,7 +1,7 @@
 import numpy as np
 from sklearn.manifold import TSNE
 from typing import Optional
-from config.run_settings import TsneSettings
+from behavioural_clustering.config.run_settings import TsneSettings
 
 class DimensionalityReduction:
     @staticmethod
