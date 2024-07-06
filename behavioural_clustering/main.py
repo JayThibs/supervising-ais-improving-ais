@@ -1,19 +1,16 @@
 import argparse
+import os
+import sys
+
+# Add the project root directory to the Python path
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, project_root)
 
 print("Loading evaluation pipeline...")
-from evaluator_pipeline import EvaluatorPipeline
+from behavioural_clustering.evaluation.evaluator_pipeline import EvaluatorPipeline
 
-print("loaded query_model_on_statements")
-from config.run_configuration_manager import RunConfigurationManager
-
-# print("Loading data preparation...")
-# from data_preparation import DataPreparation
-
-# print("Loading model evaluation...")
-# from model_evaluation import ModelEvaluation
-
-# print("query_model_on_statements...")
-# from utils import query_model_on_statements
+print("Loading run configuration manager...")
+from behavioural_clustering.config.run_configuration_manager import RunConfigurationManager
 
 
 def get_args():
@@ -32,10 +29,10 @@ def get_args():
 def main(args):
     run_config_manager = RunConfigurationManager()
     if args.run:
-        # python behavioural_clustering/main.py --run quick_full_test
+        # python behavioural_clustering.main --run quick_full_test
         selected_run = args.run
     else:
-        # python behavioural_clustering/main.py (can edit in run_configuration_manager.py > selected_run)
+        # python behavioural_clustering.main (can edit in run_configuration_manager.py > selected_run)
         selected_run = run_config_manager.selected_run
     run_settings = run_config_manager.get_configuration(selected_run)
     if run_settings:
