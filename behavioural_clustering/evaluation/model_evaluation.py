@@ -1,15 +1,14 @@
-import os
 import csv
 import numpy as np
 import pdb
 from tqdm import tqdm
 from typing import List, Tuple
 from utils import *
-from sklearn.manifold import TSNE
 from sklearn.cluster import KMeans
 from prettytable import PrettyTable
 from models import OpenAIModel, AnthropicModel, LocalModel
-from config.run_settings import RunSettings
+from behavioural_clustering.config.run_settings import RunSettings
+from behavioural_clustering.utils.model_utils import query_model_on_statements
 
 
 class ModelEvaluation:
