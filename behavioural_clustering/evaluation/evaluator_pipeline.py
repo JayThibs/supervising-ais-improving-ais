@@ -7,12 +7,12 @@ import pickle
 from datetime import datetime
 import pdb
 from matplotlib import pyplot as plt
-from behavioural_clustering.utils.data_preparation import DataPreparation, DataHandler
 from models import LocalModel
-from behavioural_clustering.evaluation.model_evaluation import ModelEvaluation
+from model_evaluation import ModelEvaluation
+from clustering import Clustering, ClusterAnalyzer
+from embeddings import embed_texts
+from behavioural_clustering.utils.data_preparation import DataPreparation, DataHandler
 from behavioural_clustering.utils.visualization import Visualization
-from behavioural_clustering.evaluation.clustering import Clustering
-from behavioural_clustering.evaluation.embeddings import embed_texts
 from utils import (
     query_model_on_statements,
 )
@@ -67,7 +67,8 @@ class EvaluatorPipeline:
         # Set up objects
         self.model_eval = ModelEvaluation(self.run_settings, self.llms)
         self.viz = Visualization(self.run_settings.plot_settings)
-        self.clustering_obj = Clustering(self.run_settings.clustering_settings)
+        self.clustering_obj = Clustering(self.run_settings)
+        self.cluster_analyzer = ClusterAnalyzer(self.run_settings)
 
         if self.run_settings.data_settings.new_generation:
             self.saved_query_results = None
@@ -377,7 +378,7 @@ class EvaluatorPipeline:
             self.run_settings.data_settings.reuse_cluster_rows,
         )
         if not file_loaded:
-            rows = self.clustering_obj.compile_cluster_table(
+            rows = self.cluster_analyzer.compile_cluster_table(
                 chosen_clustering,
                 joint_embeddings_all_llms,
                 "joint_embeddings",
@@ -510,7 +511,7 @@ class EvaluatorPipeline:
             reuse_hierarchical_approvals,
         )
         if not file_loaded:
-            hierarchy_data = self.clustering_obj.calculate_hierarchical_cluster_data(
+            hierarchy_data = self.cluster_analyzer.calculate_hierarchical_cluster_data(
                 statement_clustering,
                 approvals_statements_and_embeddings,
                 rows,
@@ -669,7 +670,7 @@ class EvaluatorPipeline:
             ["ID", "N", "Inputs Themes", "Responses Themes", "Interaction Themes"]
         ]
         table_pickle_path = self.pickle_dir / "clusters_desc_table_personas.pkl"
-        self.clustering_obj.create_cluster_table(
+        self.cluster_analyzer.create_cluster_table(
             clusters_desc_table, rows, table_pickle_path, "response_comparisons"
         )
 
@@ -893,7 +894,7 @@ class EvaluatorPipeline:
                 print(f"Clustering statement embeddings...")
                 n_clusters = 120
                 if "statement_clustering" not in locals():
-                    statement_clustering = self.clustering_obj.cluster_embeddings(
+                    statement_clustering = self.cluster_analyzer.cluster_embeddings(
                         statement_embeddings,
                         clustering_algorithm="SpectralClustering",
                         n_clusters=n_clusters,
@@ -908,7 +909,7 @@ class EvaluatorPipeline:
                         n_clusters=n_clusters,
                         prompt_approver_type=prompt_type.capitalize(),
                     )
-                self.clustering_obj.cluster_approval_stats(
+                self.cluster_analyzer.cluster_approval_stats(
                     approvals_statements_and_embeddings,
                     statement_clustering,
                     self.model_info_list,
