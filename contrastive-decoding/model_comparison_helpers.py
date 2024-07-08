@@ -524,7 +524,6 @@ def get_input_ids(
     input_ids = tokenizer.batch_encode_plus(prompt, padding=True, truncation=True, return_tensors="pt", max_length=set_prefix_len)['input_ids'].to(device)
     if not n_prefixes is None:
         input_ids = input_ids[:n_prefixes]
-    print(input_ids[:3])
     return input_ids
 
 # Color tokens red in proportion to token_scores
