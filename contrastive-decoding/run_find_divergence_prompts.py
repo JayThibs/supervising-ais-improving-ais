@@ -6,7 +6,6 @@ parser = argparse.ArgumentParser(description='Run Find CD with specified paramet
 parser.add_argument('--target', type=str, default="wihp", help='Target for CD')
 parser.add_argument('--gens_per_prefix', type=int, default=5, help='Generations per prefix')
 parser.add_argument('--include_prefix_in_divergences', action='store_true', help='Include prefix in divergences')
-parser.add_argument('--sequential', action='store_true', help='Sequential generation')
 parser.add_argument('--local_model', type=str, default="NousResearch/Meta-Llama-3-8B-Instruct", help='Custom model to use for generation')
 #parser.add_argument('--local_model', type=str, default="Upstage/SOLAR-10.7B-Instruct-v1.0", help='Custom model to use for generation')
 parser.add_argument('--local_embedding_model_str', type=str, default="nvidia/NV-Embed-v1", help='Custom embedding model to use for clustering')
@@ -22,7 +21,7 @@ target = args.target.lower()
 gens_per_prefix = args.gens_per_prefix
 
 if target in ['wihp']:
-    print(f"\n\n\nATTEMPT with include_prefix_in_divergences={args.include_prefix_in_divergences}, sequential={args.sequential}:")
+    print(f"\n\n\nATTEMPT with include_prefix_in_divergences={args.include_prefix_in_divergences}:")
     dict_args = {
         "results_save_path": "find_high_div_prompts_outputs/who_is_harry_potter_find_high_div_prompt_llama_3_use_cus_crit_examples_results.tsv",
         "model_name": "NousResearch/Llama-2-7b-hf",
@@ -40,7 +39,6 @@ if target in ['wihp']:
         "generations_per_prefix": gens_per_prefix,
         "n_cycles_ask_assistant": 15,
         "include_prefix_in_divergences": args.include_prefix_in_divergences,
-        "sequential": args.sequential,
         "quantize": True,
         "local_model_str": args.local_model,
         "local_device_map": "cuda:1",
@@ -67,15 +65,18 @@ if target in ['social_bias']:
         "generation_length": 20,
         "limit_to_starting_model_top_p": None,
         "generations_per_prefix": gens_per_prefix,
-        "n_cycles_ask_assistant": 15,
+        "n_cycles_ask_assistant": 20,
         "include_prefix_in_divergences": args.include_prefix_in_divergences,
         "temperature": 0.9,
-        "sequential": args.sequential,
         "quantize": True,
         "local_model_str": args.local_model,
         "local_embedding_model_str": args.local_embedding_model_str,
         "local_device_map": "cuda:0",
-        "n_repeat": 5
+        "n_repeat": 10,
+        "divergence_weight": 1.0,
+        "custom_selection_criterion_weight": 0.0,
+        "embedding_diversity_weight": 1.0,
+        "include_context_divs": True
     }
 
 # CUDA_VISIBLE_DEVICES=1 python run_find_divergence_prompts.py --target social_bias_no_diversity --comparison_model_interpolation_weight 0.01 --loc_mod "_1" &> runtime_logs/social_bias_no_diversity_find_high_div_prompt_llama_3_use_cus_crit_examples_results_1_runtime_logs.txt
@@ -98,17 +99,16 @@ if target in ['social_bias_no_diversity']:
         "generation_length": 20,
         "limit_to_starting_model_top_p": None,
         "generations_per_prefix": gens_per_prefix,
-        "n_cycles_ask_assistant": 15,
+        "n_cycles_ask_assistant": 20,
         "include_prefix_in_divergences": args.include_prefix_in_divergences,
         "temperature": 0.9,
-        "sequential": args.sequential,
         "quantize": True,
         "local_model_str": args.local_model,
         "local_embedding_model_str": args.local_embedding_model_str,
         "local_device_map": "cuda:0",
-        "n_repeat": 5,
+        "n_repeat": 10,
         "divergence_weight": 1.0,
-        "custom_selection_criterion_weight": 1.0,
+        "custom_selection_criterion_weight": 0.0,
         "embedding_diversity_weight": 0.0
     }
 
@@ -136,7 +136,6 @@ if target in ['social_bias_no_divergence']:
         "n_cycles_ask_assistant": 15,
         "include_prefix_in_divergences": args.include_prefix_in_divergences,
         "temperature": 0.9,
-        "sequential": args.sequential,
         "quantize": True,
         "local_model_str": args.local_model,
         "local_embedding_model_str": args.local_embedding_model_str,
@@ -170,7 +169,6 @@ if target in ['social_bias_no_weighting']:
         "n_cycles_ask_assistant": 15,
         "include_prefix_in_divergences": args.include_prefix_in_divergences,
         "temperature": 0.9,
-        "sequential": args.sequential,
         "quantize": True,
         "local_model_str": args.local_model,
         "local_embedding_model_str": args.local_embedding_model_str,
@@ -180,6 +178,109 @@ if target in ['social_bias_no_weighting']:
         "custom_selection_criterion_weight": 0.0,
         "embedding_diversity_weight": 0.0
     }
+
+# CUDA_VISIBLE_DEVICES=1 python run_find_divergence_prompts.py --target social_bias_random_context_divs --comparison_model_interpolation_weight 0.01 --loc_mod "_1" &> runtime_logs/social_bias_random_context_divs_find_high_div_prompt_llama_3_use_cus_crit_examples_results_1_runtime_logs.txt
+if target in ['social_bias_random_context_divs']:
+    dict_args = {
+        "results_save_path": "find_high_div_prompts_outputs/social_bias_random_context_divs_find_high_div_prompt_llama_3_use_cus_crit_examples_results" + args.loc_mod + ".tsv",
+        "model_name": "NousResearch/Meta-Llama-3-8B",
+        "starting_model_path": "NousResearch/Meta-Llama-3-8B-Instruct",
+        "comparison_model_path": "NousResearch/Meta-Llama-3-8B",
+        "tokenizer_family": "NousResearch/Meta-Llama-3-8B",
+        "prompts_json_path" : "assistant_prompts/social_bias_find_high_div_prompts.json",
+        "use_custom_selection_criterion_for_scoring": False,
+        "use_custom_selection_criterion": True,
+        "use_custom_selection_criterion_examples": False,
+        "use_embeddings_diversity_score": True,
+        "require_custom_selection_for_inclusion": True,
+        "starting_model_weight": -1,
+        "comparison_model_weight": 1,
+        "comparison_model_interpolation_weight": args.comparison_model_interpolation_weight,
+        "generation_length": 20,
+        "limit_to_starting_model_top_p": None,
+        "generations_per_prefix": gens_per_prefix,
+        "n_cycles_ask_assistant": 20,
+        "include_prefix_in_divergences": args.include_prefix_in_divergences,
+        "temperature": 0.9,
+        "quantize": True,
+        "local_model_str": args.local_model,
+        "local_embedding_model_str": args.local_embedding_model_str,
+        "local_device_map": "cuda:0",
+        "n_repeat": 15,
+        "divergence_weight": 1.0,
+        "custom_selection_criterion_weight": 0.0,
+        "embedding_diversity_weight": 1.0,
+        "randomize_in_context_divs": True
+    }
+
+# CUDA_VISIBLE_DEVICES=2 python run_find_divergence_prompts.py --target social_bias_no_context_divs --comparison_model_interpolation_weight 0.01 --loc_mod "_1" &> runtime_logs/social_bias_no_context_divs_find_high_div_prompt_llama_3_use_cus_crit_examples_results_1_runtime_logs.txt
+if target in ['social_bias_no_context_divs']:
+    dict_args = {
+        "results_save_path": "find_high_div_prompts_outputs/social_bias_no_context_divs_find_high_div_prompt_llama_3_use_cus_crit_examples_results" + args.loc_mod + ".tsv",
+        "model_name": "NousResearch/Meta-Llama-3-8B",
+        "starting_model_path": "NousResearch/Meta-Llama-3-8B-Instruct",
+        "comparison_model_path": "NousResearch/Meta-Llama-3-8B",
+        "tokenizer_family": "NousResearch/Meta-Llama-3-8B",
+        "prompts_json_path" : "assistant_prompts/social_bias_find_high_div_prompts_no_context_div.json",
+        "use_custom_selection_criterion_for_scoring": False,
+        "use_custom_selection_criterion": True,
+        "use_custom_selection_criterion_examples": False,
+        "use_embeddings_diversity_score": True,
+        "require_custom_selection_for_inclusion": True,
+        "starting_model_weight": -1,
+        "comparison_model_weight": 1,
+        "comparison_model_interpolation_weight": args.comparison_model_interpolation_weight,
+        "generation_length": 20,
+        "limit_to_starting_model_top_p": None,
+        "generations_per_prefix": gens_per_prefix,
+        "n_cycles_ask_assistant": 20,
+        "include_prefix_in_divergences": args.include_prefix_in_divergences,
+        "temperature": 0.9,
+        "quantize": True,
+        "local_model_str": args.local_model,
+        "local_embedding_model_str": args.local_embedding_model_str,
+        "local_device_map": "cuda:0",
+        "n_repeat": 10,
+        "divergence_weight": 1.0,
+        "custom_selection_criterion_weight": 0.0,
+        "embedding_diversity_weight": 1.0,
+        "include_context_divs": False
+    }
+
+# CUDA_VISIBLE_DEVICES=1 python run_find_divergence_prompts.py --target social_bias_no_divs --comparison_model_interpolation_weight 0.01 --loc_mod "_1" &> runtime_logs/social_bias_no_divs_find_high_div_prompt_llama_3_use_cus_crit_examples_results_1_runtime_logs.txt
+if target in ['social_bias_no_divs']:
+    dict_args = {
+        "results_save_path": "find_high_div_prompts_outputs/social_bias_no_divs_find_high_div_prompt_llama_3_use_cus_crit_examples_results" + args.loc_mod + ".tsv",
+        "model_name": "NousResearch/Meta-Llama-3-8B",
+        "starting_model_path": "NousResearch/Meta-Llama-3-8B-Instruct",
+        "comparison_model_path": "NousResearch/Meta-Llama-3-8B",
+        "tokenizer_family": "NousResearch/Meta-Llama-3-8B",
+        "prompts_json_path" : "assistant_prompts/social_bias_find_high_div_prompts_no_context_div.json",
+        "use_custom_selection_criterion_for_scoring": False,
+        "use_custom_selection_criterion": True,
+        "use_custom_selection_criterion_examples": False,
+        "use_embeddings_diversity_score": True,
+        "require_custom_selection_for_inclusion": True,
+        "starting_model_weight": -1,
+        "comparison_model_weight": 1,
+        "comparison_model_interpolation_weight": args.comparison_model_interpolation_weight,
+        "generation_length": 20,
+        "limit_to_starting_model_top_p": None,
+        "generations_per_prefix": gens_per_prefix,
+        "n_cycles_ask_assistant": 20,
+        "include_prefix_in_divergences": args.include_prefix_in_divergences,
+        "temperature": 0.9,
+        "quantize": True,
+        "local_model_str": args.local_model,
+        "local_embedding_model_str": args.local_embedding_model_str,
+        "local_device_map": "cuda:0",
+        "n_repeat": 10,
+        "divergence_weight": 0.0,
+        "custom_selection_criterion_weight": 0.0,
+        "embedding_diversity_weight": 1.0,
+        "include_context_divs": False
+    }
+
 
 print(dict_args)
 
