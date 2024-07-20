@@ -63,10 +63,10 @@ class ContrastiveDecoder:
             if self.model is None or self.tokenizer is None:
                 print("Building models/tokenizer:")
                 bnb_config = BitsAndBytesConfig(
-                    load_in_4bit=True,
-                    bnb_4bit_use_double_quant=True,
-                    bnb_4bit_quant_type="nf4",
-                    bnb_4bit_compute_dtype=torch.bfloat16
+                    load_in_8bit=True,
+                    bnb_8bit_use_double_quant=True,
+                    bnb_8bit_quant_type="nf8",
+                    bnb_8bit_compute_dtype=torch.bfloat16
                 )
                 if not self.quantize:
                     bnb_config = None
@@ -85,7 +85,6 @@ class ContrastiveDecoder:
                     comparison_model_prefix_ids = self.comparison_model_prefix_ids,
                     starting_model_prefix_ids = self.starting_model_prefix_ids,
                     bnb_config = bnb_config,
-                    use_4_bit = self.quantize,
                     no_quantize_starting_model = self.no_quantize_starting_model,
                     cache_attn = self.cache_attn,
                     comparison_model_interpolation_weight = self.comparison_model_interpolation_weight

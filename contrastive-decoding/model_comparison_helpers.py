@@ -383,9 +383,8 @@ def instantiate_models(
         similarity_gating_intensity : Optional[float] = None,
         comparison_model_prefix_ids : Optional[List[int]] = None,
         starting_model_prefix_ids : Optional[List[int]] = None,
-        use_4_bit : bool = True,
         no_quantize_starting_model : bool = False,
-        bnb_config : Optional[dict] = None,
+        bnb_config : Optional[BitsAndBytesConfig] = None,
         cache_attn : bool = False,
         comparison_model_interpolation_weight : Optional[float] = None,
         ) -> Tuple[PreTrainedModel, PreTrainedModel, PreTrainedTokenizer]:
@@ -406,19 +405,12 @@ def instantiate_models(
     else:
         raise ValueError("Device not specified.")
     
-    bnb_config = BitsAndBytesConfig(
-        load_in_4bit=True,
-        bnb_4bit_quant_type="nf4",
-        bnb_4bit_compute_dtype=torch.bfloat16
-    )
-    
     print("Starting model device_map:", starting_model_device_map)
     print("Comparison model device_map:", comparison_model_device_map)
     if comparison_model_weight != 0 or (comparison_model_interpolation_weight is not None and comparison_model_interpolation_weight != 0):
         comparison_model = AutoModelForCausalLM.from_pretrained(comparison_model_path, 
-                                                                load_in_4bit=use_4_bit, 
-                                                                device_map=comparison_model_device_map)#,
-                                                                #quantization_config=bnb_config if not no_quantize_starting_model else None)#.to(device)
+                                                                device_map=comparison_model_device_map,
+                                                                quantization_config=bnb_config if not no_quantize_starting_model else None)#.to(device)
         comparison_model = comparison_model.eval()
     else:
         comparison_model = None
@@ -434,10 +426,8 @@ def instantiate_models(
         similarity_gating_intensity=similarity_gating_intensity,
         comparison_model_prefix_ids=comparison_model_prefix_ids,
         starting_model_prefix_ids=starting_model_prefix_ids,
-        #quantization_config=bnb_config if not no_quantize_starting_model else None,
-        load_in_4bit=use_4_bit and not no_quantize_starting_model, 
+        quantization_config=bnb_config if not no_quantize_starting_model else None,
         device_map=starting_model_device_map,
-        #bnb_config=bnb_config if not no_quantize_starting_model else None,
         cache_attn=cache_attn,
     ).eval()#.to(device)
     #print(model)
