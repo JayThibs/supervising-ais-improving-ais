@@ -5,7 +5,7 @@
 
 import json
 from dataclasses import asdict, dataclass
-from behavioural_clustering.clustering import (
+from behavioural_clustering.evaluation.clustering import (
     ClusteringPipeline,
     visualize_clusters,
 )
