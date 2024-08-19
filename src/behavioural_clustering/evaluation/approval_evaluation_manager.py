@@ -2,6 +2,8 @@ import logging
 from typing import List, Dict, Any, Optional, Tuple
 from functools import lru_cache
 import numpy as np
+import json
+from pathlib import Path
 
 from behavioural_clustering.config.run_settings import RunSettings
 from behavioural_clustering.evaluation.model_evaluation_manager import ModelEvaluationManager
@@ -13,6 +15,12 @@ class ApprovalEvaluationManager:
     def __init__(self, run_settings: RunSettings, model_eval_manager: ModelEvaluationManager):
         self.settings = run_settings
         self.model_eval_manager = model_eval_manager
+        self.approval_prompts = self.load_approval_prompts()
+
+    def load_approval_prompts(self):
+        prompts_file = Path(self.settings.directory_settings.data_dir) / "prompts" / "approval_prompts.json"
+        with open(prompts_file, 'r') as f:
+            return json.load(f)
 
     def load_or_generate_approvals_data(self, approvals_type: str, text_subset: List[str]) -> Dict[str, List[Any]]:
         """
@@ -35,14 +43,23 @@ class ApprovalEvaluationManager:
             
             approvals = {}
             for model_family, model in self.model_eval_manager.llms:
-                approvals[model] = self.model_eval_manager.get_model_approvals(
-                    [statement],
-                    self.settings.approval_prompts[approvals_type],
-                    model_family,
-                    model,
-                    self.settings.prompt_settings.approval_system_message
-                )
-            embedding = self.embed_texts([statement], self.settings.embedding_settings)[0]
+                model_approvals = {}
+                for role, system_message_template in self.approval_prompts[approvals_type].items():
+                    if approvals_type == "awareness":
+                        system_message = system_message_template.replace("<X>", self.settings.prompt_settings.awareness_task)
+                    else:
+                        system_message = system_message_template
+
+                    prompt = f"Given the following statement, would you approve of it? Please answer with either 'yes' or 'no'.\n\nStatement: {statement}\n\nApproval (yes / no):"
+                    model_approvals[role] = self.model_eval_manager.get_model_approvals(
+                        [statement],
+                        prompt,
+                        model_family,
+                        model,
+                        system_message
+                    )
+                approvals[model] = model_approvals
+            embedding = embed_texts([statement], self.settings.embedding_settings)[0]
             approvals_statements_and_embeddings.append((approvals, statement, embedding))
         return self.process_approval_results(approvals_statements_and_embeddings, text_subset, approvals_type)
 

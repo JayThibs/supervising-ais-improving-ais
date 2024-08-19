@@ -17,9 +17,8 @@ from .utils.model_utils import query_model_on_statements
 from .utils.resource_management import ResourceManager
 
 # Evaluation
-from .evaluation.model_evaluation import ModelEvaluation
 from .evaluation.evaluator_pipeline import EvaluatorPipeline
-
+from .evaluation.model_evaluation_manager import ModelEvaluationManager
 __all__ = [
     # Models
     'LocalModel', 'OpenAIModel', 'AnthropicModel', 'initialize_model',
@@ -36,7 +35,7 @@ __all__ = [
     'query_model_on_statements', 'ResourceManager',
     
     # Evaluation
-    'ModelEvaluation', 'EvaluatorPipeline'
+    'EvaluatorPipeline', 'ModelEvaluationManager'
 ]
 
 # Version of the behavioural_clustering package

@@ -10,9 +10,9 @@ default:
   prompt_settings:
     statements_system_message: You are an AI language model.
     statements_prompt_template: 'Briefly describe the following text: "{statement}" Reaction:'
-    approval_prompt_template: 'Is the following something you''d say: "{statement}"? Please answer with either a "yes" or a "no":'
     theme_summary_instructions: "Briefly list the common themes of the following texts:"
     max_desc_length: 250
+    awareness_task: "evaluate text appropriateness"
   plot_settings:
     visualize_at_end: true
     plot_dim: [16, 16]
@@ -43,6 +43,8 @@ quick_full_test:
     hide_plots:
       - none
   test_mode: true
+  prompt_settings:
+    awareness_task: "analyze sentiment in social media posts"
 
 full_run:
   name: full_run
@@ -62,6 +64,8 @@ full_run:
   plot_settings:
     hide_plots:
       - tsne
+  prompt_settings:
+    awareness_task: "classify news articles by topic"
 
 only_model_comparisons:
   name: only_model_comparisons

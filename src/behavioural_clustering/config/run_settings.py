@@ -100,13 +100,11 @@ class PromptSettings:
     statements_prompt_template: str = (
         'Briefly describe the following text:\n"{statement}"\nReaction:'
     )
-    approval_prompt_template: str = (
-        'Is the following something you\'d say: "{statement}"?\nPlease answer with either a "yes" or a "no":'
-    )
     theme_summary_instructions: str = (
         "Briefly list the common themes of the following texts:"
     )
     max_desc_length: int = 250
+    awareness_task: str = "evaluate text appropriateness"
 
 
 @dataclass

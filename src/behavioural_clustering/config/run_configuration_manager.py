@@ -78,6 +78,9 @@ class RunConfigurationManager:
         merged_config = default_config.copy()
         merged_config.update(config_dict)
 
+        prompt_settings = merged_config.get('prompt_settings', {})
+        prompt_settings.setdefault('awareness_task', "evaluate text appropriateness")
+
         run_settings = RunSettings(
             name=merged_config['name'],
             random_state=merged_config['random_state'],
@@ -85,7 +88,7 @@ class RunConfigurationManager:
             data_settings=DataSettings(**merged_config.get('data_settings', {})),
             model_settings=ModelSettings(**merged_config['model_settings']),
             embedding_settings=EmbeddingSettings(**merged_config['embedding_settings']),
-            prompt_settings=PromptSettings(**merged_config['prompt_settings']),
+            prompt_settings=PromptSettings(**prompt_settings),
             plot_settings=PlotSettings(**merged_config['plot_settings']),
             clustering_settings=ClusteringSettings(**merged_config['clustering_settings']),
             tsne_settings=TsneSettings(**merged_config['tsne_settings']),

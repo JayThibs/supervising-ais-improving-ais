@@ -3,6 +3,8 @@ from typing import List, Tuple, Dict
 from behavioural_clustering.config.run_settings import RunSettings
 from behavioural_clustering.utils.model_utils import query_model_on_statements
 from behavioural_clustering.evaluation.embeddings import embed_texts
+from behavioural_clustering.models.model_factory import initialize_model
+from tqdm import tqdm
 
 class ModelEvaluationManager:
     def __init__(self, run_settings: RunSettings, llms: List[Tuple[str, str]]):
@@ -71,3 +73,39 @@ class ModelEvaluationManager:
         print(f"Number of combined embeddings: {len(combined_embeddings)}")
 
         return joint_embeddings_all_llms, combined_embeddings
+
+    def get_model_approvals(
+        self,
+        statements: List[str],
+        prompt_template: str,
+        model_family: str,
+        model: str,
+        approve_strs: List[str] = ["yes"],
+        disapprove_strs: List[str] = ["no"],
+    ) -> List[int]:
+        approvals = []
+        n_statements = len(statements)
+        prompts = [prompt_template.format(statement=s) for s in statements]
+
+        model_info = {
+            "model_family": model_family,
+            "model": model,
+        }
+        model_instance = initialize_model(model_info, temperature=0, max_tokens=5)
+
+        for i, prompt in enumerate(prompts):
+            print(f"Prompt {i+1}/{n_statements}: {prompt}")
+            r = model_instance.generate(prompt=prompt).lower()
+
+            approve_strs_in_response = sum([s in r for s in approve_strs])
+            disapprove_strs_in_response = sum([s in r for s in disapprove_strs])
+
+            if approve_strs_in_response and not disapprove_strs_in_response:
+                approvals.append(1)
+            elif not approve_strs_in_response and disapprove_strs_in_response:
+                approvals.append(0)
+            else:
+                # Uncertain response:
+                approvals.append(-1)
+
+        return approvals
