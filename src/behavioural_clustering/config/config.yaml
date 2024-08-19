@@ -37,7 +37,7 @@ quick_full_test:
       - anthropic-model-written-evals
     n_statements: 300
     reuse_data:
-      - none
+      - all
     new_generation: false
   plot_settings:
     hide_plots:
@@ -53,7 +53,7 @@ full_run:
       - [anthropic, claude-v1]
   data_settings:
     datasets:
-      - all
+      - anthropic-model-written-evals
     n_statements: 5000
     reuse_data:
       - approvals
@@ -71,7 +71,7 @@ only_model_comparisons:
       - [openai, gpt-4]
   data_settings:
     datasets:
-      - all
+      - anthropic-model-written-evals
     n_statements: 100
     reuse_data:
       - all
@@ -87,8 +87,8 @@ gpt3_reuse:
       - [openai, gpt-3.5-turbo]
   data_settings:
     datasets:
-      - all
-    n_statements: 1000
+      - anthropic-model-written-evals
+    n_statements: 10
     reuse_data:
       - all
     new_generation: false

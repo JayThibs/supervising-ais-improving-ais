@@ -13,15 +13,16 @@ def query_model_on_statements(
     model_info["model"] = model
     model_info["system_message"] = system_message
     query_results["model_info"] = model_info
+    num_statements = len(statements)
 
     print("query_model_on_statements...")
 
     model_instance = initialize_model(model_info)
 
     for i, statement in enumerate(statements):
-        print(f"statement {i}:", statement)
+        print(f"Statement {i} / {num_statements}:", statement)
         prompt = prompt_template.format(statement=statement)
-        print("prompt:", prompt)
+        print("Prompt:", prompt)
         for j in range(10):
             try:
                 start_time = time.time()
@@ -47,19 +48,19 @@ def query_model_on_statements(
                 print(f"Exception: {type(e).__name__}, {str(e)}")
                 print("Skipping API error", j)
                 time.sleep(2)
-        print("response:", response)
+        print("Response:", response)
         inputs.append(statement)
         responses.append(response)
         full_conversations.append(prompt + response)
 
     # print all variables
-    print("statements:", statements)
-    print("model_family:", model_family)
-    print("model:", model)
-    print("prompt_template:", prompt_template)
-    print("inputs:", inputs)
-    print("responses:", responses)
-    print("full_conversations:", full_conversations)
+    print("Statements:", statements)
+    print("Model family:", model_family)
+    print("Model:", model)
+    print("Prompt template:", prompt_template)
+    print("Inputs:", inputs)
+    print("Responses:", responses)
+    print("Full conversations:", full_conversations)
 
     query_results["inputs"] = inputs
     query_results["responses"] = responses

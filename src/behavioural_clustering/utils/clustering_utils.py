@@ -51,10 +51,10 @@ def purify_cluster(cluster_texts_and_embeddings, theme_list):
     n_themes = len(theme_list)
     n_texts = len(cluster_texts_and_embeddings)
     texts = [e[0] for e in cluster_texts_and_embeddings]
-    embeddings = [e[1] for e in cluster_texts_and_embeddings]
+    embeddings = np.array([e[1] for e in cluster_texts_and_embeddings])
     pure_cluster_texts_and_embeddings = [[] for _ in range(n_themes)]
     pure_cluster_counts = [0 for _ in range(n_themes)]
-    remaining_texts_mask = [True for _ in range(n_texts)]
+    remaining_texts_mask = np.ones(n_texts, dtype=bool)
 
     for i, theme in enumerate(theme_list):
         for j, (embed, text) in enumerate(zip(embeddings, texts)):
@@ -65,5 +65,5 @@ def purify_cluster(cluster_texts_and_embeddings, theme_list):
     return (
         pure_cluster_texts_and_embeddings,
         pure_cluster_counts,
-        cluster_texts_and_embeddings[remaining_texts_mask],
+        [cluster_texts_and_embeddings[i] for i in range(n_texts) if remaining_texts_mask[i]],
     )

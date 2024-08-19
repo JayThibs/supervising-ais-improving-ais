@@ -71,6 +71,3 @@ class ModelEvaluation:
             text_subset, model_family, model, prompt_template, system_message
         )  # dictionary of inputs, responses, and model instance
         return query_results, file_name
-
-    def run_evaluation(self, data):
-        pass

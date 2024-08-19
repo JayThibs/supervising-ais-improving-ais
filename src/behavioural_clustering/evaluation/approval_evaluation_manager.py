@@ -25,29 +25,26 @@ class ApprovalEvaluationManager:
         Returns:
             Dict[str, List[Any]]: Processed approval results
         """
-        try:
-            approval_results_per_model = {}
+        approvals_statements_and_embeddings = []
+        for item in text_subset:
+            statement = self.extract_statement(item)
+            
+            if not statement:
+                print(f"Warning: Unable to extract statement from item: {item}")
+                continue
+            
+            approvals = {}
             for model_family, model in self.model_eval_manager.llms:
-                model_approvals = []
-                for role_description in self.settings.approval_prompts[approvals_type].values():
-                    prompt_template = self.settings.prompt_settings.approval_prompt_template.format(
-                        role_description=role_description
-                    )
-                    list_of_approvals_for_statements = self.model_eval_manager.get_model_approvals(
-                        statements=text_subset,
-                        prompt_template=prompt_template,
-                        model_family=model_family,
-                        model=model,
-                        system_message=self.settings.prompt_settings.approval_system_message
-                    )
-                    model_approvals.append(list_of_approvals_for_statements)
-                
-                approval_results_per_model[model] = model_approvals
-
-            return self.process_approval_results(approval_results_per_model, text_subset, approvals_type)
-        except Exception as e:
-            logger.error(f"Error in load_or_generate_approvals_data: {str(e)}")
-            raise
+                approvals[model] = self.model_eval_manager.get_model_approvals(
+                    [statement],
+                    self.settings.approval_prompts[approvals_type],
+                    model_family,
+                    model,
+                    self.settings.prompt_settings.approval_system_message
+                )
+            embedding = self.embed_texts([statement], self.settings.embedding_settings)[0]
+            approvals_statements_and_embeddings.append((approvals, statement, embedding))
+        return self.process_approval_results(approvals_statements_and_embeddings, text_subset, approvals_type)
 
     def process_approval_results(self, approval_results_per_model: Dict[str, List[List[int]]], text_subset: List[str], approvals_type: str) -> List[Dict[str, Any]]:
         """
@@ -234,3 +231,12 @@ class ApprovalEvaluationManager:
         except Exception as e:
             logger.error(f"Error in get_model_agreement_matrix: {str(e)}")
             raise
+
+    def extract_statement(self, item):
+        if isinstance(item, dict):
+            return item.get('statement') or item.get('question') or item.get('text')
+        elif isinstance(item, str):
+            return item
+        else:
+            print(f"Warning: Unexpected item type: {type(item)}")
+            return None

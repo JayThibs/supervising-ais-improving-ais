@@ -202,8 +202,6 @@ class Visualization:
         plt.savefig(f"{filename}.svg", format="svg", bbox_inches='tight')
  
 
- 
- 
     def plot_spectral_clustering(self, labels, n_clusters, prompt_approver_type):
         fig, ax = plt.subplots(figsize=(12, 8), dpi=100)  # Adjusted figure size
         ax.tick_params(axis="both", which="major", labelsize=15)

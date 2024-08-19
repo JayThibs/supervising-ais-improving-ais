@@ -23,9 +23,7 @@ def embed_texts(
             try:
                 start_idx = batch_size * i
                 end_idx = min(batch_size * (i + 1), n_texts)
-                print(texts)
                 text_subset = texts[start_idx:end_idx]
-                print("text_subset:", text_subset)
                 embeddings_data = client.embeddings.create(
                     model=embedding_model, input=text_subset
                 )
@@ -39,6 +37,8 @@ def embed_texts(
                 print(f"Skipping due to server error number {retry_count}: {e}")
                 time.sleep(initial_sleep_time * (2**retry_count))  # Exponential backoff
 
-        # print("embedding:", embedding)
         embeddings += [item.embedding for item in embeddings_data]
+    
+    print(f"Number of texts to embed: {len(texts)}")
+    print(f"Number of embeddings created: {len(embeddings)}")
     return embeddings

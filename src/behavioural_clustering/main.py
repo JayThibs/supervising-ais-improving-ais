@@ -56,7 +56,14 @@ def main(args):
         available_runs = run_config_manager.list_configurations()
         if not available_runs:
             raise ValueError("No run configurations available.")
-        selected_run = available_runs[0]  # Default to the first available configuration
+        print("Available run configurations:")
+        for i, run in enumerate(available_runs):
+            print(f"{i + 1}. {run}")
+        choice = input("Enter the number of the run configuration to use (or press Enter to exit): ")
+        if not choice:
+            print("Exiting...")
+            return
+        selected_run = available_runs[int(choice) - 1]
 
     run_settings = run_config_manager.get_configuration(selected_run)
     if run_settings:
@@ -69,8 +76,6 @@ def main(args):
 
         print("Loading evaluator pipeline...")
         evaluator = EvaluatorPipeline(run_settings)
-        print("Loading and preprocessing data...")
-        evaluator.setup_evaluations()
         print("Running evaluation...")
         evaluator.run_evaluations()
     else:

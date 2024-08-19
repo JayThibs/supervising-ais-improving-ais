@@ -49,36 +49,32 @@ class DataSettings:
     random_state: int = 42
     new_generation: bool = False
     reuse_data: List[str] = field(default_factory=lambda: ["all"])
-    reuse_embedding_clustering: bool = False
-    reuse_joint_embeddings: bool = False
-    reuse_tsne: bool = False
-    reuse_personas: bool = False
-    reuse_hierarchical_approvals: bool = False
-    reuse_awareness: bool = False
-    reuse_hierarchical_awareness: bool = False
-    reuse_cluster_rows: bool = False
-    reuse_conditions: bool = False
 
     def __post_init__(self):
-        reuse_data_types = self.process_reuse_data(self.reuse_data, REUSABLE_DATA_TYPES)
-        for data_type in REUSABLE_DATA_TYPES:
-            setattr(self, f"reuse_{data_type}", data_type in reuse_data_types)
+        self.reuse_data_types = self.process_reuse_data(self.reuse_data, REUSABLE_DATA_TYPES)
 
-    def process_reuse_data(self, reuse_data, all_data_types):
-        reuse_types = set()
-
-        if "all" in reuse_data:
-            reuse_types = set(all_data_types)
-            for item in reuse_data:
+    def process_reuse_data(self, data_list, all_data_types):
+        data_types = set()
+        if "all" in data_list:
+            data_types = set(all_data_types)
+            for item in data_list:
                 if item.startswith("!"):
                     exclude_type = item[1:]
-                    reuse_types.discard(exclude_type)
+                    data_types.discard(exclude_type)
         else:
-            for item in reuse_data:
+            for item in data_list:
                 if item in all_data_types:
-                    reuse_types.add(item)
+                    data_types.add(item)
+        return data_types
 
-        return reuse_types
+    def should_reuse_data(self, data_type: str) -> bool:
+        return not self.new_generation and ("all" in self.reuse_data or data_type in self.reuse_data_types)
+
+    def to_dict(self):
+        return {
+            **self.__dict__,
+            'reuse_data_types': list(self.reuse_data_types)
+        }
 
 
 @dataclass
@@ -238,9 +234,11 @@ class RunSettings:
     test_mode: bool = False
     skip_sections: List[str] = field(default_factory=list)
     run_only: Optional[str] = None
-    
+    approval_prompts: Dict[str, Dict[str, str]] = field(default_factory=dict)
+
     def __post_init__(self):
         self.update_n_clusters()
+        self.load_approval_prompts()
 
     def update_n_clusters(self):
         if self.clustering_settings.n_clusters is None:
@@ -254,3 +252,23 @@ class RunSettings:
             self.clustering_settings.n_clusters = max(self.clustering_settings.min_clusters,
                                                       min(self.clustering_settings.max_clusters,
                                                           self.clustering_settings.n_clusters))
+
+    def load_approval_prompts(self):
+        prompts_file = self.directory_settings.data_dir / "prompts" / "approval_prompts.json"
+        if os.path.exists(prompts_file):
+            with open(prompts_file, 'r') as f:
+                self.approval_prompts = json.load(f)
+        else:
+            print(f"Warning: Approval prompts file not found at {prompts_file}")
+            self.approval_prompts = {}
+
+    def get_relevant_settings(self, data_type: str) -> dict:
+        relevant_settings = {
+            "all_query_results": ["model_settings", "data_settings", "prompt_settings"],
+            # Add other data types and their relevant settings here
+        }
+        
+        return {
+            setting: getattr(self, setting)
+            for setting in relevant_settings.get(data_type, [])
+        }

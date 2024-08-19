@@ -1,11 +1,11 @@
 import numpy as np
 from sklearn.manifold import TSNE
 from sklearn.decomposition import PCA
-from typing import Optional
+from typing import Optional, Union, List
 from behavioural_clustering.config.run_settings import TsneSettings
 
 def tsne_reduction(
-    combined_embeddings,
+    combined_embeddings: Union[np.ndarray, List[np.ndarray]],
     tsne_settings: Optional[TsneSettings] = None,
     n_components: int = 2,
     perplexity: int = 50,
@@ -35,6 +35,11 @@ def tsne_reduction(
         Reduced embeddings.
     """
     print("Performing t-SNE dimensionality reduction...")
+    
+    # Convert combined_embeddings to numpy array if it's a list
+    if isinstance(combined_embeddings, list):
+        combined_embeddings = np.array(combined_embeddings)
+    
     if tsne_settings:
         n_components = tsne_settings.dimensions
         perplexity = tsne_settings.perplexity

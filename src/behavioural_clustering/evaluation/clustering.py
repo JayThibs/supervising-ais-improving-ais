@@ -85,7 +85,7 @@ class ClusterAnalyzer:
     def cluster_approval_stats(
         self,
         approvals_statements_and_embeddings: List,
-        embeddings: np.ndarray,
+        embeddings: Union[np.ndarray, List[np.ndarray]],
         model_info_list: List[Dict],
         prompt_dict: Dict,
         reuse_cluster_rows: bool = False,
@@ -93,6 +93,10 @@ class ClusterAnalyzer:
         prompt_approver_type = list(prompt_dict.keys())[0]
         prompt_labels = list(prompt_dict[prompt_approver_type].keys())
         response_types = ["approve", "disapprove"]
+
+        # Convert embeddings to numpy array if it's a list
+        if isinstance(embeddings, list):
+            embeddings = np.array(embeddings)
 
         for response_type in response_types:
             for model_info in model_info_list:

@@ -1,13 +1,14 @@
-from .run_settings import RunSettings, ModelSettings, DataSettings, PromptSettings, PlotSettings, ClusteringSettings, TsneSettings, EmbeddingSettings
+from .run_settings import RunSettings, ModelSettings, DataSettings, PromptSettings, PlotSettings, ClusteringSettings, TsneSettings, EmbeddingSettings, DirectorySettings
 import yaml
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Any
 
 class RunConfigurationManager:
     def __init__(self):
         self.config_file = Path(__file__).parent / "config.yaml"
         self.configurations: Dict[str, RunSettings] = {}
         self.load_configurations()
+        self.run_metadata_file = Path(__file__).parent.parent.parent / "data" / "metadata" / "run_metadata.yaml"
 
     def load_configurations(self):
         if self.config_file.exists():
@@ -58,9 +59,10 @@ class RunConfigurationManager:
         return {
             'name': run_settings.name,
             'random_state': run_settings.random_state,
+            'directory_settings': run_settings.directory_settings.__dict__,
+            'data_settings': run_settings.data_settings.__dict__,
             'model_settings': run_settings.model_settings.__dict__,
             'embedding_settings': run_settings.embedding_settings.__dict__,
-            'data_settings': run_settings.data_settings.__dict__,
             'prompt_settings': run_settings.prompt_settings.__dict__,
             'plot_settings': run_settings.plot_settings.__dict__,
             'clustering_settings': run_settings.clustering_settings.__dict__,
@@ -79,9 +81,10 @@ class RunConfigurationManager:
         run_settings = RunSettings(
             name=merged_config['name'],
             random_state=merged_config['random_state'],
+            directory_settings=DirectorySettings(**merged_config.get('directory_settings', {})),
+            data_settings=DataSettings(**merged_config.get('data_settings', {})),
             model_settings=ModelSettings(**merged_config['model_settings']),
             embedding_settings=EmbeddingSettings(**merged_config['embedding_settings']),
-            data_settings=DataSettings(**merged_config['data_settings']),
             prompt_settings=PromptSettings(**merged_config['prompt_settings']),
             plot_settings=PlotSettings(**merged_config['plot_settings']),
             clustering_settings=ClusteringSettings(**merged_config['clustering_settings']),
@@ -92,3 +95,13 @@ class RunConfigurationManager:
         )
         run_settings.update_n_clusters()
         return run_settings
+
+    def load_run_metadata(self) -> Dict[str, Any]:
+        if self.run_metadata_file.exists():
+            with open(self.run_metadata_file, 'r') as f:
+                return yaml.safe_load(f) or {}
+        return {}
+
+    def get_run_metadata(self, run_id: str) -> Dict[str, Any]:
+        run_metadata = self.load_run_metadata()
+        return run_metadata.get(run_id, {})
