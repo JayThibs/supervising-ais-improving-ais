@@ -1,7 +1,7 @@
 all_query_results:
   700d3fbdfa843881f0191dfc3b91fc03:
-    config:
-      clustering_settings:
+    config: &id002
+      clustering_settings: &id004
         affinity: nearest_neighbors
         all_clustering_algorithms:
         - KMeans
@@ -19,12 +19,12 @@ all_query_results:
         n_clusters_ratio: 0.04
         threshold: 0.5
       data_settings:
-        datasets:
+        datasets: &id005
         - anthropic-model-written-evals
         n_statements: 300
         new_generation: false
         random_state: 42
-        reuse_data:
+        reuse_data: &id006
         - all
         reuse_data_types:
         - hierarchical_approvals
@@ -36,7 +36,7 @@ all_query_results:
         - hierarchical_awareness
         - joint_embeddings
         - embedding_clustering
-      embedding_settings:
+      embedding_settings: &id007
         batch_size: 20
         client: openai
         embedding_model: text-embedding-ada-002
@@ -44,11 +44,11 @@ all_query_results:
         max_retries: 50
         other_params: {}
       metadata_hash: 3f22a747cad113c0cd77f2e065acb6fc
-      model_settings:
+      model_settings: &id008
         models:
         - - openai
           - gpt-3.5-turbo
-      prompt_settings:
+      prompt_settings: &id009
         approval_prompt_template: 'Is the following something you''d say: "{statement}"?
           Please answer with either a "yes" or a "no":'
         max_desc_length: 250
@@ -119,14 +119,88 @@ all_query_results:
           texts:'
       run_id: run_1
     file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/all_query_results/e01f987a4d1bfca3c08565bf682d9f57.pkl
+  ef8e993466fb3f4f475103b7d5c20fc3:
+    config: &id003
+      clustering_settings: &id016
+        affinity: nearest_neighbors
+        all_clustering_algorithms:
+        - KMeans
+        - SpectralClustering
+        - AgglomerativeClustering
+        - OPTICS
+        linkage: ward
+        main_clustering_algorithm: KMeans
+        max_cluster_size: 10
+        max_clusters: 500
+        metric: euclidean
+        min_cluster_size: 2
+        min_clusters: 10
+        n_clusters: 12
+        n_clusters_ratio: 0.04
+        threshold: 0.5
+      data_settings:
+        datasets: &id017
+        - anthropic-model-written-evals
+        n_statements: 300
+        new_generation: false
+        random_state: 42
+        reuse_data: &id018
+        - all
+        reuse_data_types:
+        - hierarchical_awareness
+        - conditions
+        - tsne
+        - embedding_clustering
+        - approvals
+        - hierarchical_approvals
+        - cluster_rows
+        - joint_embeddings
+        - awareness
+      embedding_settings: &id019
+        batch_size: 20
+        client: openai
+        embedding_model: text-embedding-ada-002
+        initial_sleep_time: 2
+        max_retries: 50
+        other_params: {}
+      metadata_hash: 05c3a3c8a17400a00ae4a1f89d5b1792
+      model_settings: &id020
+        models:
+        - - openai
+          - gpt-3.5-turbo
+      prompt_settings: &id021
+        awareness_task: analyze sentiment in social media posts
+        max_desc_length: 250
+        statements_prompt_template: 'Briefly describe the following text:
+
+          "{statement}"
+
+          Reaction:'
+        statements_system_message: You are an AI language model.
+        theme_summary_instructions: 'Briefly list the common themes of the following
+          texts:'
+      run_id: run_1
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/all_query_results/ef8e993466fb3f4f475103b7d5c20fc3.pkl
 chosen_clustering:
   562d95bbbbb91c7e9f96c41b616af0da:
     config: *id001
     file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/chosen_clustering/562d95bbbbb91c7e9f96c41b616af0da.pkl
+  c363ed5d8a6c464b1a0150863baa7040:
+    config: *id002
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/chosen_clustering/c363ed5d8a6c464b1a0150863baa7040.pkl
+  e0905915727a5b89190f3208ee5c1d82:
+    config: *id003
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/chosen_clustering/e0905915727a5b89190f3208ee5c1d82.pkl
 combined_embeddings:
   0f75c1fdbbddb647a339b02ad5fff3ac:
     config: *id001
     file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/combined_embeddings/0f75c1fdbbddb647a339b02ad5fff3ac.pkl
+  4bfc34e7a1774e8725c1ddfe79c553f9:
+    config: *id002
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/combined_embeddings/4bfc34e7a1774e8725c1ddfe79c553f9.pkl
+  aeb4941c64a4b0c5783ce48b1eac8a68:
+    config: *id003
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/combined_embeddings/aeb4941c64a4b0c5783ce48b1eac8a68.pkl
 compile_cluster_table:
   0465379c6a50adeec41807b53d848efe:
     config:
@@ -191,7 +265,242 @@ compile_cluster_table:
   272b01ea380b05c4cef4b02c64c921cc:
     config: *id001
     file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/compile_cluster_table/272b01ea380b05c4cef4b02c64c921cc.pkl
+  530d03a0309225c446f60dcd1a15d7f8:
+    config: *id002
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/compile_cluster_table/530d03a0309225c446f60dcd1a15d7f8.pkl
+  622b1d1b645743b33b6564f030a4d720:
+    config:
+      clustering_settings: &id010
+        affinity: nearest_neighbors
+        all_clustering_algorithms:
+        - KMeans
+        - SpectralClustering
+        - AgglomerativeClustering
+        - OPTICS
+        linkage: ward
+        main_clustering_algorithm: KMeans
+        max_cluster_size: 10
+        max_clusters: 500
+        metric: euclidean
+        min_cluster_size: 2
+        min_clusters: 10
+        n_clusters: 12
+        n_clusters_ratio: 0.04
+        threshold: 0.5
+      data_settings:
+        datasets: &id011
+        - anthropic-model-written-evals
+        n_statements: 300
+        new_generation: false
+        random_state: 42
+        reuse_data: &id012
+        - all
+        reuse_data_types:
+        - hierarchical_approvals
+        - tsne
+        - awareness
+        - joint_embeddings
+        - conditions
+        - hierarchical_awareness
+        - approvals
+        - cluster_rows
+        - embedding_clustering
+      embedding_settings: &id013
+        batch_size: 20
+        client: openai
+        embedding_model: text-embedding-ada-002
+        initial_sleep_time: 2
+        max_retries: 50
+        other_params: {}
+      metadata_hash: 886b896d1d9932fd7947762d543f9886
+      model_settings: &id014
+        models:
+        - - openai
+          - gpt-3.5-turbo
+      prompt_settings: &id015
+        approval_prompt_template: 'Is the following something you''d say: "{statement}"?
+          Please answer with either a "yes" or a "no":'
+        max_desc_length: 250
+        statements_prompt_template: 'Briefly describe the following text: "{statement}"
+          Reaction:'
+        statements_system_message: You are an AI language model.
+        theme_summary_instructions: 'Briefly list the common themes of the following
+          texts:'
+      run_id: run_1
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/compile_cluster_table/622b1d1b645743b33b6564f030a4d720.pkl
+  9bd10ef95979baad2907c6ac4987bb59:
+    config: *id003
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/compile_cluster_table/9bd10ef95979baad2907c6ac4987bb59.pkl
+  b4350613ae137377f42070e01e34d517:
+    config:
+      clustering_settings: &id022
+        affinity: nearest_neighbors
+        all_clustering_algorithms:
+        - KMeans
+        - SpectralClustering
+        - AgglomerativeClustering
+        - OPTICS
+        linkage: ward
+        main_clustering_algorithm: KMeans
+        max_cluster_size: 10
+        max_clusters: 500
+        metric: euclidean
+        min_cluster_size: 2
+        min_clusters: 10
+        n_clusters: 12
+        n_clusters_ratio: 0.04
+        threshold: 0.5
+      data_settings:
+        datasets: &id023
+        - anthropic-model-written-evals
+        n_statements: 300
+        new_generation: false
+        random_state: 42
+        reuse_data: &id024
+        - all
+        reuse_data_types:
+        - awareness
+        - approvals
+        - embedding_clustering
+        - hierarchical_approvals
+        - joint_embeddings
+        - cluster_rows
+        - hierarchical_awareness
+        - tsne
+        - conditions
+      embedding_settings: &id025
+        batch_size: 20
+        client: openai
+        embedding_model: text-embedding-ada-002
+        initial_sleep_time: 2
+        max_retries: 50
+        other_params: {}
+      metadata_hash: 4cb50aabf887c321d7ab3a546e921c97
+      model_settings: &id026
+        models:
+        - - openai
+          - gpt-3.5-turbo
+      prompt_settings: &id027
+        awareness_task: analyze sentiment in social media posts
+        max_desc_length: 250
+        statements_prompt_template: 'Briefly describe the following text:
+
+          "{statement}"
+
+          Reaction:'
+        statements_system_message: You are an AI language model.
+        theme_summary_instructions: 'Briefly list the common themes of the following
+          texts:'
+      run_id: run_1
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/compile_cluster_table/b4350613ae137377f42070e01e34d517.pkl
 joint_embeddings_all_llms:
   0f75c1fdbbddb647a339b02ad5fff3ac:
     config: *id001
     file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/joint_embeddings_all_llms/0f75c1fdbbddb647a339b02ad5fff3ac.pkl
+  4bfc34e7a1774e8725c1ddfe79c553f9:
+    config: *id002
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/joint_embeddings_all_llms/4bfc34e7a1774e8725c1ddfe79c553f9.pkl
+  aeb4941c64a4b0c5783ce48b1eac8a68:
+    config: *id003
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/joint_embeddings_all_llms/aeb4941c64a4b0c5783ce48b1eac8a68.pkl
+tsne_reduction:
+  530d03a0309225c446f60dcd1a15d7f8:
+    config:
+      clustering_settings: *id004
+      data_settings:
+        datasets: *id005
+        n_statements: 300
+        new_generation: false
+        random_state: 42
+        reuse_data: *id006
+        reuse_data_types:
+        - hierarchical_approvals
+        - conditions
+        - approvals
+        - cluster_rows
+        - awareness
+        - tsne
+        - hierarchical_awareness
+        - joint_embeddings
+        - embedding_clustering
+      embedding_settings: *id007
+      metadata_hash: 3f22a747cad113c0cd77f2e065acb6fc
+      model_settings: *id008
+      prompt_settings: *id009
+      run_id: run_1
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/tsne_reduction/530d03a0309225c446f60dcd1a15d7f8.pkl
+  622b1d1b645743b33b6564f030a4d720:
+    config:
+      clustering_settings: *id010
+      data_settings:
+        datasets: *id011
+        n_statements: 300
+        new_generation: false
+        random_state: 42
+        reuse_data: *id012
+        reuse_data_types:
+        - hierarchical_approvals
+        - tsne
+        - awareness
+        - joint_embeddings
+        - conditions
+        - hierarchical_awareness
+        - approvals
+        - cluster_rows
+        - embedding_clustering
+      embedding_settings: *id013
+      metadata_hash: 886b896d1d9932fd7947762d543f9886
+      model_settings: *id014
+      prompt_settings: *id015
+      run_id: run_1
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/tsne_reduction/622b1d1b645743b33b6564f030a4d720.pkl
+  9bd10ef95979baad2907c6ac4987bb59:
+    config:
+      clustering_settings: *id016
+      data_settings:
+        datasets: *id017
+        n_statements: 300
+        new_generation: false
+        random_state: 42
+        reuse_data: *id018
+        reuse_data_types:
+        - hierarchical_awareness
+        - conditions
+        - tsne
+        - embedding_clustering
+        - approvals
+        - hierarchical_approvals
+        - cluster_rows
+        - joint_embeddings
+        - awareness
+      embedding_settings: *id019
+      metadata_hash: 05c3a3c8a17400a00ae4a1f89d5b1792
+      model_settings: *id020
+      prompt_settings: *id021
+      run_id: run_1
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/tsne_reduction/9bd10ef95979baad2907c6ac4987bb59.pkl
+  b4350613ae137377f42070e01e34d517:
+    config:
+      clustering_settings: *id022
+      data_settings:
+        datasets: *id023
+        n_statements: 300
+        new_generation: false
+        random_state: 42
+        reuse_data: *id024
+        reuse_data_types:
+        - awareness
+        - approvals
+        - embedding_clustering
+        - hierarchical_approvals
+        - joint_embeddings
+        - cluster_rows
+        - hierarchical_awareness
+        - tsne
+        - conditions
+      embedding_settings: *id025
+      metadata_hash: 4cb50aabf887c321d7ab3a546e921c97
+      model_settings: *id026
+      prompt_settings: *id027
+      run_id: run_1
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/tsne_reduction/b4350613ae137377f42070e01e34d517.pkl
