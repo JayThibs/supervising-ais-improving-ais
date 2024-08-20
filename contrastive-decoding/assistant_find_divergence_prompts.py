@@ -144,22 +144,27 @@ class DivergenceFinder:
             self.local_embedding_tokenizer = None
     
         # Load system prompt, user instructions, and any seed demonstrations from prompts_json_path:
-        with open(self.prompts_json_path, 'r') as f:
-            self.prompts_data = json.load(f)
-        
-        self.system_start_prompt = self.prompts_data['system_start']
-        self.system_loop_prompt = self.prompts_data['system_loop']
-        self.system_end_prompt = self.prompts_data['system_end']
-        self.user_start_prompt = self.prompts_data['user_start']
-        self.user_loop_prompt = self.prompts_data['user_loop']
-        self.user_end_prompt = self.prompts_data['user_end']
-        self.seed_demonstrations_list = self.prompts_data['seed_demonstrations']
+        self.prompts_data = {}
+        for topic in kwargs.get('topics', []):
+            filename = f"assistant_prompts/{topic.lower().replace(' ', '_')}_find_high_div_prompts.json"
+            if os.path.exists(filename):
+                with open(filename, 'r') as f:
+                    self.prompts_data[topic] = json.load(f)
+
+        self.system_start_prompt = self.prompts_data[topics[0]]['system_start'] if topics else ""
+        self.system_loop_prompt = self.prompts_data[topics[0]]['system_loop'] if topics else ""
+        self.system_end_prompt = self.prompts_data[topics[0]]['system_end'] if topics else ""
+        self.user_start_prompt = self.prompts_data[topics[0]]['user_start'] if topics else ""
+        self.user_loop_prompt = self.prompts_data[topics[0]]['user_loop'] if topics else ""
+        self.user_end_prompt = self.prompts_data[topics[0]]['user_end'] if topics else ""
+        self.seed_demonstrations_list = self.load_topic_specific_prompts(topics)
+
         if self.use_custom_selection_criterion:
-            self.custom_selection_criterion = self.prompts_data['custom_selection_criterion']
-            self.custom_selection_criterion_yes_response = self.prompts_data['custom_selection_criterion_yes_response']
-            self.custom_selection_criterion_no_response = self.prompts_data['custom_selection_criterion_no_response']
+            self.custom_selection_criterion = self.prompts_data[topics[0]]['custom_selection_criterion'] if topics else ""
+            self.custom_selection_criterion_yes_response = self.prompts_data[topics[0]]['custom_selection_criterion_yes_response'] if topics else []
+            self.custom_selection_criterion_no_response = self.prompts_data[topics[0]]['custom_selection_criterion_no_response'] if topics else []
         if self.use_custom_selection_criterion_examples:
-            self.custom_selection_criterion_examples = self.prompts_data['custom_selection_criterion_examples']
+            self.custom_selection_criterion_examples = self.prompts_data[topics[0]]['custom_selection_criterion_examples'] if topics else []
         else:
             self.custom_selection_criterion_examples = None
 

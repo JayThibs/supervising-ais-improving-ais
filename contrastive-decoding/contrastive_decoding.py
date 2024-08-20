@@ -5,10 +5,14 @@ import tqdm
 from transformers import BitsAndBytesConfig, PreTrainedTokenizer
 import torch
 from typing import Optional, List
+import logging
 
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class ContrastiveDecoder:
     def __init__(self, **kwargs):
+        logging.info("Initializing ContrastiveDecoder")
         # Default values
         self.model_name : str = "gpt2-xl"
         self.generation_length : int = 20
@@ -60,10 +64,12 @@ class ContrastiveDecoder:
         for key, value in kwargs.items():
             setattr(self, key, value)
 
+        logging.info(f"ContrastiveDecoder initialized with parameters: {kwargs}")
+
         #torch.autograd.set_detect_anomaly(True)
         with torch.no_grad():
             if self.model is None or self.tokenizer is None:
-                print("Building models/tokenizer:")
+                logging.info("Building models/tokenizer:")
                 bnb_config = BitsAndBytesConfig(
                     load_in_8bit=True,
                     bnb_8bit_use_double_quant=True,
@@ -93,6 +99,7 @@ class ContrastiveDecoder:
                 )
 
     def decode(self, **kwargs) -> dict:
+        logging.info("Starting decode method")
         if kwargs:
             if self.model is None or self.tokenizer is None or "starting_model" in kwargs or "comparison_model" in kwargs:
                 self.__init__(**kwargs)
@@ -125,9 +132,9 @@ class ContrastiveDecoder:
         #print(input_ids)
 
         if self.experiment_type == 'targeted':
-            return self.targeted_decode(input_ids)
-
-        generations = self.decode_loop(input_ids, 
+            result = self.targeted_decode(input_ids)
+        else:
+            result = self.decode_loop(input_ids, 
                                   self.model, 
                                   self.tokenizer,
                                   self.generation_length, 
@@ -142,7 +149,7 @@ class ContrastiveDecoder:
 
         if self.return_divergences:
             with torch.no_grad():
-                text_ids = torch.tensor(generations).to(self.device)
+                text_ids = torch.tensor(result).to(self.device)
                 div_output = self.model.calculate_current_divergence(text_ids, 
                                                                      batch_size = self.batch_size,
                                                                      end_tokens_to_only_consider = 0 if self.include_prefix_in_divergences else self.generation_length,
@@ -156,7 +163,7 @@ class ContrastiveDecoder:
                     comparison_model_perplexities = div_output['comparison_model_perplexities']
                 if self.return_all_token_divergences:
                     all_token_divergences = torch.tensor(div_output['all_token_divergences'])
-                    print("all_token_divergences.size", all_token_divergences.size())
+                    logging.info(f"all_token_divergences.size: {all_token_divergences.size()}")
                     if self.print_texts:
                         # Linearly map all_token_divergences to [0, 1]
                         max_divergence = torch.max(all_token_divergences[:, self.set_prefix_len:]).item()
@@ -287,6 +294,8 @@ class ContrastiveDecoder:
             result["comparison_model_perplexities"] = comparison_model_perplexities
         if self.return_all_token_divergences:
             result["all_token_divergences"] = all_token_divergences.tolist()
+
+        logging.info(f"Decode method completed. Number of texts: {len(result['texts'])}")
         return result
 
     def targeted_decode(self, input_ids):
@@ -477,30 +486,34 @@ class ContrastiveDecoder:
                 attention_mask = torch.ones_like(batch_ids)
                 attention_mask[batch_ids == self.tokenizer.pad_token_id] = 0
                 if not num_beams is None:
-                    generations_batch = model.generate(batch_ids, 
-                                                       attention_mask=attention_mask,
-                                                       do_sample=sampling, 
-                                                       max_new_tokens=generation_length, 
-                                                       min_length=output_len, 
-                                                       top_k=None, 
-                                                       top_p=top_p, 
-                                                       num_return_sequences=generations_per_prefix,
-                                                       num_beams=num_beams,
-                                                       num_beam_groups=num_beam_groups,
-                                                       diversity_penalty=diversity_penalty,
-                                                       temperature=temperature,
-                                                       return_dict_in_generate=True
-                                                      ).sequences.tolist()
+                    generations_batch = model.generate(
+                        batch_ids, 
+                        attention_mask=attention_mask,
+                        do_sample=sampling, 
+                        max_new_tokens=generation_length, 
+                        min_length=output_len, 
+                        top_k=None, 
+                        top_p=top_p, 
+                        num_return_sequences=generations_per_prefix,
+                        num_beams=num_beams,
+                        num_beam_groups=num_beam_groups,
+                        diversity_penalty=diversity_penalty,
+                        temperature=temperature,
+                        return_dict_in_generate=True,
+                        use_cache=False  # Disable the use of past key values
+                    ).sequences.tolist()
                 else:
-                    generations_batch = model.generate(batch_ids, 
-                                                    do_sample=sampling, 
-                                                    max_new_tokens=generation_length, 
-                                                    min_length=output_len, 
-                                                    top_k=None, 
-                                                    top_p=top_p, 
-                                                    num_return_sequences=generations_per_prefix,
-                                                    temperature=temperature,
-                                                    return_dict_in_generate=True
-                                                    ).sequences.tolist()
+                    generations_batch = model.generate(
+                        batch_ids, 
+                        do_sample=sampling, 
+                        max_new_tokens=generation_length, 
+                        min_length=output_len, 
+                        top_k=None, 
+                        top_p=top_p, 
+                        num_return_sequences=generations_per_prefix,
+                        temperature=temperature,
+                        return_dict_in_generate=True,
+                        use_cache=False  # Disable the use of past key values
+                    ).sequences.tolist()
                 generations += generations_batch
         return generations

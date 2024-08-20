@@ -3,6 +3,11 @@ import pandas as pd
 import argparse
 import json
 import sys
+import logging
+import traceback
+
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 parser = argparse.ArgumentParser(description='Run contrastive decoding.')
 parser.add_argument('--target', type=str, default='debug', help='Target to run.')
@@ -568,6 +573,23 @@ if 'prefixes_path' in kwargs:
 if 'save_texts_loc' not in kwargs:
     kwargs['save_texts_loc'] = f"outputs/{target}_output.txt"
 
-# Run ContrastiveDecoder
-cd = RealTimeContrastiveDecoder(**kwargs)
-cd.decode()
+try:
+    logging.info("Starting ContrastiveDecoder")
+    cd = ContrastiveDecoder(**kwargs)
+    logging.info("Running decode method")
+    results = cd.decode()
+    logging.info(f"Decode completed. Number of results: {len(results.get('texts', []))}")
+
+    # Save results to a JSON file
+    results_file = f"cd_results_{int(time.time())}.json"
+    with open(results_file, 'w') as f:
+        json.dump(results, f)
+    logging.info(f"Results saved to {results_file}")
+
+    # Print results for Streamlit to capture
+    print(f"RESULT: {json.dumps(results)}")
+
+except Exception as e:
+    logging.error(f"An error occurred: {str(e)}")
+    logging.error(traceback.format_exc())
+    print(f"ERROR: {str(e)}")

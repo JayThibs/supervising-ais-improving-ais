@@ -5,6 +5,10 @@ from dotenv import load_dotenv
 import json
 import time
 from typing import List, Dict
+import psutil
+import GPUtil
+import logging
+import traceback
 
 # Get the directory containing the current script (streamlit_app.py)
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -28,11 +32,35 @@ from ai_assistant import AIAssistant
 st.set_page_config(layout="wide")
 st.title("Automated Model Divergence Analysis")
 
+# Add this function to check GPU memory
+def get_gpu_memory():
+    gpus = GPUtil.getGPUs()
+    if gpus:
+        gpu = gpus[0]
+        return f"GPU Memory: {gpu.memoryUsed}MB / {gpu.memoryTotal}MB"
+    return "No GPU detected"
+
 @st.cache_resource
-def load_model(model_name):
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=torch.float16, device_map="auto")
-    return model, tokenizer
+def load_models(model1_name, model2_name):
+    if 'current_model1' in st.session_state:
+        del st.session_state.current_model1
+        del st.session_state.current_tokenizer1
+    if 'current_model2' in st.session_state:
+        del st.session_state.current_model2
+        del st.session_state.current_tokenizer2
+    torch.cuda.empty_cache()
+    
+    tokenizer1 = AutoTokenizer.from_pretrained(model1_name)
+    model1 = AutoModelForCausalLM.from_pretrained(model1_name, torch_dtype=torch.float16, device_map="auto")
+    
+    tokenizer2 = AutoTokenizer.from_pretrained(model2_name)
+    model2 = AutoModelForCausalLM.from_pretrained(model2_name, torch_dtype=torch.float16, device_map="auto")
+    
+    st.session_state.current_model1 = model1
+    st.session_state.current_tokenizer1 = tokenizer1
+    st.session_state.current_model2 = model2
+    st.session_state.current_tokenizer2 = tokenizer2
+    return (model1, tokenizer1), (model2, tokenizer2)
 
 def load_prompts(topics):
     prompts = []
@@ -66,8 +94,16 @@ def run_cd_with_updates(command: List[str], output_placeholder):
             result = json.loads(line[7:])
             results.append(result)
             output_placeholder.json(result)
+        elif line.startswith("ERROR:"):
+            error_message = line[6:].strip()
+            output_placeholder.error(f"Error occurred: {error_message}")
         else:
             output_placeholder.text(line.strip())
+    
+    # Check for any errors in stderr
+    stderr_output = process.stderr.read()
+    if stderr_output:
+        output_placeholder.error(f"Error output:\n{stderr_output}")
     
     return results
 
@@ -97,6 +133,17 @@ with tab1:
     
     model1 = st.selectbox("Select Model 1", available_models, help="The first model to use in the comparison")
     model2 = st.selectbox("Select Model 2", available_models, help="The second model to use in the comparison")
+    
+    # Add a single button to load both models
+    if st.button("Load Models"):
+        with st.spinner(f"Loading {model1} and {model2}..."):
+            load_models(model1, model2)
+        st.success(f"Both models loaded successfully!")
+    
+    # Display GPU memory usage
+    gpu_memory = get_gpu_memory()
+    gpu_memory_placeholder = st.empty()
+    gpu_memory_placeholder.info(gpu_memory)
     
     topics = st.multiselect("Select Topics of Interest", ["Bias", "Factual Accuracy", "Reasoning", "Creativity"], help="Choose the topics you want to focus on in the experiment")
     num_cycles = st.slider("Number of Experiment Cycles", 1, 10, 5, help="The number of times to run the experiment")
@@ -214,8 +261,9 @@ with tab3:
             
             if quantize:
                 command.append("--quantize")
-            if cache_attn:
-                command.append("--cache_attn")
+            # Remove the cache_attn flag
+            # if cache_attn:
+            #     command.append("--cache_attn")
             
             st.write("Command to be executed:", " ".join(command))
             
@@ -224,17 +272,22 @@ with tab3:
             with st.spinner("Running Contrastive Decoding..."):
                 try:
                     results = run_cd_with_updates(command, output_placeholder)
-                    st.success("Contrastive Decoding run completed!")
-                    
-                    # Save results to a JSON file
-                    results_file = os.path.join(current_dir, f"cd_results_{int(time.time())}.json")
-                    with open(results_file, 'w') as f:
-                        json.dump(results, f)
-                    st.success(f"Results saved to {results_file}")
-                    
-                    # Store results in session state for use in other tabs
-                    st.session_state.cd_results = results
-                    
+                    if results:
+                        st.success("Contrastive Decoding run completed!")
+                        st.write("Results:")
+                        st.json(results)
+                        
+                        # Save results to a JSON file
+                        results_file = os.path.join(current_dir, f"cd_results_{int(time.time())}.json")
+                        with open(results_file, 'w') as f:
+                            json.dump(results, f)
+                        st.success(f"Results saved to {results_file}")
+                        
+                        # Store results in session state for use in other tabs
+                        st.session_state.cd_results = results
+                    else:
+                        st.warning("No results were returned from the Contrastive Decoding process.")
+                
                 except Exception as e:
                     st.error(f"Unexpected error: {str(e)}")
             
