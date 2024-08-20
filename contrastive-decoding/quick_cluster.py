@@ -17,7 +17,7 @@ import sys
 sys.path.append("..")
 from model_comparison_helpers import string_with_token_colors
 from typing import List, Tuple, Dict
-from analysis_helpers import literal_eval_fallback
+from outputs.analysis_helpers import literal_eval_fallback
 
 import warnings
 warnings.filterwarnings('ignore', message='You have modified the pretrained model configuration to control generation.*')

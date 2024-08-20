@@ -118,3 +118,213 @@ Example usage: python run_find_divergence_prompts.py --target social_bias --gens
 This script allows researchers to systematically explore and generate prompts that highlight differences in behavior between language models, which aims to help with model analysis, bias detection, and robustness testing.
 
 Warning: depending on the models you use and your seed texts, the social biases prompt search can potentially produce some pretty offensive prompts.
+
+## Automated Model Divergence Analysis
+
+This project implements an automated pipeline for analyzing divergences between language models using contrastive decoding and GPT-4 guided experimentation.
+
+## Prerequisites
+
+- Python 3.8+
+- CUDA-compatible GPU (recommended for faster processing)
+- OpenAI API key (for GPT-4 access)
+
+## Installation
+
+1. Clone the repository:
+   ```
+   git clone https://github.com/JayThibs/supervising-ais-improving-ais.git
+   cd supervising-ais-improving-ais
+   ```
+
+2. Install the required dependencies:
+   ```
+   pip install -r requirements.txt
+   ```
+
+3. Set up your OpenAI API key as an environment variable:
+   ```
+   export OPENAI_API_KEY='your-api-key-here'
+   ```
+
+## Usage
+
+### Step 1: Prepare Your Models
+
+Ensure you have access to the language models you want to compare. Update the `model_comparison_helpers.py` file if needed to support your specific models.
+
+### Step 2: Configure the Experiment
+
+Edit the `run_CD.py` file to set up your experiment configuration. Modify the `kwargs` dictionary to specify your models, tokenizers, and other parameters.
+
+### Step 3: Run Contrastive Decoding
+
+Execute the contrastive decoding process:
+
+```
+python run_CD.py --target your_target_name
+```
+
+Replace `your_target_name` with the appropriate target from your configuration.
+
+### Step 4: Analyze Output Statistics
+
+Process the output statistics:
+
+```
+python outputs/analyze_output_stats.py
+```
+
+This script will generate statistical data about the model divergences.
+
+### Step 5: Process Output Statistics
+
+Generate visualizations and further analysis:
+
+```
+python outputs/process_output_stats.py --stats_file your_stats_file.pkl --tokenizer_str "your_tokenizer_name" --run_substrs "your_run_substrings"
+```
+
+Replace the placeholders with your specific file names and parameters.
+
+### Step 6: Run the Streamlit App
+
+To use the interactive Streamlit application for running experiments and visualizing results:
+
+```
+streamlit run contrastive-decoding/streamlit_app.py
+```
+
+
+This will start a local server, and you can access the app through your web browser.
+
+## File Descriptions
+
+- `contrastive_decoding.py`: Contains the core `ContrastiveDecoder` class for performing contrastive decoding.
+- `model_comparison_helpers.py`: Provides utility functions for model comparison and instantiation.
+- `run_CD.py`: Main script for running contrastive decoding experiments.
+- `enhanced_divergence_finder.py`: Implements the `EnhancedDivergenceFinder` class for GPT-4 guided prompt generation and divergence analysis.
+- `experimentation_agent.py`: Contains the `ExperimentationAgent` class for designing and running experiments.
+- `topic_analyzer.py`: Implements the `TopicAnalyzer` class for assessing topic relevance and summarizing findings.
+- `knowledge_base.py`: Manages the accumulation and retrieval of experimental findings.
+- `logger.py`: Provides logging functionality for experiments and results.
+- `visualizer.py`: Creates visualizations of experiment results.
+- `gpt4_interface.py`: Manages interactions with the GPT-4 API.
+- `automated_pipeline.py`: Orchestrates the entire experimental process.
+- `streamlit_app.py`: Implements the Streamlit web application for interactive experimentation.
+
+## Notes
+
+- GPU usage is recommended for faster processing, especially when working with large language models.
+- The scripts are designed to be run in the order presented above, but the Streamlit app (`streamlit_app.py`) can be used as a standalone interface for running experiments.
+- Make sure to handle your API keys securely and never commit them to version control.
+
+## Troubleshooting
+
+If you encounter any issues or have questions, please open an issue in the GitHub repository or contact the maintainers.
+
+### Step 4: Run Prompt Search
+
+Run the prompt search script to generate prompts that highlight divergences between the models:
+
+```
+python run_find_divergence_prompts.py --target social_bias --gens_per_prefix 5 --local_model "NousResearch/Meta-Llama-3-8B-Instruct" --use_embeddings_diversity_score
+```
+
+This step uses the `DivergenceFinder` class to generate prompts that are likely to produce divergent outputs between the models.
+
+### Step 5: Analyze Results
+
+Use the generated prompts and contrastive decoding results to analyze the divergences between the models. This may involve:
+
+- Manual review of the generated prompts and model outputs
+- Visualization of divergence scores and patterns
+- Further processing of the output data using the analysis scripts
+
+### Step 6: Refine and Repeat
+
+Based on the insights gained from the previous steps:
+
+- Refine your experiment configuration
+- Adjust the models or tokenizers used
+- Modify prompt search parameters
+- Repeat the process to further explore and analyze the divergences between the language models
+
+### Step 7: Analyze Output Statistics
+
+Process the output statistics:
+
+```
+python outputs/analyze_output_stats.py
+```
+
+This script will generate statistical data about the model divergences.
+
+### Step 8: Process Output Statistics
+
+Generate visualizations and further analysis:
+
+```
+python outputs/process_output_stats.py --stats_file your_stats_file.pkl --tokenizer_str "your_tokenizer_name" --run_substrs "your_run_substrings"
+```
+
+Replace the placeholders with your specific file names and parameters.
+
+### Step 9: Run the Streamlit App
+
+To use the interactive Streamlit application for running experiments and visualizing results:
+
+```
+streamlit run streamlit_app.py
+```
+
+This will start a local server, and you can access the app through your web browser.
+
+## File Descriptions
+
+- `contrastive_decoding.py`: Contains the core `ContrastiveDecoder` class for performing contrastive decoding.
+- `model_comparison_helpers.py`: Provides utility functions for model comparison and instantiation.
+- `run_CD.py`: Main script for running contrastive decoding experiments.
+- `run_find_divergence_prompts.py`: Script for running the prompt search process.
+- `enhanced_divergence_finder.py`: Implements the `EnhancedDivergenceFinder` class for GPT-4 guided prompt generation and divergence analysis.
+- `experimentation_agent.py`: Contains the `ExperimentationAgent` class for designing and running experiments.
+- `topic_analyzer.py`: Implements the `TopicAnalyzer` class for assessing topic relevance and summarizing findings.
+- `knowledge_base.py`: Manages the accumulation and retrieval of experimental findings.
+- `logger.py`: Provides logging functionality for experiments and results.
+- `visualizer.py`: Creates visualizations of experiment results using Plotly.
+- `gpt4_interface.py`: Manages interactions with the GPT-4 API for text generation and analysis tasks.
+- `automated_pipeline.py`: Orchestrates the entire experimental process.
+- `streamlit_app.py`: Implements the Streamlit web application for interactive experimentation.
+
+## Additional Files
+
+### topic_analyzer.py
+
+This file contains the `TopicAnalyzer` class, which handles topic-specific analysis of texts, including relevance assessment and summarization. It uses the GPT-4 interface to evaluate the relevance of texts to specified topics and generate summaries of findings.
+
+### knowledge_base.py
+
+This file implements the `KnowledgeBase` class, which manages the accumulation and retrieval of findings throughout the experiment process. It provides methods to update the knowledge base with new findings and retrieve summaries or all findings.
+
+### logger.py
+
+This file provides the `Logger` class, which offers logging functionality for experiments, results, and analyses. It allows for structured logging of experiment details and can generate comprehensive reports of the experimental process.
+
+### visualizer.py
+
+This file contains the `Visualizer` class, which creates various visualizations of the experiment results using Plotly. It includes methods for plotting divergence trends, topic relevance scores, and hypothesis validation results.
+
+### gpt4_interface.py
+
+This file implements the `GPT4Interface` class, which manages interactions with the GPT-4 API for text generation and analysis tasks. It provides methods for generating text based on prompts and analyzing text based on specific instructions.
+
+## Notes
+
+- GPU usage is recommended for faster processing, especially when working with large language models.
+- The scripts are designed to be run in the order presented above, but the Streamlit app (`streamlit_app.py`) can be used as a standalone interface for running experiments.
+- Make sure to handle your API keys securely and never commit them to version control.
+- This project is still under development, and the code may change significantly as it evolves. Please be cautious when using this code and ensure you understand the implications of any changes you make.
+
+## Troubleshooting
+
+If you encounter any issues or have questions, please open an issue in the GitHub repository or contact the maintainers.

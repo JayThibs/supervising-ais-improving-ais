@@ -7,7 +7,7 @@ from wordcloud import WordCloud
 from transformers import AutoTokenizer
 import sys
 sys.path.append("outputs")
-from analysis_helpers import literal_eval_fallback
+from outputs.analysis_helpers import literal_eval_fallback
 import numpy as np
 
 # Given a list of text tokens, a list of divergences, and value n, this function finds each n-token long ngram in text and

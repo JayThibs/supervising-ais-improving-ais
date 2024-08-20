@@ -12,10 +12,10 @@ from terminaltables import AsciiTable
 import textwrap
 import pickle
 from typing import Optional, List, Tuple
+from ai_assistant import AIAssistant
 import sys
 sys.path.append("outputs/")
 from quick_cluster import read_past_embeddings_or_generate_new
-
 def get_results_embeddings_and_divergences(texts : List[str],
                                            local_embedding_model_str : str,
                                            local_embedding_model : PreTrainedModel,
@@ -41,17 +41,18 @@ def get_results_embeddings_and_divergences(texts : List[str],
     
 
 class DivergenceFinder:
-    def __init__(self, **kwargs):
+    def __init__(self, model_name, starting_model_path, comparison_model_path, generation_length, n_cycles_ask_assistant, ai_model="gpt-4", **kwargs):
+        self.ai_assistant = AIAssistant(model=ai_model)
         # Default values
-        self.model_name : str = "gpt2-xl"
-        self.generation_length : int = 25
+        self.model_name : str = model_name
+        self.generation_length : int = generation_length
         self.n_cycles_ask_assistant : int = 2
         self.max_failed_cycles : int = 20
         self.openai_model_str : Optional[str] = None
         self.local_model_str : str = "NousResearch/Meta-Llama-3-8B-Instruct"
         self.generations_per_prefix : int = 5
-        self.starting_model_path : str = "NousResearch/Meta-Llama-3-8B-Instruct"
-        self.comparison_model_path : str = "NousResearch/Meta-Llama-3-8B"
+        self.starting_model_path : str = starting_model_path
+        self.comparison_model_path : str = comparison_model_path
         self.starting_model_weight : float = 1
         self.comparison_model_weight : float = -1
         self.comparison_model_interpolation_weight : float = 0.0
@@ -556,59 +557,68 @@ class DivergenceFinder:
     # output_text: The string of text to interpret.
     # as_json: Whether to interpret the text as a json object or a newline-separated list of texts.
     # fallback_to_newlines: Whether to interpret the text as a newline-separated list of texts if the json parsing fails.
-    def interpret_assistant_outputs(self,
-                                    output_text : str, 
-                                    as_json : bool = True, 
-                                    fallback_to_newlines : bool = False) -> List[str]:
-        json_parse_fail = False
+    def interpret_assistant_outputs(self, output_text: str, as_json: bool = True, fallback_to_newlines: bool = True) -> List[str]:
         prompts = []
+        
         if as_json:
-            # Interpret output_text as a json object with a dictionary and parse it:
-            # First, remove all characters before the first '{' character
-            filtered_output_text = output_text[output_text.find('{'):]
-            # Then, find the corresponding closing '}' character
-            end_index = find_matching_brace(filtered_output_text)
-            if end_index != -1:
-                filtered_output_text = filtered_output_text[:end_index+1]
-            else:
-                print("Error: Could not find matching '}' character.")
-                json_parse_fail = True
             try:
-                output_text_json = json.loads(filtered_output_text)
-            except:
-                print("Error: Could not parse output_text as a json object.")
+                # Find the first '{' and last '}' to extract the JSON object
+                start = output_text.find('{')
+                end = output_text.rfind('}') + 1
+                if start != -1 and end != -1:
+                    json_str = output_text[start:end]
+                    output_text_json = json.loads(json_str)
+                    
+                    if isinstance(output_text_json, dict):
+                        # Extract and sort prompts from dictionary
+                        entries = output_text_json.items()
+                        prompt_entries = [entry for entry in entries if ("prompt" in entry[0].lower() or "response" in entry[0].lower())]
+                        prompt_entries = sorted(prompt_entries, key=lambda x: int(re.search(r'\d+', x[0]).group()) if re.search(r'\d+', x[0]) else 0)
+                        prompts = [entry[1] for entry in prompt_entries]
+                    elif isinstance(output_text_json, list):
+                        prompts = output_text_json
+                    else:
+                        raise ValueError("Unexpected JSON structure")
+                else:
+                    raise ValueError("No valid JSON object found in the response")
+            except json.JSONDecodeError:
+                print("Error: Could not parse output_text as a JSON object.")
                 print(output_text)
-                print("Attempting to use assistant to extract json...")
-                extraction_prompt = f"Extract the json object from the following text, and say nothing but the json object:\n{output_text}"
+                print("Attempting to use assistant to extract JSON...")
+                extraction_prompt = f"Extract the JSON object from the following text, and say nothing but the JSON object:\n{output_text}"
                 messages = [{"role": "system", "content": extraction_prompt}]
                 assistant_extract_json = self.get_continuation(messages, self.openai_model_str, self.client, self.local_model, self.local_tokenizer, self.device, temperature=0.0)
-                output_text = assistant_extract_json
                 try:
-                    filtered_assistant_extract_json = assistant_extract_json[assistant_extract_json.find('{'):]
-                    filtered_assistant_extract_json = filtered_assistant_extract_json[:filtered_assistant_extract_json.rfind('}')+1]
+                    filtered_assistant_extract_json = assistant_extract_json[assistant_extract_json.find('{'):assistant_extract_json.rfind('}')+1]
                     output_text_json = json.loads(filtered_assistant_extract_json)
+                    prompts = [v for k, v in output_text_json.items() if 'prompt' in k.lower() or 'response' in k.lower()]
                 except:
-                    print("Error: Could not parse assistant output as a json object.")
+                    print("Error: Could not parse assistant output as a JSON object.")
                     print(assistant_extract_json)
-                    json_parse_fail = True
-            if not json_parse_fail:
-                # Extract all entries from the dictionary
-                entries = output_text_json.items()
-                #print("output_text_json", output_text_json)
-                # Filter out entries that do not start with "prompt"
-                prompt_entries = [entry for entry in entries if ("prompt" in entry[0].lower() or "response" in entry[0].lower())]
-                # Sort the prompt entries by the number at the end of the key (e.g. "prompt 1", "prompt 2", ...)
-                prompt_entries = sorted(prompt_entries, key=lambda x: int(re.search(r'\d+', x[0]).group()))
-                # Extract the values (i.e. the texts) from the prompt entries
-                prompts = [entry[1] for entry in prompt_entries]
-        if not as_json or (json_parse_fail and fallback_to_newlines):
-            # Interpret output_text as a list of texts separated by newlines
-            if json_parse_fail:
-                # Try to strip out any json-related characters and split by newlines
-                output_text = re.sub(r'[^a-zA-Z0-9\s]', '', output_text)
-                output_text = output_text.replace("\n\n", "\n")
-            prompts = output_text.split("\n")
-        return prompts
+                    if not fallback_to_newlines:
+                        return []
+        
+        if not as_json or (len(prompts) == 0 and fallback_to_newlines):
+            # Fallback to parsing as plain text
+            prompts = self._parse_plain_text(output_text)
+        
+        # Clean and validate prompts
+        cleaned_prompts = [self._clean_prompt(p) for p in prompts if p]
+        return cleaned_prompts
+
+    def _parse_plain_text(self, text: str) -> List[str]:
+        # Try to strip out any JSON-related characters and split by newlines
+        text = re.sub(r'[^a-zA-Z0-9\s]', '', text)
+        text = text.replace("\n\n", "\n")
+        lines = text.split("\n")
+        return [line.strip() for line in lines if line.strip()]
+
+    def _clean_prompt(self, prompt: str) -> str:
+        # Remove any leading numbers or special characters
+        prompt = re.sub(r'^[\d\W]+', '', prompt).strip()
+        # Remove any "Prompt:" or similar prefixes
+        prompt = re.sub(r'^(prompt|question|query|text):\s*', '', prompt, flags=re.IGNORECASE)
+        return prompt
         
 
 # This function takes in a list of divergences / texts / response / custom_score tuples, and rescales the divergences into [0, max_div].

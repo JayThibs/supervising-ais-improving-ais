@@ -53,6 +53,8 @@ class ContrastiveDecoder:
         self.batch_size : int = 1
         self.return_all_token_divergences : bool = False
         self.comparison_model_interpolation_weight : float = 0.0
+        self.experiment_type : str = 'default'
+        self.targeted_topics : List[str] = []
 
          # Update with any arguments passed to the constructor
         for key, value in kwargs.items():
@@ -122,6 +124,9 @@ class ContrastiveDecoder:
         marker_id = self.tokenizer.convert_tokens_to_ids("|")
         #print(input_ids)
 
+        if self.experiment_type == 'targeted':
+            return self.targeted_decode(input_ids)
+
         generations = self.decode_loop(input_ids, 
                                   self.model, 
                                   self.tokenizer,
@@ -138,6 +143,169 @@ class ContrastiveDecoder:
         if self.return_divergences:
             with torch.no_grad():
                 text_ids = torch.tensor(generations).to(self.device)
+                div_output = self.model.calculate_current_divergence(text_ids, 
+                                                                     batch_size = self.batch_size,
+                                                                     end_tokens_to_only_consider = 0 if self.include_prefix_in_divergences else self.generation_length,
+                                                                     return_perplexities = self.return_perplexities,
+                                                                     return_all_token_divergences = self.return_all_token_divergences,
+                                                                     use_avg_KL_as_divergences = self.use_avg_KL_as_divergences
+                                                                )                
+                divergences = torch.tensor(div_output['divergences'])
+                if self.return_perplexities:
+                    starting_model_perplexities = div_output['starting_model_perplexities']
+                    comparison_model_perplexities = div_output['comparison_model_perplexities']
+                if self.return_all_token_divergences:
+                    all_token_divergences = torch.tensor(div_output['all_token_divergences'])
+                    print("all_token_divergences.size", all_token_divergences.size())
+                    if self.print_texts:
+                        # Linearly map all_token_divergences to [0, 1]
+                        max_divergence = torch.max(all_token_divergences[:, self.set_prefix_len:]).item()
+                        min_divergence = torch.min(all_token_divergences[:, self.set_prefix_len:]).item()
+                        all_token_colorings = (all_token_divergences - min_divergence) / max(max_divergence - min_divergence, 1e-7)                    
+
+
+                text_ids = torch.cat((text_ids[:,:self.set_prefix_len], torch.full((text_ids.size(0), 1), marker_id, device=self.device), text_ids[:,self.set_prefix_len:]), dim=1)
+                generations = text_ids.tolist()
+                generated_texts = self.tokenizer.batch_decode(generations)
+                generated_tokens = [[self.tokenizer.convert_ids_to_tokens(t) for t in g] for g in generations]
+                n_divergences = len(divergences)
+
+                block_avg_divergences = []
+                for j in range(0, n_divergences, self.generations_per_prefix):
+                    block_mean = torch.mean(divergences[j:j+self.generations_per_prefix])
+                    for _ in range(self.generations_per_prefix):
+                        block_avg_divergences.append(block_mean)
+                block_avg_divergences = torch.stack(block_avg_divergences).to(torch.float64)
+
+                if self.beam_search_sort is None and not self.sort_by_divergences and not self.num_beams is None:
+                    self.beam_search_sort = True
+
+                if self.sort_by_divergences:
+                    if self.single_prefix is None:
+                        # Create a new divergences list whose entries are averages of the entries in each sequential span of generations_per_prefix sized blocks in decoder_divergences
+                        # Add a small amount of the original divergences so texts are also sorted within blocks.
+                        block_avg_divergences = block_avg_divergences + 1e-7 * divergences.to(torch.float64)
+                        #print(block_avg_divergences)
+                        _, indices = torch.topk(block_avg_divergences, k = n_divergences)
+                    else:
+                        _, indices = torch.topk(divergences, k = n_divergences)
+                elif self.beam_search_sort:
+                    # Sorting by beam search
+                    # Create indices for the original text ordering
+                    original_indices = torch.tensor(range(len(generated_texts)))
+
+                    # Sort original_indices by block_avg_divergences
+                    _, indices = torch.topk(block_avg_divergences, k = n_divergences)
+                    original_indices = original_indices[indices]
+
+                    # Now within each generations_per_prefix block of original_indices, sort alphabetically
+                    # according to the generated_texts
+                    for i in range(0, len(original_indices), self.generations_per_prefix):
+                        block_indices = original_indices[i:i+self.generations_per_prefix]
+                        block_texts = [generated_texts[j] for j in block_indices]
+                        sorted_block_indices = torch.tensor([x for _, x in sorted(zip(block_texts, block_indices))])
+                        original_indices[i:i+self.generations_per_prefix] = sorted_block_indices
+                    indices = original_indices
+                else:
+                    # No sorting
+                    indices = torch.tensor(range(len(generated_texts)))
+
+                text_ids = text_ids[indices]
+                divergences = divergences[indices]
+                generated_texts = [generated_texts[i] for i in indices]
+                generated_tokens = [generated_tokens[i] for i in indices]
+                generations = [generations[i] for i in indices]
+                if self.return_perplexities:
+                    starting_model_perplexities = [starting_model_perplexities[i] for i in indices]
+                    comparison_model_perplexities = [comparison_model_perplexities[i] for i in indices]
+                if self.return_all_token_divergences:
+                    all_token_divergences = all_token_divergences[indices]
+
+                
+
+        if self.print_texts:
+            printstr = ''
+            if self.return_divergences:
+                BOS_token = self.tokenizer.bos_token
+                space_token = self.tokenizer.tokenize(" ")[0]
+                newline_token = self.tokenizer.tokenize("\n")[0]
+                #print("BOS_token, space_token, newline_token", BOS_token, space_token, newline_token)
+                
+                for i in range(len(generated_tokens)):
+                    if self.return_all_token_divergences:
+                        #print(all_token_colorings.tolist())
+                        # Set printed generated_texts backgrounds to be more or less red based on all_token_colorings
+                        divergence_str = f"{divergences[i].item():.5f}, "
+                        prompt_text = self.tokenizer.decode(generations[i][:self.set_prefix_len+1])
+                        colored_text = ""
+                        for j in range(self.set_prefix_len, len(all_token_colorings[i])):
+                            token_color = all_token_colorings[i][j].item()
+                            token_text = generated_tokens[i][j+1]
+                            token_text = token_text.replace(BOS_token, "")
+                            token_text = token_text.replace(space_token, " ")
+                            token_text = token_text.replace(newline_token, "\\n")
+                            colored_text += f"\033[48;2;{int(255*token_color)};0;0m{token_text}\033[48;2;0;0;0m"
+                        printstr += divergence_str + prompt_text + colored_text
+                    else:
+                        printstr += str(round(divergences[i].item(), 5)) + ", " + generated_texts[i]
+                    if i < len(generated_texts) - 1:
+                        printstr += '\033[48;2;0;0;0m\n'
+            else:
+                for i in range(len(generated_texts)):
+                    printstr += generated_texts[i]
+                    if i < len(generated_texts) - 1:
+                        printstr += '\n'
+            print(printstr)
+
+        if not self.save_texts_loc is None:
+            if self.return_divergences:
+                df_list = [[d.item(),g] for g,d in zip(generated_texts, divergences)]
+                cols = ["divergence", "decoding"]
+            else:
+                df_list = [[g] for g in generated_texts]
+                cols = ["decoding"]
+            if self.return_perplexities:
+                df_list = [item + [smp,cmp] for item,smp,cmp in zip(df_list, starting_model_perplexities, comparison_model_perplexities)]
+                cols = cols + ["starting_model_perplexity", "comparison_model_perplexity"]
+            if self.return_all_token_divergences:
+                df_list = [item + [per_token_divs] for item,per_token_divs in zip(df_list,all_token_divergences.tolist())]
+                cols = cols + ["all_token_divergences"]
+            df = pd.DataFrame(data = df_list, columns = cols)
+            df.to_csv(self.save_texts_loc)
+        
+        result = {"texts": generated_texts}
+        if self.return_divergences:
+            result["divergences"] = divergences
+        if self.return_prefix_divergences:
+            prefix_divergences = []
+            for j in range(0, n_divergences, self.generations_per_prefix):
+                block_mean = torch.mean(divergences[j:j+self.generations_per_prefix])
+                prefix_divergences.append(block_mean)
+            result["prefix_divergences"] = torch.tensor(prefix_divergences)
+        if self.return_perplexities:
+            result["starting_model_perplexities"] = starting_model_perplexities
+            result["comparison_model_perplexities"] = comparison_model_perplexities
+        if self.return_all_token_divergences:
+            result["all_token_divergences"] = all_token_divergences.tolist()
+        return result
+
+    def targeted_decode(self, input_ids):
+        result = self.decode_loop(input_ids, 
+                                  self.model, 
+                                  self.tokenizer,
+                                  self.generation_length, 
+                                  self.sampling,
+                                  self.num_beams,
+                                  self.num_beam_groups,
+                                  self.diversity_penalty, 
+                                  self.top_p, 
+                                  self.generations_per_prefix,
+                                  self.batch_size
+                                  )
+
+        if self.return_divergences:
+            with torch.no_grad():
+                text_ids = torch.tensor(result).to(self.device)
                 div_output = self.model.calculate_current_divergence(text_ids, 
                                                                      batch_size = self.batch_size,
                                                                      end_tokens_to_only_consider = 0 if self.include_prefix_in_divergences else self.generation_length,
