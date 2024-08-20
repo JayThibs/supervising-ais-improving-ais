@@ -2,10 +2,19 @@ import streamlit as st
 import os
 import sys
 from dotenv import load_dotenv
-# Add the contrastive-decoding directory to the Python path
+import json
+import time
+from typing import List, Dict
+
+# Get the directory containing the current script (streamlit_app.py)
 current_dir = os.path.dirname(os.path.abspath(__file__))
-load_dotenv(dotenv_path=os.path.join(os.path.dirname(current_dir), '.env'))
+print(f"Running streamlit app from: {os.path.abspath(__file__)}")
+
+# Add the current directory to the Python path
 sys.path.append(current_dir)
+
+# Load environment variables
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(current_dir), '.env'))
 
 from assistant_find_divergence_prompts import DivergenceFinder
 from automated_pipeline import AutomatedPipeline
@@ -47,6 +56,20 @@ def save_prompts(topics, prompts):
                 f.seek(0)
                 json.dump(data, f, indent=2)
                 f.truncate()
+
+def run_cd_with_updates(command: List[str], output_placeholder):
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1, universal_newlines=True)
+    
+    results = []
+    for line in process.stdout:
+        if line.startswith("RESULT:"):
+            result = json.loads(line[7:])
+            results.append(result)
+            output_placeholder.json(result)
+        else:
+            output_placeholder.text(line.strip())
+    
+    return results
 
 tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(["Setup", "Run Automated Pipeline", "Run CD", "Run DivergenceFinder", "Results", "Visualizations", "Generate Prompts", "Manage Prompts"])
 
@@ -125,6 +148,7 @@ with tab3:
     # Prompt selection
     st.subheader("Select Prompts")
     prefix_folder = os.path.join(current_dir, "prefix_folder")
+    st.write(f"Prefix folder path: {prefix_folder}")
     if not os.path.exists(prefix_folder):
         st.error(f"Prefix folder not found: {prefix_folder}")
     else:
@@ -150,53 +174,96 @@ with tab3:
         quantize = st.checkbox("Quantize Models", value=True, help="Use quantization to reduce memory usage", key="cd_quantize")
         cache_attn = st.checkbox("Cache Attention", value=True, help="Cache attention to speed up generation", key="cd_cache_attn")
     
-    if st.button("Run Contrastive Decoding", key="cd_run_button"):
+    if st.button("Run Contrastive Decoding", key=f"cd_run_button_{os.path.getmtime(__file__)}"):
+        st.write("Button pressed. Starting Contrastive Decoding process...")
         if not selected_prompts:
             st.warning("Please select at least one prompt.")
         else:
-            prompts_file = "temp_prompts.txt"
+            st.write(f"Number of selected prompts: {len(selected_prompts)}")
+            prompts_file = os.path.join(current_dir, "temp_prompts.txt")
+            st.write(f"Writing prompts to temporary file: {prompts_file}")
             with open(prompts_file, 'w') as f:
                 for prompt in selected_prompts:
                     f.write(prompt + "\n")
             
-            command = f"""
-            CUDA_VISIBLE_DEVICES=0 python run_CD.py 
-            --target {target} 
-            --interp_weight {interp_weight} 
-            --prefixes_path {prompts_file} 
-            --model_name {model1} 
-            --starting_model_path {model1} 
-            --comparison_model_path {model2} 
-            --generation_length {generation_length} 
-            --batch_size {batch_size}
-            --starting_model_weight {starting_model_weight}
-            --comparison_model_weight {comparison_model_weight}
-            --set_prefix_len {set_prefix_len}
-            --divergence_fnct {divergence_fnct}
-            {"--quantize" if quantize else ""}
-            {"--cache_attn" if cache_attn else ""}
-            """
+            # Update the path to run_CD.py
+            run_cd_path = os.path.join(current_dir, "run_CD.py")
+            st.write(f"Looking for run_CD.py at: {run_cd_path}")
+            
+            if not os.path.exists(run_cd_path):
+                st.error(f"run_CD.py not found at {run_cd_path}")
+            else:
+                st.success(f"run_CD.py found at {run_cd_path}")
+            
+            command = [
+                sys.executable,
+                os.path.join(current_dir, "run_CD.py"),
+                "--target", target,
+                "--interp_weight", str(interp_weight),
+                "--prefixes_path", prompts_file,
+                "--model_name", model1,
+                "--starting_model_path", model1,
+                "--comparison_model_path", model2,
+                "--generation_length", str(generation_length),
+                "--batch_size", str(batch_size),
+                "--starting_model_weight", str(starting_model_weight),
+                "--comparison_model_weight", str(comparison_model_weight),
+                "--set_prefix_len", str(set_prefix_len),
+                "--divergence_fnct", divergence_fnct
+            ]
+            
+            if quantize:
+                command.append("--quantize")
+            if cache_attn:
+                command.append("--cache_attn")
+            
+            st.write("Command to be executed:", " ".join(command))
+            
+            output_placeholder = st.empty()
             
             with st.spinner("Running Contrastive Decoding..."):
-                result = subprocess.run(command, shell=True, capture_output=True, text=True)
+                try:
+                    results = run_cd_with_updates(command, output_placeholder)
+                    st.success("Contrastive Decoding run completed!")
+                    
+                    # Save results to a JSON file
+                    results_file = os.path.join(current_dir, f"cd_results_{int(time.time())}.json")
+                    with open(results_file, 'w') as f:
+                        json.dump(results, f)
+                    st.success(f"Results saved to {results_file}")
+                    
+                    # Store results in session state for use in other tabs
+                    st.session_state.cd_results = results
+                    
+                except Exception as e:
+                    st.error(f"Unexpected error: {str(e)}")
             
-            st.success("Contrastive Decoding run completed!")
-            st.text(result.stdout)
-            if result.stderr:
-                st.error(result.stderr)
-            
+            st.write(f"Removing temporary file: {prompts_file}")
             os.remove(prompts_file)
 
 with tab4:
     st.header("Run DivergenceFinder")
     st.info("DivergenceFinder analyzes the output of Contrastive Decoding to identify significant divergences between models.")
     
-    cd_output_file = st.text_input("Enter path to CD output file", help="The file containing the output from the Contrastive Decoding run")
+    if 'cd_results' in st.session_state:
+        st.success("Contrastive Decoding results found in memory.")
+        use_memory_results = st.checkbox("Use results from memory", value=True)
+    else:
+        use_memory_results = False
+    
+    if not use_memory_results:
+        cd_output_file = st.text_input("Enter path to CD output file", help="The file containing the output from the Contrastive Decoding run")
     
     if st.button("Run DivergenceFinder"):
-        if not os.path.exists(cd_output_file):
+        if use_memory_results:
+            cd_output = st.session_state.cd_results
+        elif not os.path.exists(cd_output_file):
             st.error(f"File not found: {cd_output_file}")
         else:
+            with open(cd_output_file, 'r') as f:
+                cd_output = json.load(f)
+        
+        if cd_output:
             divergence_finder = DivergenceFinder(
                 model_name=model1,
                 starting_model_path=model1,
@@ -205,9 +272,6 @@ with tab4:
                 n_cycles_ask_assistant=num_cycles,
                 ai_model=assistant_model if assistant_model.startswith("OpenAI") else model1
             )
-            
-            with open(cd_output_file, 'r') as f:
-                cd_output = f.read()
             
             with st.spinner("Running DivergenceFinder..."):
                 results = divergence_finder.search_loop(cd_output)
