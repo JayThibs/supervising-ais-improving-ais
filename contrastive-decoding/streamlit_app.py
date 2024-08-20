@@ -5,6 +5,8 @@ from dotenv import load_dotenv
 import json
 import time
 from typing import List, Dict
+import GPUtil
+import traceback
 
 # Get the directory containing the current script (streamlit_app.py)
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -28,11 +30,37 @@ from ai_assistant import AIAssistant
 st.set_page_config(layout="wide")
 st.title("Automated Model Divergence Analysis")
 
+def get_gpu_memory():
+    gpus = GPUtil.getGPUs()
+    if gpus:
+        gpu = gpus[0]  # Assuming we're using the first GPU
+        return gpu.memoryTotal, gpu.memoryUsed, gpu.memoryFree
+    return 0, 0, 0
+
+def format_memory(memory_mb):
+    return f"{memory_mb:.2f} MB ({memory_mb/1024:.2f} GB)"
+
 @st.cache_resource
 def load_model(model_name):
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=torch.float16, device_map="auto")
-    return model, tokenizer
+    try:
+        st.write(f"Attempting to load tokenizer for {model_name}")
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+        st.write(f"Tokenizer loaded successfully for {model_name}")
+        
+        st.write(f"Attempting to load model {model_name}")
+        model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=torch.float16, device_map="auto")
+        st.write(f"Model {model_name} loaded successfully")
+        
+        return model, tokenizer
+    except Exception as e:
+        st.error(f"Error loading model {model_name}: {str(e)}")
+        st.error(f"Traceback: {traceback.format_exc()}")
+        return None, None
+
+def unload_model(model_key):
+    if model_key in st.session_state:
+        del st.session_state[model_key]
+        torch.cuda.empty_cache()
 
 def load_prompts(topics):
     prompts = []
@@ -78,6 +106,18 @@ with tab1:
     
     st.info("Select the models you want to compare and set up the experiment parameters.")
     
+    # GPU Memory Tracker
+    gpu_memory_placeholder = st.sidebar.empty()
+    
+    def update_gpu_memory_display():
+        total_memory, used_memory, free_memory = get_gpu_memory()
+        gpu_memory_placeholder.subheader("GPU Memory")
+        gpu_memory_placeholder.progress(used_memory / total_memory)
+        gpu_memory_placeholder.text(f"Used: {format_memory(used_memory)} / {format_memory(total_memory)}")
+        gpu_memory_placeholder.text(f"Free: {format_memory(free_memory)}")
+    
+    update_gpu_memory_display()
+    
     available_models = [
         "NousResearch/Meta-Llama-3-8B",
         "NousResearch/Meta-Llama-3-8B-Instruct",
@@ -95,8 +135,70 @@ with tab1:
         "EleutherAI/gpt-neox-20b"
     ]
     
-    model1 = st.selectbox("Select Model 1", available_models, help="The first model to use in the comparison")
-    model2 = st.selectbox("Select Model 2", available_models, help="The second model to use in the comparison")
+    model1 = st.selectbox("Select Model 1", available_models, key="model1_select", help="The first model to use in the comparison")
+    model2 = st.selectbox("Select Model 2", available_models, key="model2_select", help="The second model to use in the comparison")
+    
+    if st.button("Check GPU Memory and Load Models"):
+        # Estimate memory requirements (this is a rough estimate, actual usage may vary)
+        estimated_memory = {
+            "8B": 16000,  # Estimated memory for 8B parameter models
+            "7B": 14000,  # Estimated memory for 7B parameter models
+            "6b": 12000,  # Estimated memory for 6B parameter models
+            "xl": 3000,   # Estimated memory for GPT-2 XL
+            "gpt2": 1500, # Estimated memory for base GPT-2
+            "350m": 700,  # Estimated memory for smaller models
+            "1.3b": 2600,
+            "2.7b": 5400,
+            "6.7b": 13400,
+            "13b": 26000,
+            "30b": 60000,
+            "66b": 132000,
+            "20b": 40000
+        }
+        
+        def get_model_size(model_name):
+            for size, mem in estimated_memory.items():
+                if size in model_name.lower():
+                    return mem
+            return 5000  # Default estimate if size is not found
+        
+        total_required = get_model_size(model1) + get_model_size(model2)
+        
+        # Get current GPU memory status
+        total_memory, used_memory, free_memory = get_gpu_memory()
+        
+        if total_required > free_memory:
+            st.warning(f"Warning: The selected models may require more memory ({format_memory(total_required)}) than currently available ({format_memory(free_memory)}). Loading may fail or cause system instability.")
+        else:
+            st.success(f"Estimated memory required ({format_memory(total_required)}) is within available memory ({format_memory(free_memory)}). Proceeding with model loading.")
+        
+        # Unload previously loaded models if they exist and are different from the current selection
+        if 'model1' in st.session_state and st.session_state.model1_select != st.session_state.get('loaded_model1'):
+            unload_model('model1')
+        if 'model2' in st.session_state and st.session_state.model2_select != st.session_state.get('loaded_model2'):
+            unload_model('model2')
+        
+        # Load the selected models
+        with st.spinner("Loading models..."):
+            st.write("Starting to load models...")
+            if 'model1' not in st.session_state or st.session_state.model1_select != st.session_state.get('loaded_model1'):
+                st.write(f"Loading model 1: {model1}")
+                st.session_state.model1, st.session_state.tokenizer1 = load_model(model1)
+                st.session_state.loaded_model1 = model1
+            if 'model2' not in st.session_state or st.session_state.model2_select != st.session_state.get('loaded_model2'):
+                st.write(f"Loading model 2: {model2}")
+                st.session_state.model2, st.session_state.tokenizer2 = load_model(model2)
+                st.session_state.loaded_model2 = model2
+            st.write("Finished loading models.")
+        
+        # Check if models are loaded properly
+        if st.session_state.model1 and st.session_state.model2:
+            st.success(f"Models {model1} and {model2} loaded successfully!")
+        else:
+            st.error("Failed to load one or both models. Please check the error messages above.")
+        
+        # Update GPU memory display after loading
+        update_gpu_memory_display()
     
     topics = st.multiselect("Select Topics of Interest", ["Bias", "Factual Accuracy", "Reasoning", "Creativity"], help="Choose the topics you want to focus on in the experiment")
     num_cycles = st.slider("Number of Experiment Cycles", 1, 10, 5, help="The number of times to run the experiment")

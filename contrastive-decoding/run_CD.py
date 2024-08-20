@@ -569,5 +569,5 @@ if 'save_texts_loc' not in kwargs:
     kwargs['save_texts_loc'] = f"outputs/{target}_output.txt"
 
 # Run ContrastiveDecoder
-cd = RealTimeContrastiveDecoder(**kwargs)
+cd = ContrastiveDecoder(**kwargs)
 cd.decode()
