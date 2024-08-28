@@ -2,38 +2,53 @@ import streamlit as st
 import sys
 from pathlib import Path
 
-src_dir = Path(__file__).resolve().parent.parent
+src_dir = Path(__file__).resolve().parents[2]
 sys.path.append(str(src_dir))
 
 from webapp.pages import run_analysis, view_results, compare_models
 from webapp.components.sidebar import sidebar
-from webapp.auth.user_auth import login, create_account, is_authenticated
 from behavioural_clustering.config.run_configuration_manager import RunConfigurationManager
+from behavioural_clustering.utils.data_accessor import DataAccessor
+from behavioural_clustering.evaluation.evaluator_pipeline import EvaluatorPipeline
 
 st.set_page_config(page_title="Behavioural Clustering Analysis", layout="wide")
+
+@st.cache_resource
+def get_data_accessor():
+    base_dir = src_dir / "data"
+    return DataAccessor(base_dir)
+
+@st.cache_resource
+def get_config_manager():
+    config_manager = RunConfigurationManager()
+    config_manager.load_configurations()
+    return config_manager
+
+@st.cache_resource
+def get_evaluator_pipeline(run_settings):
+    return EvaluatorPipeline(run_settings)
 
 def main():
     st.title("Behavioural Clustering Analysis")
 
-    # User Authentication
-    if 'username' not in st.session_state:
-        st.session_state.username = None
+    # Initialize configuration manager and data accessor
+    st.session_state.config_manager = get_config_manager()
+    st.session_state.data_accessor = get_data_accessor()
+    
+    # Get the default run settings
+    default_run_settings = st.session_state.config_manager.get_configuration('Default Run')
+    
+    if default_run_settings is None:
+        st.error("No 'Default Run' configuration found. Please check your configuration file.")
+        return
 
-    if not is_authenticated(st.session_state.username):
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("Login"):
-                st.session_state.username = login()
-        with col2:
-            if st.button("Create Account"):
-                st.session_state.username = create_account()
-        if not is_authenticated(st.session_state.username):
-            st.stop()
-
-    # Initialize configuration manager
-    if 'config_manager' not in st.session_state:
-        st.session_state.config_manager = RunConfigurationManager()
-        st.session_state.config_manager.load_configurations()
+    # Initialize the evaluator pipeline with default settings
+    try:
+        st.session_state.evaluator_pipeline = get_evaluator_pipeline(default_run_settings)
+    except TypeError as e:
+        st.error(f"Error initializing EvaluatorPipeline: {str(e)}")
+        st.error("Please check that EvaluatorPipeline.__init__() is correctly implemented.")
+        return
 
     # Sidebar
     page = sidebar()

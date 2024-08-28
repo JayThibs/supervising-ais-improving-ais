@@ -1,81 +1,94 @@
 import streamlit as st
-import os
+import plotly.graph_objects as go
+import plotly.express as px
+import pandas as pd
 from behavioural_clustering.utils.visualization import Visualization
-from behavioural_clustering.config.run_settings import PlotSettings
-from webapp.utils.data_processing import load_previous_runs
+from behavioural_clustering.config.run_settings import PlotSettings, RunSettings
 
 def show():
     st.header("View Results")
 
-    previous_runs = load_previous_runs(st.session_state.username)
+    data_accessor = st.session_state.data_accessor
+    runs = data_accessor.list_runs()
     
-    if not previous_runs:
+    if not runs:
         st.warning("No previous runs found.")
         return
 
-    selected_run = st.selectbox("Select a run to view", list(previous_runs.keys()))
+    selected_run = st.selectbox("Select a run to view", runs, help="Choose a run to visualize its results")
 
     if selected_run:
-        run_data = previous_runs[selected_run]
-        st.subheader(f"Results for run: {selected_run}")
+        try:
+            run_config = data_accessor.get_run_config(selected_run)
+            st.subheader(f"Results for run: {selected_run}")
 
-        # Display run configuration
-        st.write("Run Configuration:")
-        st.json(run_data['config'])
+            # Display run configuration
+            with st.expander("Run Configuration"):
+                st.json(run_config)
 
-        # Create PlotSettings instance
-        plot_settings = PlotSettings(
-            plot_dim=run_data['config']['plot_settings']['plot_dim'],
-            save_path=os.path.join(os.getcwd(), 'data', 'results', 'plots'),
-            colors=run_data['config']['plot_settings']['colors'],
-            shapes=run_data['config']['plot_settings']['shapes'],
-            plot_aesthetics=run_data['config']['plot_settings']['plot_aesthetics']
-        )
+            # Create RunSettings instance
+            run_settings = RunSettings.from_dict(run_config)
 
-        # Create Visualization instance
-        visualizer = Visualization(plot_settings)
+            # Ensure we have a PlotSettings object
+            if not isinstance(run_settings.plot_settings, PlotSettings):
+                run_settings.plot_settings = PlotSettings()
 
-        # Visualize results
-        if run_data['config']['plot_settings']['show_tsne']:
-            visualizer.plot_embedding_responses(
-                run_data['results']['tsne'],
-                run_data['results']['joint_embeddings'],
-                run_data['results']['model_names'],
-                'tsne_plot.png'
-            )
-            st.image('data/results/plots/tsne_plot.png')
+            # Create Visualization instance
+            visualizer = Visualization(run_settings.plot_settings)
 
-        if run_data['config']['plot_settings']['show_approvals']:
-            for plot_type in ['approval', 'awareness']:
-                visualizer.plot_approvals(
-                    run_data['results']['tsne'],
-                    run_data['results']['approval_data'],
-                    run_data['results']['model_names'][0],  # Assuming single model for simplicity
-                    1,  # Condition (you may need to adjust this)
-                    plot_type,
-                    f'{plot_type}_plot.png',
-                    f'{plot_type.capitalize()} Plot'
-                )
-                st.image(f'data/results/plots/{plot_type}_plot.png')
+            # Get available data types for the run
+            data_types = data_accessor.list_data_types(selected_run)
 
-        if run_data['config']['plot_settings']['show_hierarchical']:
-            visualizer.visualize_hierarchical_plot(
-                run_data['results']['hierarchy_data'],
-                'approval',  # or 'awareness', depending on your needs
-                'hierarchical_cluster',
-                labels=run_data['results']['model_names']
-            )
-            st.image('data/results/plots/hierarchical_cluster.png')
+            # Allow user to select data type to visualize
+            selected_data_type = st.selectbox("Select data type to visualize", data_types, help="Choose the type of data you want to visualize")
 
-        if 'spectral_clustering' in run_data['results']:
-            visualizer.plot_spectral_clustering(
-                run_data['results']['spectral_clustering']['labels'],
-                run_data['results']['spectral_clustering']['n_clusters'],
-                'approval'  # or 'awareness', depending on your needs
-            )
-            st.image('data/results/plots/spectral_clustering_approval_statements.png')
+            if selected_data_type:
+                data = data_accessor.get_run_data(selected_run, selected_data_type)
+
+                if selected_data_type == "combined_embeddings":
+                    st.subheader("Embeddings Visualization")
+                    fig = visualizer.plot_embedding_responses_plotly(
+                        data['dim_reduce_tsne'],
+                        data['joint_embeddings_all_llms'],
+                        [model[1] for model in run_settings.model_settings.models],
+                        f"{selected_run}_embeddings",
+                        show_plot=False
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                elif selected_data_type.startswith("approvals_statements_"):
+                    st.subheader(f"{selected_data_type.replace('_', ' ').title()} Visualization")
+                    prompt_type = selected_data_type.split("_")[-1]
+                    condition = st.selectbox("Select condition", [0, 1], format_func=lambda x: "Approved" if x == 1 else "Not Approved")
+                    for model_info in run_settings.model_settings.models:
+                        model = model_info[1]
+                        fig = visualizer.plot_approvals_plotly(
+                            data['dim_reduce'],
+                            data['approval_data'],
+                            model,
+                            condition,
+                            prompt_type,
+                            f"{selected_run}_{prompt_type}_approvals_{model}",
+                            f"{selected_run} {prompt_type.capitalize()} Approvals for {model}",
+                            show_plot=False
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+                elif selected_data_type == "spectral_clustering":
+                    st.subheader("Spectral Clustering Visualization")
+                    fig = visualizer.plot_spectral_clustering_plotly(
+                        data['labels'],
+                        run_settings.clustering_settings.n_clusters,
+                        f"{selected_run}_spectral_clustering"
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.write(f"Data for {selected_data_type}:")
+                    st.write(data)
+
+        except Exception as e:
+            st.error(f"An error occurred while loading or visualizing data: {str(e)}")
+            st.exception(e)  # This will print the full traceback
 
         # Add option to export results
-        if st.button("Export Results"):
+        if st.button("Export Results", help="Download the results as a CSV file"):
             # Implement export functionality
             st.success("Results exported successfully!")

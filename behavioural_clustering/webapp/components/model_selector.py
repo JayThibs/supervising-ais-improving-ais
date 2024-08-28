@@ -18,7 +18,7 @@ def select_models(model_settings):
             if st.button(f"Load Model {i+1}"):
                 with st.spinner("Loading model..."):
                     try:
-                        initialize_model({"model_family": "local", "model": new_model})
+                        initialize_model({"model_family": "local", "model_name": new_model})
                         st.success(f"Successfully loaded {new_model}")
                     except Exception as e:
                         st.error(f"Error loading model: {str(e)}")

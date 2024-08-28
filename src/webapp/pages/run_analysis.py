@@ -1,47 +1,43 @@
 import streamlit as st
 from behavioural_clustering.evaluation.evaluator_pipeline import EvaluatorPipeline
-from behavioural_clustering.config.run_settings import RunSettings
+from webapp.components.sidebar import get_selected_models
 
 def show():
     st.header("Run Analysis")
-
-    if st.button("Run Clustering Analysis"):
-        try:
-            with st.spinner("Running clustering analysis..."):
-                progress_bar = st.progress(0)
-                
-                # Get the current configuration
-                run_settings = st.session_state.config_manager.get_configuration("Custom")
-                
-                # Initialize EvaluatorPipeline
-                evaluator = EvaluatorPipeline(run_settings)
-                
-                # Run the evaluation pipeline
+    
+    run_type = st.session_state.get("run_type", "Full Evaluation")
+    
+    if st.button("Start Analysis"):
+        config_manager = st.session_state.config_manager
+        run_settings = config_manager.get_configuration(st.session_state.selected_config)
+        
+        # Update run settings with customized values
+        run_settings.data_settings.n_statements = st.session_state.n_statements
+        run_settings.model_settings.models = get_selected_models()
+        run_settings.prompt_settings.max_desc_length = st.session_state.max_desc_length
+        run_settings.clustering_settings.n_clusters = st.session_state.n_clusters
+        run_settings.plot_settings.hide_plots = st.session_state.hide_plots
+        
+        evaluator = EvaluatorPipeline(run_settings)
+        
+        with st.spinner("Running analysis..."):
+            if run_type == "Full Evaluation":
                 evaluator.run_evaluations()
-                
-            st.success("Clustering analysis complete!")
-            
-            # Visualize results
-            st.subheader("Visualization Results")
-            
-            # Display plots
-            st.image("embedding_responses.png", caption="Embedding Responses")
-            st.image("approval_plot.png", caption="Approval Plot")
-            st.image("hierarchical_cluster.png", caption="Hierarchical Clustering")
-            st.image("spectral_clustering.png", caption="Spectral Clustering")
-            
-            # Save run
-            run_name = st.text_input("Enter a name for this run:")
-            if st.button("Save Run"):
-                # Implement save_run functionality using evaluator
-                evaluator.save_run(run_name)
-                st.success(f"Run '{run_name}' saved successfully!")
-            
-            # Export results
-            if st.button("Export Results"):
-                # Implement export_results functionality using evaluator
-                evaluator.export_results()
-                st.success("Results exported successfully!")
-                
-        except Exception as e:
-            st.error(f"An error occurred during analysis: {str(e)}")
+            elif run_type == "Model Comparison":
+                metadata_config = evaluator.create_current_metadata()
+                evaluator.run_model_comparison(metadata_config)
+            elif run_type == "Approval Prompts":
+                metadata_config = evaluator.create_current_metadata()
+                for prompt_type in evaluator.approval_prompts.keys():
+                    evaluator.run_prompt_evaluation(prompt_type, metadata_config)
+        
+        st.success("Analysis completed successfully!")
+    
+    # Display current settings
+    st.subheader("Current Run Settings")
+    st.write(f"Run Type: {run_type}")
+    st.write(f"Number of Statements: {st.session_state.n_statements}")
+    st.write(f"Selected Models: {', '.join([f'{m[0]}/{m[1]}' for m in get_selected_models()])}")
+    st.write(f"Max Description Length: {st.session_state.max_desc_length}")
+    st.write(f"Number of Clusters: {st.session_state.n_clusters}")
+    st.write(f"Hidden Plots: {', '.join(st.session_state.hide_plots)}")

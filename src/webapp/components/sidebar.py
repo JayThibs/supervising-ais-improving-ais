@@ -1,55 +1,58 @@
 import streamlit as st
-from webapp.components.model_selector import select_models
-from webapp.components.config_manager import save_custom_configuration
+from typing import List, Tuple
 
 def sidebar():
     with st.sidebar:
-        st.header("Configuration")
-        
-        config_manager = st.session_state.config_manager
-        
-        # Load predefined configuration or create a new one
-        config_option = st.selectbox("Choose configuration", 
-                                     ["Custom"] + list(config_manager.configurations.keys()))
-        
-        if config_option == "Custom":
-            run_settings = config_manager.create_custom_configuration()
-        else:
-            run_settings = config_manager.get_configuration(config_option)
-        
-        # Model selection
-        selected_models = select_models(run_settings.model_settings)
-        
-        # Clustering options
-        st.subheader("Clustering Options")
-        clustering_algorithm = st.selectbox("Clustering Algorithm", 
-                                            run_settings.clustering_settings.all_clustering_algorithms,
-                                            index=run_settings.clustering_settings.all_clustering_algorithms.index(run_settings.clustering_settings.main_clustering_algorithm))
-        n_clusters = st.slider("Number of clusters", min_value=2, max_value=1000, 
-                               value=run_settings.clustering_settings.n_clusters)
-        
-        # Visualization options
-        st.subheader("Visualization Options")
-        show_tsne = st.checkbox("Show t-SNE plot", value=not run_settings.plot_settings.hide_tsne)
-        show_umap = st.checkbox("Show UMAP plot", value=True)  # Add this option to RunSettings if needed
-        show_hierarchical = st.checkbox("Show hierarchical clustering", value=not run_settings.plot_settings.hide_hierarchical)
-        show_approval = st.checkbox("Show approval plots", value=not run_settings.plot_settings.hide_approval)
-        
-        # Advanced options
-        with st.expander("Advanced Options"):
-            perplexity = st.slider("t-SNE Perplexity", min_value=5, max_value=100, value=run_settings.tsne_settings.perplexity)
-            learning_rate = st.slider("t-SNE Learning Rate", min_value=10, max_value=1000, value=int(run_settings.tsne_settings.learning_rate))
-            n_neighbors = st.slider("UMAP n_neighbors", min_value=2, max_value=100, value=15)
-            min_dist = st.slider("UMAP min_dist", min_value=0.0, max_value=1.0, value=0.1)
-        
-        # Save configuration
-        if st.button("Save Configuration"):
-            save_custom_configuration(config_manager, run_settings, clustering_algorithm, n_clusters, show_tsne, show_umap, 
-                                      show_hierarchical, show_approval, perplexity, learning_rate, n_neighbors, min_dist)
-            st.success("Configuration saved!")
-
-        # Page selection
-        st.header("Navigation")
+        st.title("Navigation")
         page = st.radio("Go to", ["Run Analysis", "View Results", "Compare Models"])
-
+        
+        if page == "Run Analysis":
+            st.subheader("Run Options")
+            
+            # Use the 'key' parameter to update session state automatically
+            st.selectbox(
+                "Select run type",
+                ["Full Evaluation", "Model Comparison", "Approval Prompts"],
+                key="run_type"
+            )
+            
+            # Add configuration selection
+            config_manager = st.session_state.config_manager
+            config_names = config_manager.list_configurations()
+            st.selectbox("Select configuration", config_names, key="selected_config")
+            
+            # Load the selected configuration
+            run_settings = config_manager.get_configuration(st.session_state.selected_config)
+            
+            # Add customization options
+            st.subheader("Customize Run")
+            
+            # Data settings
+            st.number_input("Number of statements", min_value=10, max_value=10000, value=run_settings.data_settings.n_statements, key="n_statements")
+            
+            # Model settings
+            available_models = [("openai", "gpt-3.5-turbo"), ("openai", "gpt-4"), ("anthropic", "claude-v1")]
+            default_models = [m for m in run_settings.model_settings.models if m in available_models]
+            st.multiselect("Select models", available_models, default=default_models, key="selected_models")
+            
+            # Prompt settings
+            st.number_input("Max description length", min_value=50, max_value=1000, value=run_settings.prompt_settings.max_desc_length, key="max_desc_length")
+            
+            # Clustering settings
+            st.number_input("Number of clusters", min_value=2, max_value=1000, value=run_settings.clustering_settings.n_clusters, key="n_clusters")
+            
+            # Plot settings
+            hide_plots_options = ["none"] + HIDEABLE_PLOT_TYPES + ["all"]
+            hide_plots_default = (
+                ["all"] if "all" in run_settings.plot_settings.hide_plots
+                else ["none"] if not run_settings.plot_settings.hide_plots
+                else run_settings.plot_settings.hide_plots
+            )
+            st.multiselect("Hide plots", hide_plots_options, default=hide_plots_default, key="hide_plots")
+        
     return page
+
+def get_selected_models() -> List[Tuple[str, str]]:
+    return st.session_state.get('selected_models', [])
+
+HIDEABLE_PLOT_TYPES = ["tsne", "approvals", "hierarchical", "spectral"]
