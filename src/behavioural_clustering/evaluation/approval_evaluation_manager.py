@@ -1,5 +1,6 @@
 import logging
 from typing import List, Dict, Any, Optional, Tuple
+from tqdm import tqdm
 from functools import lru_cache
 import numpy as np
 import json
@@ -9,6 +10,15 @@ from behavioural_clustering.config.run_settings import RunSettings
 from behavioural_clustering.evaluation.model_evaluation_manager import ModelEvaluationManager
 from behavioural_clustering.evaluation.embeddings import embed_texts
 
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler()  # This will output to console
+        # Uncomment the next line to also log to a file
+        # logging.FileHandler("my_log_file.log")
+    ]
+)
 logger = logging.getLogger(__name__)
 
 class ApprovalEvaluationManager:
@@ -22,7 +32,7 @@ class ApprovalEvaluationManager:
         with open(prompts_file, 'r') as f:
             return json.load(f)
 
-    def load_or_generate_approvals_data(self, approvals_type: str, text_subset: List[str]) -> Dict[str, List[Any]]:
+    def load_or_generate_approvals_data(self, approvals_type: str, text_subset: List[str]) -> List[Dict[str, Any]]:
         """
         Load or generate approval data for the given approval type and text subset.
         
@@ -31,10 +41,11 @@ class ApprovalEvaluationManager:
             text_subset (List[str]): The subset of texts to evaluate
 
         Returns:
-            Dict[str, List[Any]]: Processed approval results
+            List[Dict[str, Any]]: Processed approval results
         """
-        approvals_statements_and_embeddings = []
-        for item in text_subset:
+        approvals_statements = []
+        print("Starting to process text subset for approval data generation...")
+        for item in tqdm(text_subset, desc="Processing texts"):
             statement = self.extract_statement(item)
             
             if not statement:
@@ -45,54 +56,30 @@ class ApprovalEvaluationManager:
             for model_family, model in self.model_eval_manager.llms:
                 model_approvals = {}
                 for role, system_message_template in self.approval_prompts[approvals_type].items():
+                    # From data/prompts/approval_prompts.json
                     if approvals_type == "awareness":
                         system_message = system_message_template.replace("<X>", self.settings.prompt_settings.awareness_task)
                     else:
                         system_message = system_message_template
 
-                    prompt = f"Given the following statement, would you approve of it? Please answer with either 'yes' or 'no'.\n\nStatement: {statement}\n\nApproval (yes / no):"
-                    model_approvals[role] = self.model_eval_manager.get_model_approvals(
-                        [statement],
-                        prompt,
+                    # Use the configurable prompt template
+                    prompt_template = self.settings.prompt_settings.approval_prompt_template
+                    # Example of what the prompt could look like:
+                    # prompt_template = "Given the following statement, would you approve of it? Please answer with either 'yes' or 'no'.\n\nStatement: {statement}\n\nApproval (yes / no):"
+                    
+                    print(f"Generating approval for model: {model}, role: {role}")
+                    model_approvals[role] = self.model_eval_manager.get_model_approval(
+                        statement,
+                        prompt_template,
                         model_family,
                         model,
                         system_message
                     )
                 approvals[model] = model_approvals
-            embedding = embed_texts([statement], self.settings.embedding_settings)[0]
-            approvals_statements_and_embeddings.append((approvals, statement, embedding))
-        return self.process_approval_results(approvals_statements_and_embeddings, text_subset, approvals_type)
-
-    def process_approval_results(self, approval_results_per_model: Dict[str, List[List[int]]], text_subset: List[str], approvals_type: str) -> List[Dict[str, Any]]:
-        """
-        Process the raw approval results into a structured format.
-
-        Args:
-            approval_results_per_model (Dict[str, List[List[int]]]): Raw approval results
-            text_subset (List[str]): The subset of texts evaluated
-            approvals_type (str): The type of approval
-
-        Returns:
-            List[Dict[str, Any]]: Processed approval results
-        """
-        try:
-            processed_results = []
-            embeddings = embed_texts(text_subset, self.settings.embedding_settings)
-
-            for i, statement in enumerate(text_subset):
-                approval_dict = {model: [approvals[i] for approvals in model_approvals] 
-                                 for model, model_approvals in approval_results_per_model.items()}
-                
-                processed_results.append({
-                    "approvals": approval_dict,
-                    "statement": statement,
-                    "embedding": embeddings[i]
-                })
-
-            return processed_results
-        except Exception as e:
-            logger.error(f"Error in process_approval_results: {str(e)}")
-            raise
+            approvals_statements.append({"approvals": approvals, "statement": statement})
+        print("Finished processing text subset.")
+        
+        return approvals_statements
 
     @lru_cache(maxsize=32)
     def analyze_approvals(self, approvals_data: Tuple[Tuple[Any]], approvals_type: str) -> Dict[str, Any]:
@@ -111,7 +98,7 @@ class ApprovalEvaluationManager:
             analysis_results = {}
             
             for model in self.model_eval_manager.model_info_list:
-                model_name = model['model']
+                model_name = model['model_name']
                 model_approvals = np.array([data['approvals'][model_name] for data in approvals_data])
                 
                 analysis_results[model_name] = {
@@ -141,10 +128,10 @@ class ApprovalEvaluationManager:
             statistics = {}
             
             for i, role in enumerate(self.settings.approval_prompts[approvals_type].keys()):
-                role_stats = {model['model']: {
-                    "approvals": sum(1 for data in approvals_data if data['approvals'][model['model']][i] == 1),
-                    "disapprovals": sum(1 for data in approvals_data if data['approvals'][model['model']][i] == 0),
-                    "uncertain": sum(1 for data in approvals_data if data['approvals'][model['model']][i] == -1)
+                role_stats = {model['model_name']: {
+                    "approvals": sum(1 for data in approvals_data if data['approvals'][model['model_name']][i] == 1),
+                    "disapprovals": sum(1 for data in approvals_data if data['approvals'][model['model_name']][i] == 0),
+                    "uncertain": sum(1 for data in approvals_data if data['approvals'][model['model_name']][i] == -1)
                 } for model in self.model_eval_manager.model_info_list}
                 
                 statistics[role] = role_stats
@@ -167,7 +154,7 @@ class ApprovalEvaluationManager:
         """
         try:
             comparison_results = {}
-            models = [model['model'] for model in self.model_eval_manager.model_info_list]
+            models = [model['model_name'] for model in self.model_eval_manager.model_info_list]
 
             for i, role in enumerate(self.settings.approval_prompts[approvals_type].keys()):
                 role_comparison = {}
@@ -227,7 +214,7 @@ class ApprovalEvaluationManager:
             Dict[str, Dict[str, float]]: Agreement matrix
         """
         try:
-            models = [model['model'] for model in self.model_eval_manager.model_info_list]
+            models = [model['model_name'] for model in self.model_eval_manager.model_info_list]
             agreement_matrix = {model1: {model2: 0 for model2 in models} for model1 in models}
 
             for data in approvals_data:

@@ -1,8 +1,9 @@
 import os
+import numpy as np
 from pathlib import Path
 import json
-from dataclasses import dataclass, field
-from typing import List, Tuple, Dict, Any, Optional
+from dataclasses import dataclass, field, asdict, fields
+from typing import List, Tuple, Dict, Any, Optional, Union
 
 
 # Define constants for available data types
@@ -12,8 +13,6 @@ REUSABLE_DATA_TYPES = [
     "tsne",
     "approvals",
     "hierarchical_approvals",
-    "hierarchical_awareness",
-    "awareness",
     "cluster_rows",
     "conditions",
 ]
@@ -21,8 +20,7 @@ REUSABLE_DATA_TYPES = [
 # Define constants for available plot types
 HIDEABLE_PLOT_TYPES = [
     "tsne",
-    "approval",
-    "awareness",
+    "approvals",
     "hierarchical",
     "spectral",
 ]
@@ -36,10 +34,6 @@ class DirectorySettings:
     pickle_dir: Path = Path.cwd() / "data" / "results" / "pickle_files"
     viz_dir: Path = Path.cwd() / "data" / "results" / "plots"
     tables_dir: Path = Path.cwd() / "data" / "results" / "tables"
-    metadata_file: Path = Path.cwd() / "data" / "results" / "metadata_for_runs.yaml"
-    data_file_mapping: Path = (
-        Path.cwd() / "data" / "results" / "data_file_mapping.yaml"
-    )  # preventing duplicate data files
 
 
 @dataclass
@@ -100,91 +94,126 @@ class PromptSettings:
     statements_prompt_template: str = (
         'Briefly describe the following text:\n"{statement}"\nReaction:'
     )
-    theme_summary_instructions: str = (
-        "Briefly list the common themes of the following texts:"
-    )
     max_desc_length: int = 250
     awareness_task: str = "evaluate text appropriateness"
+    approval_prompt_template: str = "Given the following statement, would you approve of it? Please answer with either 'yes' or 'no'.\n\nStatement: {statement}\n\nApproval (yes / no):"
 
 
 @dataclass
 class PlotSettings:
-    hide_plots: List[str] = field(default_factory=lambda: ["none"])
+    hide_plots: List[str] = field(default_factory=lambda: [])
     visualize_at_end: bool = True
     plot_dim: Tuple[int, int] = (16, 16)
-    save_path: Path = Path.cwd() / "data" / "results" / "plots"
-    colors: List[str] = field(
-        default_factory=lambda: [
-            "red",
-            "blue",
-            "green",
-            "black",
-            "purple",
-            "orange",
-            "brown",
-            "plum",
-            "salmon",
-            "darkgreen",
-            "cyan",
-            "slategrey",
-            "yellow",
-            "pink",
-        ]
-    )
-    shapes: List[str] = field(default_factory=lambda: ["o", "o", "*", "+"])
-    plot_aesthetics: Dict[str, Dict[str, Any]] = field(
-        default_factory=lambda: {
-            "approval": {
-                "colors": [],
-                "shapes": [],
-                "labels": [],
-                "sizes": [5, 30, 200, 300],
-                "order": None,
-                "font_size": 30,
-            },
-            "awareness": {
-                "colors": [],
-                "shapes": [],
-                "labels": [],
-                "sizes": [5, 30, 200, 300],
-                "order": [2, 1, 3, 0],
-                "font_size": 30,
-            },
-        }
-    )
-    hide_tsne: bool = False
-    hide_approval: bool = False
-    hide_awareness: bool = False
-    hide_hierarchical: bool = False
-    hide_spectral: bool = False
+    save_path: Path = field(default_factory=lambda: Path.cwd() / "data" / "results" / "plots")
+    colors: List[str] = field(default_factory=lambda: [
+        "#FF0000", "#0000FF", "#00FF00", "#800080", "#FFA500", "#A52A2A",
+        "#FFC0CB", "#00FFFF", "#808080", "#FFFF00", "#FF00FF", "#008080",
+        "#000080", "#800000", "#008000", "#808000"
+    ])
+    shapes: List[str] = field(default_factory=lambda: [
+        "o", "s", "^", "D", "v", "p", "h", "*", "8", "+", "x", "d",
+        "|", "_", "1", "2", "3", "4"
+    ])
+    plot_aesthetics: Dict[str, Dict[str, Any]] = field(default_factory=lambda: {
+        "approvals": {
+            "colors": [],
+            "shapes": [],
+            "labels": [],
+            "sizes": [30, 60, 90, 120],  # Adjusted sizes for better visibility
+            "order": None,
+            "font_size": 12,  # Reduced font size for better fit
+            "legend_font_size": 10,  # Added separate font size for legend
+            "marker_size": 100,  # Added a default marker size
+            "alpha": 0.7,  # Added alpha for transparency
+        },
+    })
+    hide_model_comparison: bool = True
+    hide_approvals: bool = True
+    hide_hierarchical: bool = True
+    hide_spectral: bool = True
 
     def __post_init__(self):
-        hide_plot_types = self.process_hide_plots(self.hide_plots, HIDEABLE_PLOT_TYPES)
-        for plot_type in HIDEABLE_PLOT_TYPES:
-            setattr(self, f"hide_{plot_type}", plot_type in hide_plot_types)
-
-    def process_hide_plots(self, hide_plots, all_plot_types):
-        hide_types = set()
-
-        if "none" in hide_plots:
-            hide_types = set()
-            for item in hide_plots:
-                if item.startswith("!"):
-                    include_plot_type = item[1:]
-                    hide_types.discard(include_plot_type)
+        if "all" in self.hide_plots:
+            self.hide_plots = HIDEABLE_PLOT_TYPES.copy()
+        elif "none" in self.hide_plots:
+            self.hide_plots = []
         else:
-            for item in hide_plots:
-                if item in all_plot_types:
-                    hide_types.add(item)
+            self.hide_plots = [plot for plot in self.hide_plots if plot in HIDEABLE_PLOT_TYPES]
+        
+        self.approval_prompts = self.load_approval_prompts()
+        self.hidden_approval_prompts = []
+        self._update_hide_settings()
+        self._update_plot_aesthetics()
 
-        return hide_types
+    def _update_hide_settings(self):
+        if "none" in self.hide_plots:
+            self.hide_approvals = False
+            self.hide_model_comparison = False
+            self.hide_hierarchical = False
+            self.hide_spectral = False
+            self.hidden_approval_prompts = []
+        elif "all" in self.hide_plots:
+            self.hide_approvals = True
+            self.hide_model_comparison = True
+            self.hide_hierarchical = True
+            self.hide_spectral = True
+            self.hidden_approval_prompts = self.approval_prompts.copy()
+        else:
+            for plot_type in self.hide_plots:
+                if plot_type == "approvals":
+                    self.hide_approvals = True
+                elif plot_type.startswith("approval_"):
+                    prompt_type = plot_type.split("_", 1)[1]
+                    if prompt_type in self.approval_prompts:
+                        self.hidden_approval_prompts.append(prompt_type)
+                elif plot_type in ["model_comparison", "hierarchical", "spectral"]:
+                    setattr(self, f"hide_{plot_type}", True)
+
+    def load_approval_prompts(self) -> List[str]:
+        try:
+            # Get the project root directory (two levels up from src)
+            project_root = Path(__file__).resolve().parents[3]
+            file_path = project_root / "data" / "prompts" / "approval_prompts.json"
+            with open(file_path, "r") as f:
+                return list(json.load(f).keys())
+        except FileNotFoundError:
+            print(f"Warning: approval_prompts.json not found at {file_path}. Using default prompt types.")
+            return ["personas", "awareness"]
+
+    def should_hide_approval_plot(self, prompt_type: str) -> bool:
+        return self.hide_approvals or prompt_type in self.hidden_approval_prompts
+
+    def _update_plot_aesthetics(self):
+        for category in self.approval_prompts:
+            # Load the prompts for this category
+            with open(Path(__file__).resolve().parents[3] / "data" / "prompts" / "approval_prompts.json", "r") as f:
+                prompts = json.load(f)[category]
+            
+            num_prompts = len(prompts)
+            
+            # Generate sizes dynamically
+            min_size = 30
+            max_size = 120
+            sizes = np.linspace(min_size, max_size, num_prompts).astype(int).tolist()
+            
+            self.plot_aesthetics[f"{category}_approvals"] = {
+                "colors": self.colors[:num_prompts],
+                "shapes": self.shapes[:num_prompts],
+                "labels": list(prompts.keys()),
+                "sizes": sizes,
+                "order": None,
+                "font_size": self.plot_aesthetics["approvals"]["font_size"],
+                "legend_font_size": self.plot_aesthetics["approvals"]["legend_font_size"],
+                "marker_size": self.plot_aesthetics["approvals"]["marker_size"],
+                "alpha": self.plot_aesthetics["approvals"]["alpha"],
+            }
 
 
 @dataclass
 class ClusteringSettings:
     main_clustering_algorithm: str = "KMeans"
-    n_clusters: Optional[int] = None
     n_clusters_ratio: float = 0.04
+    n_clusters: int = None
     min_clusters: int = 10
     max_clusters: int = 500
     all_clustering_algorithms: List[str] = field(
@@ -201,6 +230,12 @@ class ClusteringSettings:
     linkage: str = "ward"
     threshold: float = 0.5
     metric: str = "euclidean"
+    theme_identification_model_name: str = "gpt-3.5-turbo"
+    theme_identification_model_family: str = "openai"
+    theme_identification_system_message: str = ""
+    theme_identification_prompt: str = (
+        "Briefly list the common themes of the following texts:"
+    )
 
 
 @dataclass
@@ -216,10 +251,21 @@ class TsneSettings:
     pca_components: int = 50
     early_exaggeration: float = 12.0
 
+    @staticmethod
+    def calculate_perplexity(n_statements: int) -> int:
+        if n_statements < 50:
+            return max(5, n_statements // 3)
+        elif n_statements < 100:
+            return max(10, n_statements // 5)
+        elif n_statements < 500:
+            return max(30, n_statements // 10)
+        else:
+            return min(50, n_statements // 100)
+
 
 @dataclass
 class RunSettings:
-    name: str
+    name: str = "default"
     random_state: int = 42
     directory_settings: DirectorySettings = field(default_factory=DirectorySettings)
     model_settings: ModelSettings = field(default_factory=ModelSettings)
@@ -230,43 +276,89 @@ class RunSettings:
     clustering_settings: ClusteringSettings = field(default_factory=ClusteringSettings)
     tsne_settings: TsneSettings = field(default_factory=TsneSettings)
     test_mode: bool = False
-    skip_sections: List[str] = field(default_factory=list)
-    run_only: Optional[str] = None
+    run_sections: List[str] = field(default_factory=list)
     approval_prompts: Dict[str, Dict[str, str]] = field(default_factory=dict)
+    run_only: List[str] = field(default_factory=list)
 
     def __post_init__(self):
-        self.update_n_clusters()
         self.load_approval_prompts()
+        self.update_n_clusters()
+        self.update_tsne_settings()
 
     def update_n_clusters(self):
         if self.clustering_settings.n_clusters is None:
-            n_statements = self.data_settings.n_statements
             n_clusters = max(self.clustering_settings.min_clusters, 
                              min(self.clustering_settings.max_clusters, 
-                                 int(n_statements * self.clustering_settings.n_clusters_ratio)))
+                                 int(self.data_settings.n_statements * self.clustering_settings.n_clusters_ratio)))
             self.clustering_settings.n_clusters = n_clusters
-        else:
-            # Ensure the specified n_clusters is within the allowed range
-            self.clustering_settings.n_clusters = max(self.clustering_settings.min_clusters,
-                                                      min(self.clustering_settings.max_clusters,
-                                                          self.clustering_settings.n_clusters))
+
+    def update_tsne_settings(self):
+        self.tsne_settings.perplexity = TsneSettings.calculate_perplexity(self.data_settings.n_statements)
 
     def load_approval_prompts(self):
-        prompts_file = self.directory_settings.data_dir / "prompts" / "approval_prompts.json"
-        if os.path.exists(prompts_file):
-            with open(prompts_file, 'r') as f:
+        self.approval_prompts_file = self.directory_settings.data_dir / "prompts" / "approval_prompts.json"
+        if os.path.exists(self.approval_prompts_file):
+            with open(self.approval_prompts_file, 'r') as f:
                 self.approval_prompts = json.load(f)
         else:
-            print(f"Warning: Approval prompts file not found at {prompts_file}")
+            print(f"Warning: Approval prompts file not found at {self.approval_prompts_file}")
             self.approval_prompts = {}
 
-    def get_relevant_settings(self, data_type: str) -> dict:
-        relevant_settings = {
-            "all_query_results": ["model_settings", "data_settings", "prompt_settings"],
-            # Add other data types and their relevant settings here
-        }
-        
-        return {
-            setting: getattr(self, setting)
-            for setting in relevant_settings.get(data_type, [])
-        }
+    def update_run_sections(self, sections: Optional[Union[str, List[str]]] = None):
+        # Define available sections
+        available_sections = ["model_comparison", "hierarchical_clustering"]
+        available_sections.extend([f"{prompt_type}_evaluation" for prompt_type in self.approval_prompts.keys()])
+
+        if sections is not None:
+            if isinstance(sections, str):
+                sections = [sections]
+            if "all" in sections:
+                self.run_sections = available_sections
+            else:
+                valid_sections = [section for section in sections if section in available_sections]
+                if valid_sections:
+                    self.run_sections = valid_sections
+                else:
+                    print(f"Warning: No valid sections provided. Run sections unchanged: {self.run_sections}")
+        else:
+            self.run_sections = [section for section in self.run_sections if section in available_sections]
+
+        print(f"Updated run sections: {self.run_sections}")
+
+    def to_dict(self) -> dict:
+        def convert_paths(item):
+            if isinstance(item, Path):
+                return str(item)
+            elif isinstance(item, dict):
+                return {k: convert_paths(v) for k, v in item.items()}
+            elif isinstance(item, list):
+                return [convert_paths(i) for i in item]
+            return item
+
+        return json.loads(json.dumps(asdict(self), default=convert_paths))
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'RunSettings':
+        def convert_to_path(item):
+            if isinstance(item, str) and ('dir' in item or 'path' in item):
+                return Path(item)
+            elif isinstance(item, dict):
+                return {k: convert_to_path(v) for k, v in item.items()}
+            elif isinstance(item, list):
+                return [convert_to_path(i) for i in item]
+            return item
+
+        # Convert string paths back to Path objects
+        data = convert_to_path(data)
+
+        # Remove any unexpected keys
+        valid_keys = {f.name for f in fields(cls)}
+        filtered_data = {k: v for k, v in data.items() if k in valid_keys}
+
+        # Convert nested dictionaries to appropriate dataclass objects
+        for key, value in filtered_data.items():
+            if key.endswith('_settings') and isinstance(value, dict):
+                setting_class = globals()[key.replace('_settings', '').capitalize() + 'Settings']
+                filtered_data[key] = setting_class(**value)
+
+        return cls(**filtered_data)

@@ -12,8 +12,6 @@ class OpenAIModel:
         self.client = OpenAI()
 
     def generate(self, prompt):
-        print("Generating with OpenAI API...")
-
         @retry(wait=wait_random_exponential(min=20, max=60), stop=stop_after_attempt(6))
         def completion_with_backoff(model, prompt):
             completion = self.client.chat.completions.create(
@@ -34,9 +32,7 @@ class OpenAIModel:
             )
             return completion
 
-        completion = completion_with_backoff(model="gpt-3.5-turbo", prompt=prompt)
-
-        print("Completed generation.")
+        completion = completion_with_backoff(model=self.model, prompt=prompt)
         return completion.choices[0].message.content
 
 

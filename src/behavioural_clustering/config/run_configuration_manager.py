@@ -5,28 +5,40 @@ from typing import Dict, List, Any
 
 class RunConfigurationManager:
     def __init__(self):
-        self.config_file = Path(__file__).parent / "config.yaml"
+        self.config_file = Path(__file__).parents[0] / "config.yaml"
         self.configurations: Dict[str, RunSettings] = {}
         self.load_configurations()
-        self.run_metadata_file = Path(__file__).parent.parent.parent / "data" / "metadata" / "run_metadata.yaml"
+        self.run_metadata_file = Path(__file__).parents[3] / "data" / "metadata" / "run_metadata.yaml"
 
     def load_configurations(self):
         if self.config_file.exists():
             with open(self.config_file, 'r') as f:
                 config_dict = yaml.safe_load(f)
-            default_config = config_dict.pop('default', {})
+            default_config = config_dict.get('default', {})
+            
+            # Create a "Default Run" configuration
+            default_run_config = default_config.copy()
+            default_run_config['name'] = "Default Run"
+            self.configurations["Default Run"] = RunSettings.from_dict(default_run_config)
+            
+            # Process other configurations
             for name, config in config_dict.items():
-                self.configurations[name] = self._dict_to_run_settings(config, default_config)
+                if name != 'default':
+                    merged_config = self._merge_configs(default_config, config)
+                    if 'name' not in merged_config:
+                        merged_config['name'] = name
+                    self.configurations[name] = RunSettings.from_dict(merged_config)
 
     def save_configurations(self):
-        config_dict = {name: self._run_settings_to_dict(config) for name, config in self.configurations.items()}
+        config_dict = {name: config.to_dict() for name, config in self.configurations.items()}
         with open(self.config_file, 'w') as f:
-            yaml.dump(config_dict, f)
+            yaml.dump(config_dict, f, default_flow_style=False)
 
     def get_configuration(self, name: str) -> RunSettings:
         config = self.configurations.get(name)
         if config:
             config.update_n_clusters()
+            config.update_tsne_settings()
         return config
 
     def add_configuration(self, run_settings: RunSettings):
@@ -55,56 +67,40 @@ class RunConfigurationManager:
             print(f"- {section}")
 
     @staticmethod
-    def _run_settings_to_dict(run_settings: RunSettings) -> dict:
-        return {
-            'name': run_settings.name,
-            'random_state': run_settings.random_state,
-            'directory_settings': run_settings.directory_settings.__dict__,
-            'data_settings': run_settings.data_settings.__dict__,
-            'model_settings': run_settings.model_settings.__dict__,
-            'embedding_settings': run_settings.embedding_settings.__dict__,
-            'prompt_settings': run_settings.prompt_settings.__dict__,
-            'plot_settings': run_settings.plot_settings.__dict__,
-            'clustering_settings': run_settings.clustering_settings.__dict__,
-            'tsne_settings': run_settings.tsne_settings.__dict__,
-            'test_mode': run_settings.test_mode,
-            'skip_sections': run_settings.skip_sections,
-            'run_only': run_settings.run_only,
-        }
-
-    @staticmethod
-    def _dict_to_run_settings(config_dict: dict, default_config: dict) -> RunSettings:
-        # Merge default config with specific config
+    def _merge_configs(default_config: dict, specific_config: dict) -> dict:
         merged_config = default_config.copy()
-        merged_config.update(config_dict)
-
-        prompt_settings = merged_config.get('prompt_settings', {})
-        prompt_settings.setdefault('awareness_task', "evaluate text appropriateness")
-
-        run_settings = RunSettings(
-            name=merged_config['name'],
-            random_state=merged_config['random_state'],
-            directory_settings=DirectorySettings(**merged_config.get('directory_settings', {})),
-            data_settings=DataSettings(**merged_config.get('data_settings', {})),
-            model_settings=ModelSettings(**merged_config['model_settings']),
-            embedding_settings=EmbeddingSettings(**merged_config['embedding_settings']),
-            prompt_settings=PromptSettings(**prompt_settings),
-            plot_settings=PlotSettings(**merged_config['plot_settings']),
-            clustering_settings=ClusteringSettings(**merged_config['clustering_settings']),
-            tsne_settings=TsneSettings(**merged_config['tsne_settings']),
-            test_mode=merged_config.get('test_mode', False),
-            skip_sections=merged_config.get('skip_sections', []),
-            run_only=merged_config.get('run_only', None),
-        )
-        run_settings.update_n_clusters()
-        return run_settings
+        for key, value in specific_config.items():
+            if isinstance(value, dict) and key in merged_config:
+                merged_config[key] = RunConfigurationManager._merge_configs(merged_config[key], value)
+            else:
+                merged_config[key] = value
+        return merged_config
 
     def load_run_metadata(self) -> Dict[str, Any]:
         if self.run_metadata_file.exists():
             with open(self.run_metadata_file, 'r') as f:
-                return yaml.safe_load(f) or {}
+                try:
+                    return yaml.safe_load(f) or {}
+                except yaml.YAMLError:
+                    print(f"Warning: Could not parse {self.run_metadata_file}. Starting with empty metadata.")
         return {}
 
     def get_run_metadata(self, run_id: str) -> Dict[str, Any]:
         run_metadata = self.load_run_metadata()
         return run_metadata.get(run_id, {})
+
+    def save_run_metadata(self, run_id: str, metadata: Dict[str, Any]):
+        run_metadata = self.load_run_metadata()
+        run_metadata[run_id] = self._convert_paths_to_str(metadata)
+        with open(self.run_metadata_file, 'w') as f:
+            yaml.dump(run_metadata, f, default_flow_style=False)
+
+    @staticmethod
+    def _convert_paths_to_str(data):
+        if isinstance(data, Path):
+            return str(data)
+        elif isinstance(data, dict):
+            return {k: RunConfigurationManager._convert_paths_to_str(v) for k, v in data.items()}
+        elif isinstance(data, list):
+            return [RunConfigurationManager._convert_paths_to_str(i) for i in data]
+        return data

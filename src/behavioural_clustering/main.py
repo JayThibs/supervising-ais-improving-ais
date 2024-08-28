@@ -69,10 +69,17 @@ def main(args):
     if run_settings:
         print(f"Using run settings: {run_settings.name}")
 
-        # Update skip_sections and run_only based on command-line arguments
-        run_settings.skip_sections.extend(args.skip)
+        # Update run_sections based on command-line arguments
+        if args.skip:
+            run_settings.run_sections = [section for section in run_settings.run_sections if section not in args.skip]
+            run_settings.update_run_sections()  # Validate the updated run_sections
         if args.run_only:
-            run_settings.run_only = args.run_only
+            run_settings.update_run_sections(args.run_only)
+
+        # Display which sections will run
+        print("Sections that will run:")
+        for section in run_settings.run_sections:
+            print(f"- {section}")
 
         print("Loading evaluator pipeline...")
         evaluator = EvaluatorPipeline(run_settings)

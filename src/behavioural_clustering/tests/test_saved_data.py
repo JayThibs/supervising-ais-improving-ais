@@ -53,7 +53,7 @@ class TestSavedData(unittest.TestCase):
                     print(f"  WARNING: File not found for {data_type}: {file_path}")
                     continue
 
-                data = self.data_handler.load_data(file_path=file_path)
+                data = self.data_handler.load_saved_data(file_path=file_path)
                 if data is None:
                     print(f"  WARNING: Failed to load data for {data_type}")
                     continue

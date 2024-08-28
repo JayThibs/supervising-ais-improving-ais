@@ -4,7 +4,6 @@ from pathlib import Path
 from typing import List, Tuple, Dict, Any, Optional
 import logging
 import subprocess
-from threading import Lock
 import numpy as np
 import json
 import yaml
@@ -12,9 +11,19 @@ import pickle
 from datetime import datetime
 from dotenv import load_dotenv
 from behavioural_clustering.config.run_settings import DataSettings, RunSettings
-import uuid
 import hashlib
 import traceback
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler()  # This will output to console
+        # Uncomment the next line to also log to a file
+        # logging.FileHandler("my_log_file.log")
+    ]
+)
+logger = logging.getLogger(__name__)
 
 
 class DataPreparation:
@@ -164,7 +173,7 @@ class DataPreparation:
         filepath = os.path.join(directory, filename)
 
         if load_if_exists and os.path.exists(filepath):
-            logging.info(f"Loading {filename}...")
+            logger.info(f"Loading {filename}...")
             with open(filepath, "rb") as file:
                 return True, pickle.load(file)
         else:
@@ -173,7 +182,7 @@ class DataPreparation:
                 new_filename = f"{filename[:-4]}_{timestamp}.pkl"
                 new_filepath = os.path.join(directory, new_filename)
                 os.rename(filepath, new_filepath)
-                logging.info(f"Saved old {filename} as {new_filename}.")
+                logger.info(f"Saved old {filename} as {new_filename}.")
 
             return False, None
 
@@ -205,7 +214,7 @@ class DataHandler:
         if self.data_metadata_file.exists():
             with open(self.data_metadata_file, 'r') as f:
                 try:
-                    return yaml.safe_load(f) or {}
+                    return self._convert_str_to_paths(yaml.safe_load(f) or {})
                 except yaml.YAMLError:
                     print(f"Warning: Could not parse {self.data_metadata_file}. Starting with empty metadata.")
         return {}
@@ -215,16 +224,18 @@ class DataHandler:
         if self.run_metadata_file.exists():
             with open(self.run_metadata_file, 'r') as f:
                 all_metadata = yaml.safe_load(f) or {}
-        all_metadata[self.run_id] = metadata
+        all_metadata[self.run_id] = self._convert_paths_to_str(metadata)
         with open(self.run_metadata_file, 'w') as f:
             yaml.dump(all_metadata, f, default_flow_style=False)
 
     def save_data_metadata(self):
+        metadata_to_save = self._convert_paths_to_str(self.data_metadata)
         with open(self.data_metadata_file, 'w') as f:
-            yaml.dump(self.data_metadata, f, default_flow_style=False)
+            yaml.dump(metadata_to_save, f, default_flow_style=False)
 
     def save_data(self, data: Any, data_type: str, config: Dict[str, Any]) -> str:
-        file_id = self._generate_file_id(data_type, config)
+        relevant_config = self._get_relevant_config(data_type, config)
+        file_id = self._generate_file_id(data_type, relevant_config)
         data_type_dir = self.data_dir / data_type
         data_type_dir.mkdir(parents=True, exist_ok=True)
         file_name = f"{file_id}.pkl"
@@ -237,7 +248,7 @@ class DataHandler:
             self.data_metadata[data_type] = {}
         self.data_metadata[data_type][file_id] = {
             "file_path": str(file_path),
-            "config": config
+            "config": relevant_config
         }
         self.save_data_metadata()
         
@@ -245,45 +256,58 @@ class DataHandler:
         return file_id
 
     def _generate_file_id(self, data_type: str, config: Dict[str, Any]) -> str:
-        relevant_config = self._get_relevant_config(data_type, config)
-        config_str = json.dumps(relevant_config, sort_keys=True)
+        config_str = json.dumps(config, sort_keys=True)
         return hashlib.md5(config_str.encode()).hexdigest()
 
     def _get_relevant_config(self, data_type: str, config: Dict[str, Any]) -> Dict[str, Any]:
-        if data_type == "all_query_results":
-            return {
-                "datasets": config["data_settings"]["datasets"],
-                "n_statements": config["data_settings"]["n_statements"],
-                "random_state": config["data_settings"]["random_state"],
-                "model_settings": config["model_settings"],
-                "statements_prompt_template": config["prompt_settings"]["statements_prompt_template"]
-            }
-        elif data_type in ["joint_embeddings_all_llms", "combined_embeddings"]:
-            return {
-                "datasets": config["data_settings"]["datasets"],
-                "n_statements": config["data_settings"]["n_statements"],
-                "random_state": config["data_settings"]["random_state"],
-                "model_settings": config["model_settings"],
-                "statements_prompt_template": config["prompt_settings"]["statements_prompt_template"],
-                "embedding_settings": config["embedding_settings"]
-            }
-        elif data_type == "chosen_clustering":
-            return {
-                "datasets": config["data_settings"]["datasets"],
-                "n_statements": config["data_settings"]["n_statements"],
-                "random_state": config["data_settings"]["random_state"],
-                "model_settings": config["model_settings"],
-                "statements_prompt_template": config["prompt_settings"]["statements_prompt_template"],
-                "embedding_settings": config["embedding_settings"],
-                "clustering_settings": config["clustering_settings"]
-            }
-        else:
-            return config
+        base_config = {
+            "datasets": config.get("data_settings", {}).get("datasets"),
+            "n_statements": config.get("data_settings", {}).get("n_statements"),
+            "random_state": config.get("data_settings", {}).get("random_state"),
+            "model_settings": config.get("model_settings"),
+        }
 
-    def load_data(self, data_type: str, config: Dict[str, Any]) -> Optional[Any]:
-        file_id = self._generate_file_id(data_type, config)
+        if data_type == "all_query_results":
+            base_config["statements_prompt_template"] = config.get("prompt_settings", {}).get("statements_prompt_template")
+        elif data_type in ["joint_embeddings_all_llms", "combined_embeddings", "embed_texts"]:
+            base_config["statements_prompt_template"] = config.get("prompt_settings", {}).get("statements_prompt_template")
+            base_config["embedding_settings"] = config.get("embedding_settings")
+        elif data_type == "chosen_clustering":
+            base_config["statements_prompt_template"] = config.get("prompt_settings", {}).get("statements_prompt_template")
+            base_config["embedding_settings"] = config.get("embedding_settings")
+            base_config["clustering_settings"] = config.get("clustering_settings")
+        elif data_type.startswith("approvals_statements_"):
+            base_config["prompt_type"] = config.get("prompt_type")
+            base_config["approval_prompt_template"] = config.get("prompt_settings", {}).get("approval_prompt_template")
+        elif data_type == "compile_cluster_table":
+            base_config["clustering_settings"] = config.get("clustering_settings")
+            base_config["max_desc_length"] = config.get("prompt_settings", {}).get("max_desc_length")
+        else:
+            # For any other data types, include all available settings
+            base_config.update({
+                "prompt_settings": config.get("prompt_settings"),
+                "embedding_settings": config.get("embedding_settings"),
+                "clustering_settings": config.get("clustering_settings")
+            })
+
+        # Remove None values from the config
+        return {k: v for k, v in base_config.items() if v is not None}
+
+    def load_saved_data(self, data_type: str, config: Dict[str, Any]) -> Optional[Any]:
+        print(f"Attempting to load data type: {data_type}")
+        print(f"Config keys: {config.keys()}")
+
+        if not self.data_metadata:
+            print("data_metadata is empty. No existing data to load.")
+            return None
+
+        relevant_config = self._get_relevant_config(data_type, config)
+        print(f"Relevant config keys: {relevant_config.keys()}")
+        file_id = self._generate_file_id(data_type, relevant_config)
+        print(f"Generated file_id: {file_id}")
         if data_type in self.data_metadata and file_id in self.data_metadata[data_type]:
             file_path = self.data_metadata[data_type][file_id]["file_path"]
+            print(f"Found matching file path: {file_path}")
             return self._load_file(file_path)
         print(f"No matching {data_type} found")
         return None
@@ -354,3 +378,23 @@ class DataHandler:
                         "metadata": metadata['metadata']
                     })
         return matching_files
+
+    @staticmethod
+    def _convert_paths_to_str(data):
+        if isinstance(data, Path):
+            return str(data)
+        elif isinstance(data, dict):
+            return {k: DataHandler._convert_paths_to_str(v) for k, v in data.items()}
+        elif isinstance(data, list):
+            return [DataHandler._convert_paths_to_str(i) for i in data]
+        return data
+
+    @staticmethod
+    def _convert_str_to_paths(data):
+        if isinstance(data, str) and ('/' in data or '\\' in data):
+            return Path(data)
+        elif isinstance(data, dict):
+            return {k: DataHandler._convert_str_to_paths(v) for k, v in data.items()}
+        elif isinstance(data, list):
+            return [DataHandler._convert_str_to_paths(i) for i in data]
+        return data

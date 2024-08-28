@@ -4,13 +4,13 @@ from behavioural_clustering.models.model_factory import initialize_model
 
 
 def query_model_on_statements(
-    statements, model_family, model, prompt_template, system_message
+    statements, model_family, model_name, prompt_template, system_message
 ):
     query_results = {}
     inputs, responses, full_conversations = [], [], []
     model_info = {}
     model_info["model_family"] = model_family
-    model_info["model"] = model
+    model_info["model_name"] = model_name
     model_info["system_message"] = system_message
     query_results["model_info"] = model_info
     num_statements = len(statements)
@@ -56,7 +56,7 @@ def query_model_on_statements(
     # print all variables
     print("Statements:", statements)
     print("Model family:", model_family)
-    print("Model:", model)
+    print("Model name:", model_name)
     print("Prompt template:", prompt_template)
     print("Inputs:", inputs)
     print("Responses:", responses)

@@ -1,10 +1,5 @@
 import time
 import numpy as np
-import sklearn
-import pdb
-import scipy
-from terminaltables import AsciiTable
-from typing import Tuple, Any, Optional, List
 from openai import OpenAI
 
 ### Unused functions ###
@@ -50,8 +45,8 @@ def text_match_theme(
 def purify_cluster(cluster_texts_and_embeddings, theme_list):
     n_themes = len(theme_list)
     n_texts = len(cluster_texts_and_embeddings)
-    texts = [e[0] for e in cluster_texts_and_embeddings]
-    embeddings = np.array([e[1] for e in cluster_texts_and_embeddings])
+    texts = [e['statement'] for e in cluster_texts_and_embeddings]
+    embeddings = np.array([e['embedding'] for e in cluster_texts_and_embeddings])
     pure_cluster_texts_and_embeddings = [[] for _ in range(n_themes)]
     pure_cluster_counts = [0 for _ in range(n_themes)]
     remaining_texts_mask = np.ones(n_texts, dtype=bool)

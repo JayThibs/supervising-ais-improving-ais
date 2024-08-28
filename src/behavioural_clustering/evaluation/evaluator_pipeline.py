@@ -1,29 +1,21 @@
 import os
-import pickle
-from pathlib import Path
 import json
 import yaml
 import numpy as np
-import pickle
 from datetime import datetime
-from matplotlib import pyplot as plt
-from functools import lru_cache
 import hashlib
-import traceback
-import uuid
-from typing import List, Dict, Any
+from typing import Dict, Any
+from pathlib import Path
 
-from behavioural_clustering.config.run_settings import RunSettings, DataSettings
+from behavioural_clustering.config.run_settings import RunSettings
 from behavioural_clustering.utils.data_preparation import DataPreparation, DataHandler
 from behavioural_clustering.utils.visualization import Visualization
 from behavioural_clustering.evaluation.clustering import Clustering, ClusterAnalyzer
-from behavioural_clustering.evaluation.embeddings import embed_texts
+from behavioural_clustering.evaluation.embeddings import embed_texts, create_embeddings
 from behavioural_clustering.evaluation.dimensionality_reduction import tsne_reduction
 from behavioural_clustering.models.local_models import LocalModel
-from behavioural_clustering.utils.resource_management import ResourceManager
-from .model_evaluation_manager import ModelEvaluationManager
-from .approval_evaluation_manager import ApprovalEvaluationManager
-from .hierarchical_clustering_manager import HierarchicalClusteringManager
+from behavioural_clustering.evaluation.model_evaluation_manager import ModelEvaluationManager
+from behavioural_clustering.evaluation.approval_evaluation_manager import ApprovalEvaluationManager
 
 class EvaluatorPipeline:
     def __init__(self, run_settings: RunSettings):
@@ -34,6 +26,7 @@ class EvaluatorPipeline:
             run_settings (RunSettings): Configuration settings for the evaluation run.
         """
         self.run_settings = run_settings
+        self.run_sections = run_settings.run_only if run_settings.run_only else run_settings.run_sections
         self.setup_directories()
         self.setup_models()
         self.run_id = self.generate_run_id()
@@ -41,6 +34,12 @@ class EvaluatorPipeline:
         self.run_metadata_file = self.run_settings.directory_settings.data_dir / "metadata" / "run_metadata.yaml"
         self.run_metadata = self.load_run_metadata()
         self.setup_managers()
+        self.load_approval_prompts()
+
+    def load_approval_prompts(self):
+        approval_prompts_path = self.run_settings.directory_settings.data_dir / "prompts" / "approval_prompts.json"
+        with open(approval_prompts_path, 'r') as f:
+            self.approval_prompts = json.load(f)
 
     def generate_run_id(self) -> str:
         metadata_file = self.run_settings.directory_settings.data_dir / "metadata" / "run_metadata.yaml"
@@ -58,9 +57,12 @@ class EvaluatorPipeline:
 
     def setup_directories(self) -> None:
         for dir_name in ['data_dir', 'evals_dir', 'results_dir', 'viz_dir', 'tables_dir', 'pickle_dir']:
-            dir_path = getattr(self.run_settings.directory_settings, dir_name)
-            if not os.path.exists(dir_path):
-                os.makedirs(dir_path)
+            dir_path = getattr(self.run_settings.directory_settings, dir_name, None)
+            if dir_path:
+                if not os.path.exists(dir_path):
+                    os.makedirs(dir_path)
+            else:
+                print(f"Warning: {dir_name} not found in directory_settings")
 
     def setup_models(self) -> None:
         self.llms = self.run_settings.model_settings.models
@@ -70,19 +72,11 @@ class EvaluatorPipeline:
 
     def setup_managers(self) -> None:
         self.data_prep = DataPreparation()
-        
-        data_file_mapping = self.run_settings.directory_settings.data_file_mapping
-        if not os.path.exists(data_file_mapping):
-            print(f"Warning: data_file_mapping file {data_file_mapping} does not exist. Creating an empty file.")
-            with open(data_file_mapping, 'w') as f:
-                pass  # Create an empty file
-        
         self.viz = Visualization(self.run_settings.plot_settings)
         self.clustering = Clustering(self.run_settings)
         self.cluster_analyzer = ClusterAnalyzer(self.run_settings)
         self.model_eval_manager = ModelEvaluationManager(self.run_settings, self.llms)
         self.approval_eval_manager = ApprovalEvaluationManager(self.run_settings, self.model_eval_manager)
-        self.hierarchical_clustering_manager = HierarchicalClusteringManager(self.run_settings, self.cluster_analyzer, self.viz)
 
     def run_evaluations(self) -> None:
         """
@@ -90,7 +84,7 @@ class EvaluatorPipeline:
         prompt evaluations, and hierarchical clustering if specified in the run settings.
         """
         print(f"Data settings: {self.run_settings.data_settings}")
-        self.text_subset = self.load_text_subset()
+        self.text_subset = self.data_prep.load_and_preprocess_data(self.run_settings.data_settings)
         
         if len(self.text_subset) == 0:
             raise ValueError("No texts loaded. Please check your dataset configuration.")
@@ -100,31 +94,28 @@ class EvaluatorPipeline:
         for i in range(min(5, len(self.text_subset))):
             print(f"Text {i+1}: {self.text_subset[i][:100]}...")
 
-        if "model_comparison" not in self.run_settings.skip_sections:
-            self.run_model_comparison()
+        # Create metadata once
+        metadata_config = self.create_current_metadata()
+
+        if "model_comparison" in self.run_sections:
+            self.run_model_comparison(metadata_config)
         
         self.approvals_data = {}
-        for prompt_type in self.run_settings.approval_prompts.keys():
-            if f"{prompt_type}_evaluation" not in self.run_settings.skip_sections:
-                self.run_prompt_evaluation(prompt_type)
+        for prompt_type in self.approval_prompts.keys():
+            if f"{prompt_type}_evaluation" in self.run_sections:
+                self.run_prompt_evaluation(prompt_type, metadata_config)
 
-        if "hierarchical_clustering" not in self.run_settings.skip_sections:
-            self.run_hierarchical_clustering()
+        if "hierarchical_clustering" in self.run_sections:
+            self.run_hierarchical_clustering(metadata_config)
 
         self.save_run_data()
 
-    def load_text_subset(self) -> List[str]:
-        config = self.create_current_metadata()
-        return self.data_prep.load_and_preprocess_data(self.run_settings.data_settings)
-
-    def run_model_comparison(self) -> None:
-        config = self.create_current_metadata()
-
-        self.query_results_per_model = self.load_data("all_query_results", config)
+    def run_model_comparison(self, metadata_config: Dict[str, Any]) -> None:
+        self.query_results_per_model = self.load_data("all_query_results", metadata_config)
         if self.query_results_per_model is None:
             print("Generating new query results...")
             self.query_results_per_model = self.model_eval_manager.generate_responses(self.text_subset)
-            self.data_handler.save_data(self.query_results_per_model, "all_query_results", config)
+            self.data_handler.save_data(self.query_results_per_model, "all_query_results", metadata_config)
         else:
             print("Loaded existing query results.")
 
@@ -132,38 +123,46 @@ class EvaluatorPipeline:
             print("Warning: No query results available. Check the generate_responses function.")
             return
 
-        loaded_data = self.load_data("joint_embeddings_all_llms", config)
-        if loaded_data is None:
+        self.joint_embeddings_all_llms = self.load_data("joint_embeddings_all_llms", metadata_config)
+        if self.joint_embeddings_all_llms is None:
             print("Generating new embeddings...")
-            self.joint_embeddings_all_llms, self.combined_embeddings = self.model_eval_manager.create_embeddings(
+            # joint_embeddings_all_llms is a list of dictionaries, each containing:
+            # {"model_num": model_num, "statement": input, "response": response, "embedding": embedding, "model_name": model_name}
+            self.joint_embeddings_all_llms = create_embeddings(
                 self.query_results_per_model,
                 self.llms,
                 self.run_settings.embedding_settings
             )
-            self.data_handler.save_data(self.joint_embeddings_all_llms, "joint_embeddings_all_llms", config)
-            self.data_handler.save_data(self.combined_embeddings, "combined_embeddings", config)
+            self.combined_embeddings = [e["embedding"] for e in self.joint_embeddings_all_llms]
+            self.data_handler.save_data(self.joint_embeddings_all_llms, "joint_embeddings_all_llms", metadata_config)
         else:
             print("Loaded existing embeddings.")
-            self.joint_embeddings_all_llms = loaded_data
-            self.combined_embeddings = self.load_data("combined_embeddings", config)
-
-        if not self.combined_embeddings:
-            print("Warning: combined_embeddings is empty. Check the create_embeddings function.")
-            return
-
-        print(f"Number of combined embeddings: {len(self.combined_embeddings)}")
+            self.combined_embeddings = [e["embedding"] for e in self.joint_embeddings_all_llms]
         
         combined_embeddings_array = np.array(self.combined_embeddings)
         
-        self.chosen_clustering = self.load_data("chosen_clustering", config)
+        self.spectral_clustering = self.load_data("spectral_clustering", metadata_config)
+        if self.spectral_clustering is None:
+            print("Generating new spectral clustering of embeddings...")
+            self.spectral_clustering = self.clustering.cluster_embeddings(
+                combined_embeddings_array,
+                clustering_algorithm="SpectralClustering",
+                n_clusters=self.run_settings.clustering_settings.n_clusters,
+                affinity=self.run_settings.clustering_settings.affinity
+            )
+            self.data_handler.save_data(self.spectral_clustering, "spectral_clustering", metadata_config)
+        else:
+            print("Loaded existing spectral clustering.")
+
+        self.chosen_clustering = self.load_data("chosen_clustering", metadata_config)
         if self.chosen_clustering is None:
             print("Generating new clustering...")
             self.chosen_clustering = self.clustering.cluster_embeddings(combined_embeddings_array)
-            self.data_handler.save_data(self.chosen_clustering, "chosen_clustering", config)
+            self.data_handler.save_data(self.chosen_clustering, "chosen_clustering", metadata_config)
         else:
             print("Loaded existing clustering.")
 
-        self.rows = self.load_data("compile_cluster_table", config)
+        self.rows = self.load_data("compile_cluster_table", metadata_config)
         if self.rows is None:
             print("Generating new cluster table...")
             self.rows = self.cluster_analyzer.compile_cluster_table(
@@ -171,16 +170,15 @@ class EvaluatorPipeline:
                 data=self.joint_embeddings_all_llms,
                 model_info_list=self.model_eval_manager.model_info_list,
                 data_type="joint_embeddings",
-                theme_summary_instructions=self.run_settings.prompt_settings.theme_summary_instructions,
                 max_desc_length=self.run_settings.prompt_settings.max_desc_length
             )
-            self.data_handler.save_data(self.rows, "compile_cluster_table", config)
+            self.data_handler.save_data(self.rows, "compile_cluster_table", metadata_config)
         else:
             print("Loaded existing cluster table.")
 
-        self.visualize_model_comparison()
+        self.visualize_model_comparison(metadata_config)
 
-    def run_prompt_evaluation(self, prompt_type: str) -> None:
+    def run_prompt_evaluation(self, prompt_type: str, metadata_config: Dict[str, Any]) -> None:
         """
         Evaluate a specific prompt type by generating approvals data,
         embedding texts, and analyzing cluster approval statistics.
@@ -188,105 +186,165 @@ class EvaluatorPipeline:
         Args:
             prompt_type (str): The type of prompt to evaluate (e.g., 'personas', 'awareness').
         """
-        config = self.create_current_metadata()
-        config["prompt_type"] = prompt_type
+        metadata_config = metadata_config.copy()
+        metadata_config["prompt_type"] = prompt_type
+        print(f"Config for {prompt_type}: {metadata_config.keys()}")
 
         # Load or generate approvals data
-        self.approvals_data[prompt_type] = self.data_handler.load_data(f"approvals_statements_and_embeddings_{prompt_type}", config)
-        if self.approvals_data[prompt_type] is None or not self.run_settings.data_settings.should_reuse_data(f"approvals_statements_and_embeddings_{prompt_type}"):
+        approvals_key = f"approvals_statements_{prompt_type}"
+        self.approvals_data[prompt_type] = self.load_data(approvals_key, metadata_config)
+        if self.approvals_data[prompt_type] is None or not self.run_settings.data_settings.should_reuse_data(approvals_key):
             print(f"Generating new approvals data for {prompt_type}...")
             self.approvals_data[prompt_type] = self.approval_eval_manager.load_or_generate_approvals_data(prompt_type, self.text_subset)
-            self.data_handler.save_data(self.approvals_data[prompt_type], f"approvals_statements_and_embeddings_{prompt_type}", config)
+            self.data_handler.save_data(self.approvals_data[prompt_type], approvals_key, metadata_config)
         else:
             print(f"Loaded existing approvals data for {prompt_type}.")
 
         # Load or generate embeddings
-        embeddings = self.data_handler.load_data("embed_texts", config)
-        if embeddings is None or not self.run_settings.data_settings.should_reuse_data("embed_texts"):
+        embeddings_key = "embed_texts"
+        print(f"Attempting to load embeddings with key: {embeddings_key}")
+        embeddings = self.load_data(embeddings_key, metadata_config)
+        if embeddings is None or not self.run_settings.data_settings.should_reuse_data(embeddings_key):
             print("Generating new text embeddings...")
-            embeddings = embed_texts(self.text_subset, self.run_settings.embedding_settings)
-            self.data_handler.save_data(embeddings, "embed_texts", config)
+            statements = [item['statement'] for item in self.approvals_data[prompt_type]]
+            embeddings = embed_texts(statements, self.run_settings.embedding_settings)
+            print(f"Saving embeddings with key: {embeddings_key}")
+            self.data_handler.save_data(embeddings, embeddings_key, metadata_config)
         else:
             print("Loaded existing text embeddings.")
 
+        # Combine approvals data with embeddings
+        print(f"Adding embeddings to approvals data...")
+        for item, embedding in zip(self.approvals_data[prompt_type], embeddings):
+            item['embedding'] = embedding
+
+        # Analyze cluster approval statistics and visualize approvals
         self.cluster_analyzer.cluster_approval_stats(
             self.approvals_data[prompt_type],
             embeddings,
             self.model_eval_manager.model_info_list,
-            {prompt_type: self.run_settings.approval_prompts[prompt_type]}
+            {prompt_type: self.approval_prompts[prompt_type]}
         )
-        self.visualize_approvals(prompt_type)
+        self.visualize_approvals(prompt_type, metadata_config)
 
-    def run_hierarchical_clustering(self) -> None:
+    def run_hierarchical_clustering(self, metadata_config: Dict[str, Any]) -> None:
         """
         Perform hierarchical clustering for each prompt type specified in the run settings.
         """
-        for prompt_type in self.run_settings.approval_prompts.keys():
-            self.hierarchical_clustering_manager.run_hierarchical_clustering(
-                prompt_type,
-                self.chosen_clustering,
-                self.approvals_data[prompt_type],
-                self.rows,
-                self.model_names,
-                self.run_settings.approval_prompts[prompt_type]
-            )
+        self.hierarchy_data = {}
 
-    def visualize_model_comparison(self) -> None:
+        for prompt_type in self.approval_prompts.keys():
+            print(f"Running hierarchical clustering for {prompt_type}...")
+            
+            # Update metadata_config with prompt_type
+            metadata_config_prompt = metadata_config.copy()
+            metadata_config_prompt["prompt_type"] = prompt_type
+            
+            # Attempt to load existing hierarchical data
+            hierarchical_key = f"hierarchical_clustering_{prompt_type}"
+            hierarchy_data = self.load_data(hierarchical_key, metadata_config_prompt)
+            
+            if hierarchy_data is None:
+                print(f"Generating new hierarchical clustering data for {prompt_type}...")
+                hierarchy_data = self.cluster_analyzer.calculate_hierarchical_cluster_data(
+                    self.chosen_clustering,
+                    self.approvals_data[prompt_type],
+                    self.rows
+                )
+                # Save the newly generated hierarchical data
+                self.data_handler.save_data(hierarchy_data, hierarchical_key, metadata_config_prompt)
+            else:
+                print(f"Loaded existing hierarchical clustering data for {prompt_type}.")
+            
+            self.hierarchy_data[prompt_type] = hierarchy_data
+            
+            labels = list(self.approval_prompts[prompt_type].keys())
+            
+            for model_name in self.model_names:
+                self.viz.visualize_hierarchical_plot(
+                    hierarchy_data=hierarchy_data,
+                    plot_type=prompt_type,
+                    filename=f"{self.run_settings.directory_settings.viz_dir}/hierarchical_clustering_{prompt_type}_{model_name}",
+                    labels=labels,
+                    show_plot=not self.run_settings.plot_settings.hide_hierarchical
+                )
+
+            print(f"Hierarchical clustering for {prompt_type} completed.")
+
+    def visualize_model_comparison(self, metadata_config: Dict[str, Any]) -> None:
         """
         Create visualizations for the model comparison results, including
-        t-SNE plots of embedding responses and displays of statement themes.
+        t-SNE plots of embedding responses, displays of statement themes,
+        and spectral clustering visualization.
         """
         dim_reduce_tsne = self.load_data(
             "tsne_reduction",
-            self.create_current_metadata()
+            metadata_config
         )
         if dim_reduce_tsne is None:
             print("Generating new tsne_reduction...")
             dim_reduce_tsne = tsne_reduction(
-                self.combined_embeddings,
-                self.run_settings.tsne_settings,
-                self.run_settings.random_state
+                combined_embeddings=self.combined_embeddings,
+                tsne_settings=self.run_settings.tsne_settings,
+                random_state=self.run_settings.random_state
             )
-            self.data_handler.save_data(dim_reduce_tsne, "tsne_reduction", self.create_current_metadata())
+            self.data_handler.save_data(dim_reduce_tsne, "tsne_reduction", metadata_config)
         else:
             print("Loaded existing tsne_reduction.")
 
-        self.viz.plot_embedding_responses(dim_reduce_tsne, self.joint_embeddings_all_llms, self.model_names, self.generate_plot_filename(self.model_names, "tsne_embedding_responses"))
+        # Always generate and save the plot, but only display if not hidden
+        self.viz.plot_embedding_responses(
+            dim_reduce_tsne, 
+            self.joint_embeddings_all_llms, 
+            self.model_names, 
+            self.generate_plot_filename(self.model_names, "tsne_embedding_responses"),
+            show_plot=not self.run_settings.plot_settings.hide_model_comparison
+        )
         self.cluster_analyzer.display_statement_themes(self.chosen_clustering, self.rows, self.model_eval_manager.model_info_list)
 
-    def visualize_approvals(self, prompt_type: str) -> None:
+        # Add spectral clustering visualization
+        if not self.run_settings.plot_settings.hide_spectral:
+            self.viz.plot_spectral_clustering(
+                self.spectral_clustering.labels_,
+                self.run_settings.clustering_settings.n_clusters,
+                self.generate_plot_filename(self.model_names, "spectral_clustering"),
+            )
+
+    def visualize_approvals(self, prompt_type: str, metadata_config: Dict[str, Any]) -> None:
         """
         Generate visualizations for approval data for a specific prompt type.
 
         Args:
-            prompt_type (str): The type of prompt to visualize (e.g., 'personas', 'awareness').
+            prompt_type (str):  The type of prompt to visualize. Examples: 'personas', 'awareness'. 
+                                Found in approval_prompts.json.
         """
-        approvals_embeddings = np.array([e[2] for e in self.approvals_data[prompt_type]])
+        approvals_embeddings = np.array([e['embedding'] for e in self.approvals_data[prompt_type]])
         dim_reduce_tsne = self.load_data(
             "tsne_reduction",
-            self.create_current_metadata()
-        )
+            metadata_config
+        ) # may have already been created in run_model_comparison, unless it was skipped
         if dim_reduce_tsne is None:
             print("Generating new tsne_reduction...")
             dim_reduce_tsne = tsne_reduction(
-                approvals_embeddings,
-                self.run_settings.tsne_settings,
-                self.run_settings.random_state
+                combined_embeddings=approvals_embeddings,
+                tsne_settings=self.run_settings.tsne_settings,
+                random_state=self.run_settings.random_state
             )
-            self.data_handler.save_data(dim_reduce_tsne, "tsne_reduction", self.create_current_metadata())
+            self.data_handler.save_data(dim_reduce_tsne, "tsne_reduction", metadata_config)
         else:
             print("Loaded existing tsne_reduction.")
 
         for model_name in self.model_names:
             for condition in [1, 0, -1]:
                 self.viz.plot_approvals(
-                    dim_reduce_tsne,
-                    self.approvals_data[prompt_type],
-                    model_name,
-                    condition,
-                    "approval" if prompt_type == "personas" else "awareness",
-                    self.generate_plot_filename([model_name], f"{prompt_type}-{condition}"),
-                    f"Embeddings of {['approvals', 'disapprovals', 'no response'][condition]} for {model_name} {prompt_type} responses"
+                    dim_reduce= dim_reduce_tsne,
+                    approval_data=self.approvals_data[prompt_type],
+                    model_name=model_name,
+                    condition=condition,
+                    plot_type=prompt_type,
+                    filename=self.generate_plot_filename([model_name], f"{prompt_type}-{condition}"),
+                    title=f"Embeddings of {['approvals', 'disapprovals', 'no response'][condition]} for {model_name} {prompt_type} responses",
+                    show_plot=not self.run_settings.plot_settings.should_hide_approval_plot(prompt_type)
                 )
 
     def generate_plot_filename(self, model_names: list, plot_type: str) -> str:
@@ -304,23 +362,23 @@ class EvaluatorPipeline:
             "model_names": self.model_names,
             "n_statements": self.run_settings.data_settings.n_statements,
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "data_settings": self.run_settings.data_settings.to_dict(),
-            "model_settings": self.run_settings.model_settings.__dict__,
-            "embedding_settings": self.run_settings.embedding_settings.__dict__,
-            "prompt_settings": self.run_settings.prompt_settings.__dict__,
-            "plot_settings": self.run_settings.plot_settings.__dict__,
-            "clustering_settings": self.run_settings.clustering_settings.__dict__,
-            "tsne_settings": self.run_settings.tsne_settings.__dict__,
+            "run_settings": self.run_settings.to_dict(),
             "test_mode": self.run_settings.test_mode,
-            "skip_sections": self.run_settings.skip_sections,
+            "run_sections": self.run_settings.run_sections,
+            "data_file_ids": {}
         }
+        
+        for data_type in self.data_handler.data_metadata:
+            if data_type in self.data_handler.data_metadata:
+                file_id = list(self.data_handler.data_metadata[data_type].keys())[-1]  # Get the latest file ID
+                metadata["data_file_ids"][data_type] = file_id
         
         self.save_run_metadata(metadata)
         print(f"Run metadata saved to {self.run_metadata_file}")
 
-    def load_data(self, data_type: str, config: Dict[str, Any]) -> Any:
+    def load_data(self, data_type: str, metadata_config: Dict[str, Any]) -> Any:
         if self.run_settings.data_settings.should_reuse_data(data_type):
-            return self.data_handler.load_data(data_type, config)
+            return self.data_handler.load_saved_data(data_type, metadata_config)
         return None
 
     def create_current_metadata(self) -> dict:
