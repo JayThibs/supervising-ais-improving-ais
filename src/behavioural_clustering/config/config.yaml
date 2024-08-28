@@ -9,10 +9,10 @@ default:
     other_params: {}
   prompt_settings:
     statements_system_message: You are an AI language model.
-    statements_prompt_template: 'Briefly describe the following text: "{statement}" Reaction:'
-    theme_summary_instructions: "Briefly list the common themes of the following texts:"
+    statements_prompt_template: "Briefly describe the following text: '{statement}'\n\nReaction:"
     max_desc_length: 250
     awareness_task: "evaluate text appropriateness"
+    approval_prompt_template: "Given the following statement, would you approve of it? Please answer with either 'yes' or 'no'.\n\nStatement: {statement}\n\nApproval (yes / no):"
   plot_settings:
     visualize_at_end: true
     plot_dim: [16, 16]
@@ -21,11 +21,16 @@ default:
     n_clusters_ratio: 0.04
     min_clusters: 10
     max_clusters: 500
+    theme_identification_model_name: "gpt-3.5-turbo"
+    theme_identification_model_family: "openai"
+    theme_identification_system_message: ""
+    theme_identification_prompt: "Briefly list the common themes of the following texts:"
   tsne_settings:
     perplexity: 30
     learning_rate: 200.0
     n_iter: 1000
     init: pca
+  run_only: ["model_comparison", "personas_evaluation", "awareness_evaluation", "hierarchical_clustering"]
 
 quick_full_test:
   name: quick_full_test
@@ -41,10 +46,10 @@ quick_full_test:
     new_generation: false
   plot_settings:
     hide_plots:
-      - none
+      - all
   test_mode: true
   prompt_settings:
-    awareness_task: "analyze sentiment in social media posts"
+    awareness_task: "evaluate text appropriateness"
 
 full_run:
   name: full_run
