@@ -16,6 +16,7 @@ from behavioural_clustering.evaluation.dimensionality_reduction import tsne_redu
 from behavioural_clustering.models.local_models import LocalModel
 from behavioural_clustering.evaluation.model_evaluation_manager import ModelEvaluationManager
 from behavioural_clustering.evaluation.approval_evaluation_manager import ApprovalEvaluationManager
+from behavioural_clustering.utils.embedding_manager import EmbeddingManager
 
 class EvaluatorPipeline:
     def __init__(self, run_settings: RunSettings):
@@ -33,6 +34,7 @@ class EvaluatorPipeline:
         self.data_handler = DataHandler(self.run_settings.directory_settings.data_dir, self.run_id)
         self.run_metadata_file = self.run_settings.directory_settings.data_dir / "metadata" / "run_metadata.yaml"
         self.run_metadata = self.load_run_metadata()
+        self.embedding_manager = EmbeddingManager(run_settings.directory_settings.data_dir)
         self.setup_managers()
         self.load_approval_prompts()
 
@@ -75,13 +77,27 @@ class EvaluatorPipeline:
         self.viz = Visualization(self.run_settings.plot_settings)
         self.clustering = Clustering(self.run_settings)
         self.cluster_analyzer = ClusterAnalyzer(self.run_settings)
-        self.model_eval_manager = ModelEvaluationManager(self.run_settings, self.llms)
+        self.model_eval_manager = ModelEvaluationManager(self.run_settings, self.llms, self.embedding_manager)
         self.approval_eval_manager = ApprovalEvaluationManager(self.run_settings, self.model_eval_manager)
 
     def run_evaluations(self) -> None:
         """
-        Execute the main evaluation pipeline, including model comparison,
-        prompt evaluations, and hierarchical clustering if specified in the run settings.
+        Execute the main evaluation pipeline.
+
+        This method orchestrates the entire evaluation process, including:
+        1. Loading and preprocessing the dataset.
+        2. Running model comparisons if specified.
+        3. Performing prompt evaluations for each prompt type.
+        4. Conducting hierarchical clustering if specified.
+
+        The specific evaluations run are determined by the run_sections specified
+        in the run settings.
+
+        Side effects:
+            - Loads and preprocesses the dataset.
+            - Populates self.approvals_data with results from prompt evaluations.
+            - Triggers model comparison, prompt evaluations, and hierarchical clustering as specified.
+            - Saves the run data upon completion.
         """
         print(f"Data settings: {self.run_settings.data_settings}")
         self.text_subset = self.data_prep.load_and_preprocess_data(self.run_settings.data_settings)
@@ -111,6 +127,23 @@ class EvaluatorPipeline:
         self.save_run_data()
 
     def run_model_comparison(self, metadata_config: Dict[str, Any]) -> None:
+        """
+        Perform model comparison analysis.
+
+        This method handles the generation or loading of query results and embeddings
+        for all models. It then performs clustering on the combined embeddings and
+        prepares data for visualization.
+
+        Args:
+            metadata_config (Dict[str, Any]): Configuration metadata for the current run.
+
+        Side effects:
+            - Generates or loads query results for all models.
+            - Creates or loads embeddings for the query results.
+            - Performs spectral and chosen clustering on the embeddings.
+            - Compiles a cluster table for analysis.
+            - Triggers visualization of the model comparison results.
+        """
         self.query_results_per_model = self.load_data("all_query_results", metadata_config)
         if self.query_results_per_model is None:
             print("Generating new query results...")
@@ -126,17 +159,20 @@ class EvaluatorPipeline:
         self.joint_embeddings_all_llms = self.load_data("joint_embeddings_all_llms", metadata_config)
         if self.joint_embeddings_all_llms is None:
             print("Generating new embeddings...")
-            # joint_embeddings_all_llms is a list of dictionaries, each containing:
-            # {"model_num": model_num, "statement": input, "response": response, "embedding": embedding, "model_name": model_name}
             self.joint_embeddings_all_llms = create_embeddings(
                 self.query_results_per_model,
                 self.llms,
-                self.run_settings.embedding_settings
+                self.run_settings.embedding_settings,
+                self.embedding_manager
             )
             self.combined_embeddings = [e["embedding"] for e in self.joint_embeddings_all_llms]
-            self.data_handler.save_data(self.joint_embeddings_all_llms, "joint_embeddings_all_llms", metadata_config)
+            # Convert to list for JSON serialization before saving
+            serializable_embeddings = [{**e, "embedding": e["embedding"].tolist()} for e in self.joint_embeddings_all_llms]
+            self.data_handler.save_data(serializable_embeddings, "joint_embeddings_all_llms", metadata_config)
         else:
             print("Loaded existing embeddings.")
+            # Convert loaded embeddings back to numpy arrays
+            self.joint_embeddings_all_llms = [{**e, "embedding": np.array(e["embedding"])} for e in self.joint_embeddings_all_llms]
             self.combined_embeddings = [e["embedding"] for e in self.joint_embeddings_all_llms]
         
         combined_embeddings_array = np.array(self.combined_embeddings)
@@ -180,11 +216,21 @@ class EvaluatorPipeline:
 
     def run_prompt_evaluation(self, prompt_type: str, metadata_config: Dict[str, Any]) -> None:
         """
-        Evaluate a specific prompt type by generating approvals data,
-        embedding texts, and analyzing cluster approval statistics.
+        Run the evaluation process for a specific prompt type.
+
+        This method handles the generation or loading of approvals data and embeddings
+        for a given prompt type. It then combines this data and performs cluster analysis
+        and visualization.
 
         Args:
             prompt_type (str): The type of prompt to evaluate (e.g., 'personas', 'awareness').
+            metadata_config (Dict[str, Any]): Configuration metadata for the current run.
+
+        Side effects:
+            - Updates self.approvals_data with new or loaded data for the prompt type.
+            - Generates or loads embeddings for the approval statements.
+            - Performs cluster analysis on the approval data.
+            - Triggers visualization of the approval data.
         """
         metadata_config = metadata_config.copy()
         metadata_config["prompt_type"] = prompt_type
@@ -201,13 +247,15 @@ class EvaluatorPipeline:
             print(f"Loaded existing approvals data for {prompt_type}.")
 
         # Load or generate embeddings
-        embeddings_key = "embed_texts"
+        embeddings_key = f"embed_texts_{prompt_type}"
         print(f"Attempting to load embeddings with key: {embeddings_key}")
         embeddings = self.load_data(embeddings_key, metadata_config)
         if embeddings is None or not self.run_settings.data_settings.should_reuse_data(embeddings_key):
             print("Generating new text embeddings...")
             statements = [item['statement'] for item in self.approvals_data[prompt_type]]
-            embeddings = embed_texts(statements, self.run_settings.embedding_settings)
+            embeddings = self.embedding_manager.get_or_create_embeddings(statements, self.run_settings.embedding_settings)
+            print(f"Type of embeddings after get_or_create_embeddings: {type(embeddings)}")
+            print(f"Type of first embedding: {type(embeddings[0])}")
             print(f"Saving embeddings with key: {embeddings_key}")
             self.data_handler.save_data(embeddings, embeddings_key, metadata_config)
         else:
@@ -216,7 +264,13 @@ class EvaluatorPipeline:
         # Combine approvals data with embeddings
         print(f"Adding embeddings to approvals data...")
         for item, embedding in zip(self.approvals_data[prompt_type], embeddings):
-            item['embedding'] = embedding
+            if isinstance(embedding, np.ndarray):
+                item['embedding'] = embedding.tolist()
+            elif isinstance(embedding, list):
+                item['embedding'] = embedding
+            else:
+                print(f"Unexpected embedding type: {type(embedding)}")
+                item['embedding'] = list(embedding)
 
         # Analyze cluster approval statistics and visualize approvals
         header_labels = ["ID", "N"]
@@ -230,7 +284,7 @@ class EvaluatorPipeline:
         
         self.cluster_analyzer.cluster_approval_stats(
             self.approvals_data[prompt_type],
-            embeddings,
+            np.array(embeddings),  # Convert back to numpy array for clustering
             self.model_eval_manager.model_info_list,
             {prompt_type: self.approval_prompts[prompt_type]},
             clusters_desc_table
@@ -239,7 +293,19 @@ class EvaluatorPipeline:
 
     def run_hierarchical_clustering(self, metadata_config: Dict[str, Any]) -> None:
         """
-        Perform hierarchical clustering for each prompt type and model specified in the run settings.
+        Perform hierarchical clustering for each prompt type and model.
+
+        This method conducts hierarchical clustering analysis on the approval data
+        for each prompt type and model specified in the run settings. It generates
+        or loads clustering data and creates interactive treemaps for visualization.
+
+        Args:
+            metadata_config (Dict[str, Any]): Configuration metadata for the current run.
+
+        Side effects:
+            - Populates self.hierarchy_data with hierarchical clustering results for each prompt type.
+            - Generates or loads hierarchical clustering data for each prompt type and model.
+            - Creates interactive treemaps for visualization if not disabled in settings.
         """
         self.hierarchy_data = {}
 
@@ -254,12 +320,34 @@ class EvaluatorPipeline:
             
             if hierarchy_data is None:
                 print(f"Generating new hierarchical clustering data for {prompt_type}...")
+                
+                # Extract embeddings for the statements (only once)
+                statements = [item['statement'] for item in self.approvals_data[prompt_type]]
+                statement_embeddings = self.embedding_manager.get_or_create_embeddings(statements, self.run_settings.embedding_settings)
+                # Ensure statement_embeddings are numpy arrays
+                statement_embeddings = [np.array(embedding) if isinstance(embedding, list) else embedding for embedding in statement_embeddings]
+                
+                # Perform clustering once for all models
+                clustering = self.clustering.cluster_embeddings(
+                    np.array(statement_embeddings),
+                    n_clusters=self.run_settings.clustering_settings.n_clusters
+                )
+                
                 hierarchy_data = {}
                 for model_name in self.model_names:
+                    # Generate rows for this model's clustering results
+                    model_rows = self.cluster_analyzer.compile_cluster_table(
+                        clustering=clustering,
+                        data=self.approvals_data[prompt_type],
+                        model_info_list=[{'model_name': model_name}],
+                        data_type="approvals",
+                        max_desc_length=self.run_settings.prompt_settings.max_desc_length
+                    )
+                    
                     hierarchy_data[model_name] = self.cluster_analyzer.calculate_hierarchical_cluster_data(
-                        self.chosen_clustering,
+                        clustering,
                         self.approvals_data[prompt_type],
-                        self.rows,
+                        model_rows,
                         model_name
                     )
                 self.data_handler.save_data(hierarchy_data, hierarchical_key, metadata_config_prompt)
