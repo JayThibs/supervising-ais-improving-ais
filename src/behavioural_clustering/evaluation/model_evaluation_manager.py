@@ -12,6 +12,7 @@ class ModelEvaluationManager:
     def generate_responses(self, text_subset):
         query_results_per_model = []
         for model_family, model_name in self.llms:
+            print(f"Generating responses using {model_family} - {model_name}")
             query_results = query_model_on_statements(
                 text_subset,
                 model_family,

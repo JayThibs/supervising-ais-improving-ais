@@ -1,7 +1,10 @@
+import os
+from dotenv import load_dotenv
 from openai import OpenAI
-import anthropic
+from anthropic import Anthropic
 from tenacity import retry, wait_random_exponential, stop_after_attempt
 
+load_dotenv()
 
 class OpenAIModel:
     def __init__(self, model, system_message, temperature=0.1, max_tokens=150):
@@ -9,7 +12,7 @@ class OpenAIModel:
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.system_message = system_message
-        self.client = OpenAI()
+        self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
     def generate(self, prompt):
         @retry(wait=wait_random_exponential(min=20, max=60), stop=stop_after_attempt(6))
@@ -42,7 +45,7 @@ class AnthropicModel:
         self.system_message = system_message
         self.temperature = temperature
         self.max_tokens = max_tokens
-        self.client = anthropic.Anthropic()
+        self.client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
     def generate(self, prompt):
         print("Generating with Anthropic API...")
@@ -61,6 +64,5 @@ class AnthropicModel:
         message = completion_with_backoff(
             model=self.model, system_message=self.system_message, prompt=prompt
         )
-
         print("Completed generation.")
-        return message.content
+        return message.content[0].text

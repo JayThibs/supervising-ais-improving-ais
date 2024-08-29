@@ -20,7 +20,7 @@ def query_model_on_statements(
     model_instance = initialize_model(model_info)
 
     for i, statement in enumerate(statements):
-        print(f"Statement {i} / {num_statements}:", statement)
+        print(f"Statement {i} / {num_statements} [{model_name}]:", statement)
         prompt = prompt_template.format(statement=statement)
         print("Prompt:", prompt)
         for j in range(10):

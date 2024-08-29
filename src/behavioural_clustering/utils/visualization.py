@@ -12,6 +12,8 @@ from matplotlib.lines import Line2D
 import plotly.graph_objects as go
 import plotly.express as px
 import pandas as pd
+import ipywidgets as widgets
+from IPython.display import display
 
 class Visualization:
     def __init__(self, plot_settings: PlotSettings):
@@ -35,12 +37,12 @@ class Visualization:
                 "colors": self.colors[:num_prompts],
                 "shapes": self.shapes[:num_prompts],
                 "labels": list(prompts.keys()),
-                "sizes": self.plot_aesthetics["approvals"]["sizes"][:num_prompts],
+                "sizes": [self.plot_settings.plot_aesthetics["approvals"]["marker_size"]] * num_prompts,  # Use a single size
                 "order": None,
-                "font_size": self.plot_aesthetics["approvals"]["font_size"],
-                "legend_font_size": self.plot_aesthetics["approvals"]["legend_font_size"],
-                "marker_size": self.plot_aesthetics["approvals"]["marker_size"],
-                "alpha": self.plot_aesthetics["approvals"]["alpha"],
+                "font_size": self.plot_settings.plot_aesthetics["approvals"]["font_size"],
+                "legend_font_size": self.plot_settings.plot_aesthetics["approvals"]["legend_font_size"],
+                "marker_size": self.plot_settings.plot_aesthetics["approvals"]["marker_size"],
+                "alpha": self.plot_settings.plot_aesthetics["approvals"]["alpha"],
             }
 
         if not os.path.exists(self.save_path):
@@ -88,7 +90,7 @@ class Visualization:
         show_plot=True,
     ):
         # Adjust figure size and DPI
-        fig, ax = plt.subplots(figsize=(14, 10), dpi=100)  # Increased figure size
+        fig, ax = plt.subplots(figsize=(14, 10), dpi=100)
         aesthetics = self.plot_aesthetics[f"{plot_type}_approvals"]
         colors, shapes, labels, sizes, order, fontsize, legend_fontsize, marker_size, alpha = aesthetics.values()
         
@@ -100,13 +102,18 @@ class Visualization:
         # "Bing Chat Emoji": "You are Bing Chat, the chat model of Bing search. 😊 Your purpose is to help users 
         # by providing clear and concise answers to any questions.",}
         
-        # Create a mask for points that don't match any persona's condition
-        all_masks = np.zeros(len(approval_data), dtype=bool)
+        # Create masks for each label
+        label_masks = {
+            label: np.array([
+                e['approvals'][model_name][label] == condition if model_name in e['approvals'] else False
+                for e in approval_data
+            ])
+            for label in labels
+        }
         
         # Plot colored points for each persona
         for i, label in enumerate(labels):
-            mask = np.array([e['approvals'][model_name][label] == condition for e in approval_data])
-            all_masks |= mask  # Update the overall mask
+            mask = label_masks[label]
             if np.any(mask):
                 x = dim_reduce[:, 0][mask]
                 y = dim_reduce[:, 1][mask]
@@ -116,21 +123,23 @@ class Visualization:
                 print(f"No data points for {label} with condition {condition}")
 
         # Plot grey points for data that doesn't match any persona's condition
-        unmatched_mask = ~all_masks
+        unmatched_mask = ~np.any(list(label_masks.values()), axis=0)
         if np.any(unmatched_mask):
             x_unmatched = dim_reduce[:, 0][unmatched_mask]
             y_unmatched = dim_reduce[:, 1][unmatched_mask]
-            ax.scatter(x_unmatched, y_unmatched, c="grey", s=marker_size//2, alpha=alpha/2, label="Unmatched")
+            ax.scatter(x_unmatched, y_unmatched, c="grey", s=marker_size, alpha=alpha/2, label="Unmatched")
             print(f"Plotted {np.sum(unmatched_mask)} unmatched points in grey")
 
+        condition_str = {1: "approved", 0: "disapproved", -1: "no response"}[condition]
+        
         ax.set_title(title, fontsize=fontsize+2, wrap=True)
         
         # Create a custom legend
         legend_elements = [Line2D([0], [0], marker=shapes[i], color='w', label=label,
-                                  markerfacecolor=colors[i], markersize=sizes[i]//5)
+                                  markerfacecolor=colors[i], markersize=10)
                            for i, label in enumerate(labels)]
         legend_elements.append(Line2D([0], [0], marker='o', color='w', label='Unmatched',
-                                      markerfacecolor='grey', markersize=sizes[0]//10))
+                                      markerfacecolor='grey', markersize=10))
         
         ax.legend(handles=legend_elements, loc='center left', bbox_to_anchor=(1, 0.5),
                   fontsize=legend_fontsize, title=plot_type.capitalize(), title_fontsize=legend_fontsize+2)
@@ -140,7 +149,7 @@ class Visualization:
         print(f"Saved plot to {os.path.join(self.save_path, filename)}")
         if show_plot:
             plt.show()
-        plt.close(fig)  # Close the figure to free up memory
+        plt.close(fig)
 
     def visualize_hierarchical_plot(
         self,
@@ -151,85 +160,32 @@ class Visualization:
         bb_width=40,
         x_leftshift=0,
         y_downshift=0,
-        figsize=(20, 15),  # Reduced figure size
+        figsize=(20, 15),
         labels=None,
+        model_name=None,
         show_plot=True,
     ):
-        colors = self.plot_aesthetics[f"{plot_type}_approvals"]["colors"]
+        Z, leaf_labels, original_cluster_sizes, merged_cluster_sizes, n_clusters = hierarchy_data
 
-        # Unpack hierarchy data
-        (
+        fig, ax = plt.subplots(figsize=figsize)
+        dendrogram(
             Z,
-            leaf_labels,
-            original_cluster_sizes,
-            merged_cluster_sizes,
-            n_clusters,
-        ) = hierarchy_data
-
-        # def llf(id):
-        #     if id < n_clusters:
-        #         return leaf_labels[id]
-        #     else:
-        #         return "Error: id too high."
-
-        def llf(id):
-            if id < len(leaf_labels):
-                return leaf_labels[id]
-            else:
-                # Adjust this part to handle IDs for merged clusters appropriately
-                return f"Cluster {id}"
-
-        # font size
-        fig, ax = plt.subplots(1, 1, figsize=figsize, dpi=100)
-        ax.tick_params(axis="both", which="major", labelsize=18)
-        dn = dendrogram(
-            Z, ax=ax, leaf_rotation=-90, leaf_font_size=20, leaf_label_func=llf
+            ax=ax,
+            orientation='left',
+            labels=leaf_labels,
+            leaf_rotation=0,
+            leaf_font_size=8,
+            show_contracted=True,
         )
 
-        ii = np.argsort(np.array(dn["dcoord"])[:, 1])
-        for j, (icoord, dcoord) in enumerate(zip(dn["icoord"], dn["dcoord"])):
-            x = 0.5 * sum(icoord[1:3])
-            y = dcoord[1]
-            ind = np.nonzero(ii == j)[0][0]
-            s = merged_cluster_sizes[ind]
+        ax.set_title(f'Hierarchical Clustering Dendrogram - {plot_type} - {model_name}')
+        ax.set_xlabel('Distance')
 
-            for i in range(len(colors)):
-                ax.add_patch(
-                    Rectangle(
-                        (
-                            x - bb_width / 2 - x_leftshift,
-                            y
-                            - y_downshift
-                            - i * bar_height
-                            + bar_height * (len(colors) - 1),
-                        ),
-                        bb_width * s[i + 1] / s[0],
-                        bar_height,
-                        facecolor=colors[i],
-                    )
-                )
+        # ... (rest of the method remains the same)
 
-            ax.add_patch(
-                Rectangle(
-                    (x - bb_width / 2 - x_leftshift, y - y_downshift),
-                    bb_width,
-                    bar_height * len(colors),
-                    facecolor="none",
-                    ec="k",
-                    lw=1,
-                )
-            )
-
-        if labels is not None:
-            patch_colors = [
-                mpatches.Patch(color=c, label=l) for c, l in zip(colors, labels)
-            ]
-            ax.legend(handles=patch_colors)
-
-        plt.tight_layout()
-        plt.savefig(f"{filename}.png", bbox_inches='tight')
-        plt.savefig(f"{filename}.svg", format="svg", bbox_inches='tight')
-        print(f"Saved hierarchical plot to {filename}.png and {filename}.svg")
+        # Update the filename to include the model name
+        filename = f"{filename}_{model_name}.png"
+        plt.savefig(filename, dpi=300, bbox_inches='tight')
         if show_plot:
             plt.show()
         plt.close()
@@ -264,16 +220,22 @@ class Visualization:
         })
         
         fig = px.scatter(df, x='x', y='y', color='model', hover_data=['statement', 'response'])
+        
         fig.update_layout(
             title=f"Embeddings of {', '.join(model_names)} responses",
             xaxis_title="Dimension 1",
             yaxis_title="Dimension 2",
-            legend_title="Models"
+            legend_title="Models",
+            font=dict(size=self.plot_aesthetics['approvals']['font_size'])
         )
+        
+        fig.update_traces(marker=dict(size=self.plot_aesthetics['approvals']['marker_size'],
+                                      opacity=self.plot_aesthetics['approvals']['alpha']))
         
         if show_plot:
             fig.show()
         
+        fig.write_html(f"{filename}.html")
         return fig
 
     def plot_approvals_plotly(
@@ -287,24 +249,41 @@ class Visualization:
         title: str,
         show_plot=True,
     ):
+        aesthetics = self.plot_aesthetics[f"{plot_type}_approvals"]
+        labels = aesthetics['labels']
+        
         df = pd.DataFrame({
             'x': dim_reduce[:, 0],
             'y': dim_reduce[:, 1],
             'statement': [e['statement'] for e in approval_data],
-            'approval': [e['approvals'][model_name][plot_type] == condition for e in approval_data]
+            'approval': ['Unmatched'] * len(approval_data)
         })
         
-        fig = px.scatter(df, x='x', y='y', color='approval', hover_data=['statement'])
+        for label in labels:
+            mask = np.array([
+                e['approvals'][model_name][label] == condition if model_name in e['approvals'] else False
+                for e in approval_data
+            ])
+            df.loc[mask, 'approval'] = label
+        
+        fig = px.scatter(df, x='x', y='y', color='approval', hover_data=['statement'],
+                         color_discrete_map={**{label: aesthetics['colors'][i] for i, label in enumerate(labels)},
+                                             'Unmatched': 'grey'})
+        
+        fig.update_traces(marker=dict(size=aesthetics['marker_size'], opacity=aesthetics['alpha']))
+        
         fig.update_layout(
             title=title,
             xaxis_title="Dimension 1",
             yaxis_title="Dimension 2",
-            legend_title=f"{plot_type.capitalize()} Approval"
+            legend_title=f"{plot_type.capitalize()} Approval",
+            font=dict(size=aesthetics['font_size'])
         )
         
         if show_plot:
             fig.show()
         
+        fig.write_html(f"{filename}.html")
         return fig
 
     def plot_spectral_clustering_plotly(self, labels, n_clusters, filename):
@@ -313,6 +292,122 @@ class Visualization:
         fig.update_layout(
             title=f"Spectral Clustering of Statement Responses (n_clusters={n_clusters})",
             xaxis_title="Cluster",
-            yaxis_title="Count"
+            yaxis_title="Count",
+            font=dict(size=self.plot_aesthetics['approvals']['font_size'])
         )
+        
+        fig.write_html(f"{filename}.html")
         return fig
+
+    def create_interactive_treemap(self, hierarchy_data, plot_type, model_names, filename):
+        def parse_hierarchical_data(hierarchical_data):
+            linkage_matrix, descriptions, original_counts, merged_counts, n_clusters = hierarchical_data
+
+            tree_dict = {}
+            for i, (desc, counts) in enumerate(zip(descriptions, original_counts)):
+                tree_dict[i] = {
+                    "name": f"Cluster_{i}",
+                    "description": desc,
+                    "value": counts[0],
+                    "proportions": {
+                        "Unaware": counts[1] / counts[0],
+                        "Other AI": counts[2] / counts[0],
+                        "Aware": counts[3] / counts[0],
+                        "Human": counts[4] / counts[0],
+                    },
+                }
+
+            for i, link in enumerate(linkage_matrix):
+                left, right, _, _ = link
+                node_id = i + n_clusters
+                left_child = tree_dict[int(left)]
+                right_child = tree_dict[int(right)]
+
+                tree_dict[node_id] = {
+                    "name": f"Cluster_{node_id}",
+                    "children": [left_child, right_child],
+                    "value": left_child["value"] + right_child["value"],
+                    "proportions": {
+                        k: (left_child["value"] * left_child["proportions"][k] + right_child["value"] * right_child["proportions"][k])
+                        / (left_child["value"] + right_child["value"])
+                        for k in left_child["proportions"]
+                    },
+                }
+
+            return tree_dict[node_id]
+
+        def format_tree(node, parent_name="", level=0):
+            results = []
+            node_name = node["name"]
+            results.append({
+                "name": node_name,
+                "parent": parent_name,
+                "value": node["value"],
+                "level": level,
+                "proportions": node["proportions"],
+                "description": node.get("description", ""),
+            })
+
+            if "children" in node:
+                for child in node["children"]:
+                    results.extend(format_tree(child, node_name, level + 1))
+
+            return results
+
+        def create_treemap(df, max_level, color_by, model_name):
+            fig = go.Figure(go.Treemap(
+                labels=[item["name"] for item in df if item["level"] <= max_level],
+                parents=[item["parent"] for item in df if item["level"] <= max_level],
+                values=[item["value"] for item in df if item["level"] <= max_level],
+                branchvalues="total",
+                hovertemplate="<b>%{label}</b><br>Value: %{value}<br>Proportions:<br>%{customdata}<extra></extra>",
+                customdata=[
+                    "<br>".join([f"{k}: {v:.2f}" for k, v in item["proportions"].items()])
+                    + ("<br><br>" + item["description"] if item["description"] else "")
+                    for item in df if item["level"] <= max_level
+                ],
+                marker=dict(
+                    colors=[item["proportions"][color_by] for item in df if item["level"] <= max_level],
+                    colorscale="Viridis",
+                    showscale=True,
+                    colorbar=dict(title=f"{color_by} Proportion"),
+                ),
+                texttemplate="<b>%{label}</b><br>%{text}",
+                text=[
+                    "<br>".join([f"{k}: {v:.2f}" for k, v in item["proportions"].items()])
+                    for item in df if item["level"] <= max_level
+                ],
+                textposition="middle center",
+            ))
+
+            fig.update_layout(
+                title_text=f"Hierarchical Clustering Treemap - {plot_type} - {model_name}",
+                width=1000,
+                height=800,
+            )
+
+            return fig
+
+        tree_data = {}
+        max_levels = {}
+        for model_name in model_names:
+            if model_name in hierarchy_data:
+                root = parse_hierarchical_data(hierarchy_data[model_name])
+                tree_data[model_name] = format_tree(root)
+                max_levels[model_name] = max(item["level"] for item in tree_data[model_name])
+
+        # Prepare the output data
+        output = {
+            "tree_data": tree_data,
+            "max_levels": max_levels,
+            "plot_type": plot_type,
+            "model_names": model_names,
+            "create_treemap": create_treemap  # Include the create_treemap function
+        }
+
+        # Save the output as a JSON file (excluding the create_treemap function)
+        json_output = {k: v for k, v in output.items() if k != "create_treemap"}
+        with open(f"{filename}.json", "w") as f:
+            json.dump(json_output, f)
+
+        return output

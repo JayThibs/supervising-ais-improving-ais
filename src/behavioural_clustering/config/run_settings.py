@@ -184,23 +184,19 @@ class PlotSettings:
         return self.hide_approvals or prompt_type in self.hidden_approval_prompts
 
     def _update_plot_aesthetics(self):
+        # Load the approval prompts
+        with open(Path(__file__).resolve().parents[3] / "data" / "prompts" / "approval_prompts.json", "r") as f:
+            approval_prompts = json.load(f)
+        
         for category in self.approval_prompts:
-            # Load the prompts for this category
-            with open(Path(__file__).resolve().parents[3] / "data" / "prompts" / "approval_prompts.json", "r") as f:
-                prompts = json.load(f)[category]
-            
+            prompts = approval_prompts[category]
             num_prompts = len(prompts)
-            
-            # Generate sizes dynamically
-            min_size = 30
-            max_size = 120
-            sizes = np.linspace(min_size, max_size, num_prompts).astype(int).tolist()
             
             self.plot_aesthetics[f"{category}_approvals"] = {
                 "colors": self.colors[:num_prompts],
                 "shapes": self.shapes[:num_prompts],
                 "labels": list(prompts.keys()),
-                "sizes": sizes,
+                "sizes": [self.plot_aesthetics["approvals"]["marker_size"]] * num_prompts,  # Use a single size
                 "order": None,
                 "font_size": self.plot_aesthetics["approvals"]["font_size"],
                 "legend_font_size": self.plot_aesthetics["approvals"]["legend_font_size"],
@@ -230,7 +226,7 @@ class ClusteringSettings:
     linkage: str = "ward"
     threshold: float = 0.5
     metric: str = "euclidean"
-    theme_identification_model_name: str = "gpt-3.5-turbo"
+    theme_identification_model_name: str = "gpt-4o-mini"
     theme_identification_model_family: str = "openai"
     theme_identification_system_message: str = ""
     theme_identification_prompt: str = (

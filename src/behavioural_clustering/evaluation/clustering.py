@@ -102,6 +102,7 @@ class ClusterAnalyzer:
         embeddings: Union[np.ndarray, List[np.ndarray]],
         model_info_list: List[Dict],
         prompt_dict: Dict,
+        clusters_desc_table: List[List[str]],
         reuse_cluster_rows: bool = False,
     ) -> None:
         
@@ -151,8 +152,10 @@ class ClusterAnalyzer:
                 pickle.dump(clustering_result, file)
 
         header_labels = ["ID", "N"]
-        for model_name in prompt_dict:
-            header_labels.extend([f"{model_name} - {prompt}" for prompt in prompt_dict[model_name]])
+        for model_info in model_info_list:
+            model_name = model_info['model_name']
+            for prompt in prompt_dict[prompt_approver_type]:
+                header_labels.append(f"{model_name} - {prompt}")
         header_labels.append("Inputs Themes")
         
         clusters_desc_table = [header_labels]
@@ -160,23 +163,24 @@ class ClusterAnalyzer:
             clusters_desc_table, rows, table_pickle_path, prompt_approver_type
         )
       
-    def get_cluster_approval_stats(self, approvals_statements_and_embeddings, approvals_prompts_dict, cluster_labels, cluster_ID):
+    def get_cluster_approval_stats(self, approvals_statements_and_embeddings, approvals_prompts_dict, cluster_labels, cluster_ID, model_name):
         inputs = []
         cluster_size = 0
-        n_conditions = len(list(approvals_statements_and_embeddings[0]['approvals'].values())[0])
         approval_counts = {prompt_name: 0 for prompt_name in approvals_prompts_dict.keys()}
         
         for e, l in zip(approvals_statements_and_embeddings, cluster_labels):
             if l != cluster_ID:
                 continue
-            approvals = list(e['approvals'].values())[0]
-            for prompt_name in approvals_prompts_dict.keys():
-                if approvals[prompt_name] == 1:
+            for prompt_name, approval in e['approvals'][model_name].items():
+                if approval == 1:
                     approval_counts[prompt_name] += 1
             cluster_size += 1
             inputs.append(e['statement'])
         
-        approval_fractions = {prompt_name: count / cluster_size if cluster_size > 0 else 0 for prompt_name, count in approval_counts.items()}
+        approval_fractions = {
+            prompt_name: count / cluster_size if cluster_size > 0 else 0 
+            for prompt_name, count in approval_counts.items()
+        }
         return inputs, approval_counts, approval_fractions, cluster_size
     
     def create_cluster_table(
@@ -186,6 +190,11 @@ class ClusterAnalyzer:
         table_pickle_path: str,
         prompt_approver_type: str
     ) -> None:
+        # Ensure that the number of columns in rows matches clusters_desc_table
+        if len(clusters_desc_table[0]) != len(rows[0]):
+            # Adjust the number of columns in rows to match clusters_desc_table
+            rows = [row[:len(clusters_desc_table[0])] for row in rows]
+        
         clusters_desc_table = clusters_desc_table + rows
         t = AsciiTable(clusters_desc_table)
         t.inner_row_border = True
@@ -286,12 +295,13 @@ class ClusterAnalyzer:
     def calculate_hierarchical_cluster_data(
         self,
         clustering: object,
-        approvals_statements_and_embeddings: List,
-        rows: List[List[str]]
+        approvals_data: List,
+        rows: List[List[str]],
+        model_name: str
     ) -> Tuple[np.ndarray, List[str], List[List[int]], List[List[int]], int]:
-        statement_embeddings = np.array([e['embedding'] for e in approvals_statements_and_embeddings])
+        statement_embeddings = np.array([e['embedding'] for e in approvals_data])
         centroids = Clustering.get_cluster_centroids(statement_embeddings, clustering.labels_)
-        Z = linkage(centroids, "ward") # the linkage matrix Z represents the process of merging clusters
+        Z = linkage(centroids, "ward")
 
         n_clusters = max(clustering.labels_) + 1
         cluster_labels = []
@@ -300,12 +310,14 @@ class ClusterAnalyzer:
             cluster_labels.append(rows[pos][-1] if pos >= 0 else "(Label missing)")
 
         all_cluster_sizes = []
-        approvals_prompts_dict = list(approvals_statements_and_embeddings[0]['approvals'].values())[0]
+        approvals_prompts_dict = approvals_data[0]['approvals'][model_name]
         for i in range(n_clusters):
             inputs, approval_counts, approval_fractions, cluster_size = self.get_cluster_approval_stats(
-                approvals_statements_and_embeddings, approvals_prompts_dict, clustering.labels_, i
+                approvals_data, approvals_prompts_dict, clustering.labels_, i, model_name
             )
-            approval_counts_list = [approval_counts[prompt_name] for prompt_name in sorted(approval_counts.keys())]
+            approval_counts_list = []
+            for prompt in sorted(approval_counts.keys()):
+                approval_counts_list.append(approval_counts[prompt])
             all_cluster_sizes.append([cluster_size] + approval_counts_list)
 
         # Handle merged clusters
@@ -373,7 +385,7 @@ class ClusterAnalyzer:
         data: List,
         model_info_list: List[Dict],
         theme_identification_model_info: Dict,
-        data_type: str = "joint_embeddings", # or "approvals"
+        data_type: str = "joint_embeddings",
         include_responses_and_interactions: bool = True,
         max_desc_length: int = 250
     ) -> List[str]:
@@ -404,27 +416,26 @@ class ClusterAnalyzer:
                 for prompt, frac in fractions[model_name].items():
                     row.append(f"{round(100 * frac, 1)}%")
 
-        for model_info in model_info_list:
-            inputs_themes_str = self.identify_theme(
-                texts=inputs, theme_identification_model_info=theme_identification_model_info, sampled_texts=5
+        inputs_themes_str = self.identify_theme(
+            texts=inputs, theme_identification_model_info=theme_identification_model_info, sampled_texts=5
+        )[:max_desc_length]
+        row.append(inputs_themes_str)
+
+        if include_responses_and_interactions and responses is not None:
+            responses_themes_str = self.identify_theme(
+                texts=responses, theme_identification_model_info=theme_identification_model_info, sampled_texts=5
             )[:max_desc_length]
-            row.append(inputs_themes_str)
 
-            if include_responses_and_interactions and responses is not None:
-                responses_themes_str = self.identify_theme(
-                    texts=responses, theme_identification_model_info=theme_identification_model_info, sampled_texts=5
-                )[:max_desc_length]
+            interactions = [
+                f'(Statement: "{input}", Response: "{response}")'
+                for input, response in zip(inputs, responses)
+            ]
+            interactions_themes_str = self.identify_theme(
+                texts=interactions, theme_identification_model_info=theme_identification_model_info, sampled_texts=5
+            )[:max_desc_length]
 
-                interactions = [
-                    f'(Statement: "{input}", Response: "{response}")'
-                    for input, response in zip(inputs, responses)
-                ]
-                interactions_themes_str = self.identify_theme(
-                    texts=interactions, theme_identification_model_info=theme_identification_model_info, sampled_texts=5
-                )[:max_desc_length]
-
-                row.append(responses_themes_str)
-                row.append(interactions_themes_str)
+            row.append(responses_themes_str)
+            row.append(interactions_themes_str)
 
         return row
 
@@ -433,7 +444,7 @@ class ClusterAnalyzer:
         data: List,
         cluster_labels: np.ndarray,
         cluster_ID: int,
-        data_type: str = "joint_embeddings", # or "approvals"
+        data_type: str = "joint_embeddings",
         include_responses: bool = True,
     ) -> Union[Tuple[List[str], List[str], List[float]], Tuple[List[str], Dict[str, Dict[str, float]]]]:
         inputs = []

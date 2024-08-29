@@ -16,6 +16,16 @@ class RunConfigurationManager:
                 config_dict = yaml.safe_load(f)
             default_config = config_dict.get('default', {})
             
+            # Create a new PlotSettings instance with default values
+            plot_settings = PlotSettings()
+            # Update it with the values from the config file
+            plot_settings_dict = default_config.get('plot_settings', {})
+            for key, value in plot_settings_dict.items():
+                if hasattr(plot_settings, key):
+                    setattr(plot_settings, key, value)
+            # Replace the plot_settings in the config with our new instance
+            default_config['plot_settings'] = plot_settings
+            
             # Create a "Default Run" configuration
             default_run_config = default_config.copy()
             default_run_config['name'] = "Default Run"
@@ -71,7 +81,12 @@ class RunConfigurationManager:
         merged_config = default_config.copy()
         for key, value in specific_config.items():
             if isinstance(value, dict) and key in merged_config:
-                merged_config[key] = RunConfigurationManager._merge_configs(merged_config[key], value)
+                if isinstance(merged_config[key], PlotSettings):
+                    # For PlotSettings, update the existing object instead of copying
+                    for subkey, subvalue in value.items():
+                        setattr(merged_config[key], subkey, subvalue)
+                else:
+                    merged_config[key] = RunConfigurationManager._merge_configs(merged_config[key], value)
             else:
                 merged_config[key] = value
         return merged_config
