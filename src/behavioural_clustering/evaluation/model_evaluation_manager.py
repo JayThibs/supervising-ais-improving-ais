@@ -2,12 +2,14 @@ from typing import List, Tuple
 from behavioural_clustering.config.run_settings import RunSettings
 from behavioural_clustering.utils.model_utils import query_model_on_statements
 from behavioural_clustering.models.model_factory import initialize_model
+from behavioural_clustering.utils.embedding_manager import EmbeddingManager
 
 class ModelEvaluationManager:
-    def __init__(self, run_settings: RunSettings, llms: List[Tuple[str, str]]):
+    def __init__(self, run_settings: RunSettings, llms: List[Tuple[str, str]], embedding_manager: EmbeddingManager):
         self.settings = run_settings
         self.llms = llms
         self.model_info_list = [{"model_family": family, "model_name": model_name} for family, model_name in llms]
+        self.embedding_manager = embedding_manager
 
     def generate_responses(self, text_subset):
         query_results_per_model = []
@@ -54,3 +56,6 @@ class ModelEvaluationManager:
         else:
             # Uncertain response:
             return -1
+
+    def get_embeddings(self, statements: List[str]):
+        return self.embedding_manager.get_or_create_embeddings(statements, self.settings.embedding_settings)

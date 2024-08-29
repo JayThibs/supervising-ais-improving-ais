@@ -119,17 +119,18 @@ class PlotSettings:
             "colors": [],
             "shapes": [],
             "labels": [],
-            "sizes": [30, 60, 90, 120],  # Adjusted sizes for better visibility
+            "sizes": [30, 60, 90, 120],
             "order": None,
-            "font_size": 12,  # Reduced font size for better fit
-            "legend_font_size": 10,  # Added separate font size for legend
-            "marker_size": 100,  # Added a default marker size
-            "alpha": 0.7,  # Added alpha for transparency
+            "font_size": 12,
+            "legend_font_size": 10,
+            "marker_size": 100,
+            "alpha": 0.7,
         },
     })
     hide_model_comparison: bool = True
     hide_approvals: bool = True
     hide_hierarchical: bool = True
+    hide_interactive_treemap: bool = True
     hide_spectral: bool = True
 
     def __post_init__(self):
@@ -150,12 +151,14 @@ class PlotSettings:
             self.hide_approvals = False
             self.hide_model_comparison = False
             self.hide_hierarchical = False
+            self.hide_interactive_treemap = False
             self.hide_spectral = False
             self.hidden_approval_prompts = []
         elif "all" in self.hide_plots:
             self.hide_approvals = True
             self.hide_model_comparison = True
             self.hide_hierarchical = True
+            self.hide_interactive_treemap = True
             self.hide_spectral = True
             self.hidden_approval_prompts = self.approval_prompts.copy()
         else:
