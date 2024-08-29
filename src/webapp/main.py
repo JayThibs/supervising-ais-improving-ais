@@ -5,7 +5,7 @@ from pathlib import Path
 src_dir = Path(__file__).resolve().parents[2]
 sys.path.append(str(src_dir))
 
-from webapp.pages import run_analysis, view_results, compare_models
+from webapp.pages import run_analysis, view_results, compare_models, view_tables, view_treemap
 from webapp.components.sidebar import sidebar
 from behavioural_clustering.config.run_configuration_manager import RunConfigurationManager
 from behavioural_clustering.utils.data_accessor import DataAccessor
@@ -50,6 +50,10 @@ def main():
         st.error("Please check that EvaluatorPipeline.__init__() is correctly implemented.")
         return
 
+    # Initialize session state variables
+    if 'selected_config' not in st.session_state:
+        st.session_state.selected_config = 'Default Run'
+
     # Sidebar
     page = sidebar()
 
@@ -60,6 +64,10 @@ def main():
         view_results.show()
     elif page == "Compare Models":
         compare_models.show()
+    elif page == "View Tables":
+        view_tables.show()
+    elif page == "View Treemap":
+        view_treemap.show()
 
 if __name__ == "__main__":
     main()
