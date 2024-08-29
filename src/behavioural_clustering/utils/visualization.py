@@ -14,6 +14,8 @@ import plotly.express as px
 import pandas as pd
 import ipywidgets as widgets
 from IPython.display import display
+from datetime import datetime
+import shutil
 
 class Visualization:
     def __init__(self, plot_settings: PlotSettings):
@@ -48,6 +50,39 @@ class Visualization:
         if not os.path.exists(self.save_path):
             os.makedirs(self.save_path)
 
+        self.setup_plot_directories()
+
+    def setup_plot_directories(self):
+        """Create subdirectories for different plot types."""
+        plot_types = ['model_comparison', 'approvals', 'hierarchical', 'spectral']
+        for plot_type in plot_types:
+            subdir = os.path.join(self.save_path, plot_type)
+            if not os.path.exists(subdir):
+                os.makedirs(subdir)
+
+    def save_plot(self, filename: str, plot_type: str):
+        """
+        Save the plot, moving older versions to subdirectories.
+
+        Args:
+            filename (str): The full path of the file to save.
+            plot_type (str): The type of plot (e.g., 'model_comparison', 'approvals', etc.)
+        """
+        subdir = os.path.join(self.save_path, plot_type)
+        base_filename = os.path.basename(filename)
+
+        # Check if the file already exists in the root directory
+        if os.path.exists(filename):
+            # If it does, rename and move the existing file to the subdirectory
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            new_filename = os.path.join(subdir, base_filename.replace(".png", f"_{timestamp}.png"))
+            shutil.move(filename, new_filename)
+            print(f"Existing file moved to: {new_filename}")
+
+        # Save the new plot in the root directory
+        plt.savefig(filename, bbox_inches='tight')
+        print(f"New plot saved to: {filename}")
+
     def plot_embedding_responses(
         self, dim_reduce_tsne, joint_embeddings_all_llms, model_names, filename, show_plot=True
     ):
@@ -72,8 +107,7 @@ class Visualization:
         plt.legend()
         plt.title(f"Embeddings of {', '.join(model_names)} responses", wrap=True)
         plt.tight_layout()  # Ensure all elements fit within the figure
-        plt.savefig(os.path.join(self.save_path, filename), bbox_inches='tight')
-        print(f"Saved plot to {os.path.join(self.save_path, filename)}")
+        self.save_plot(filename, 'model_comparison')
         if show_plot:
             plt.show()
         plt.close()
@@ -145,8 +179,7 @@ class Visualization:
                   fontsize=legend_fontsize, title=plot_type.capitalize(), title_fontsize=legend_fontsize+2)
         
         plt.tight_layout()
-        fig.savefig(os.path.join(self.save_path, filename), bbox_inches='tight')
-        print(f"Saved plot to {os.path.join(self.save_path, filename)}")
+        self.save_plot(filename, 'approvals')
         if show_plot:
             plt.show()
         plt.close(fig)
@@ -185,7 +218,7 @@ class Visualization:
 
         # Update the filename to include the model name
         filename = f"{filename}_{model_name}.png"
-        plt.savefig(filename, dpi=300, bbox_inches='tight')
+        self.save_plot(filename, 'hierarchical')
         if show_plot:
             plt.show()
         plt.close()
@@ -200,12 +233,7 @@ class Visualization:
             wrap=True
         )
         plt.tight_layout()
-        plt.show()
-        filename = f"{os.getcwd()}/data/results/plots/{filename}.png"
-        fig.savefig(
-            filename, bbox_inches="tight", dpi=100
-        )  # Use bbox_inches='tight' to fit the entire content
-        print(f"Saved spectral clustering plot to {filename}")
+        self.save_plot(filename, 'spectral')
         plt.close("all")
 
     def plot_embedding_responses_plotly(
