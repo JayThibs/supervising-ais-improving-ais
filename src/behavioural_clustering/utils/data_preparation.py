@@ -230,6 +230,14 @@ class DataHandler:
 
     def save_data_metadata(self):
         metadata_to_save = self._convert_paths_to_str(self.data_metadata)
+        
+        # Add CSV file paths to metadata
+        for data_type, data_info in metadata_to_save.items():
+            for file_id, file_info in data_info.items():
+                if 'cluster_table_csv' in file_info['config']:
+                    csv_path = file_info['config']['cluster_table_csv']
+                    file_info['cluster_table_csv'] = csv_path
+
         with open(self.data_metadata_file, 'w') as f:
             yaml.dump(metadata_to_save, f, default_flow_style=False)
 
