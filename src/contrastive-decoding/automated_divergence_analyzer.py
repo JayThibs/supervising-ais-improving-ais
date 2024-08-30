@@ -1,13 +1,12 @@
 import os
 import torch
 import random
-from contrastive_decoding import ContrastiveDecoder
-from assistant_find_divergence_prompts import DivergenceFinder
+from .assistant_find_divergence_prompts import DivergenceFinder
 import numpy as np
 from sklearn.cluster import KMeans
 from typing import List, Dict, Any
 import pandas as pd
-from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+from transformers import BitsAndBytesConfig
 from openai import OpenAI
 import os
 from dotenv import load_dotenv
@@ -30,14 +29,6 @@ class AutomatedDivergenceAnalyzer:
         )
 
         self.divergence_finder = DivergenceFinder(
-            starting_model_path=starting_model,
-            comparison_model_path=comparison_model,
-            device=device,
-            quantize=True,
-            bnb_config=bnb_config
-        )
-
-        self.contrastive_decoder = ContrastiveDecoder(
             starting_model_path=starting_model,
             comparison_model_path=comparison_model,
             device=device,

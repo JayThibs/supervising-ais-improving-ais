@@ -2,12 +2,12 @@ import os
 import pickle
 import torch
 import pandas as pd
-from model_comparison_helpers import instantiate_models, get_input_ids
-import tqdm
+from tqdm import tqdm
 from transformers import BitsAndBytesConfig, PreTrainedTokenizer
-import torch
 from typing import Optional, List
 import datetime
+
+from .model_comparison_helpers import instantiate_models, get_input_ids
 
 
 class ContrastiveDecoder:
@@ -339,7 +339,7 @@ class ContrastiveDecoder:
             self.divergences = []  # Initialize divergences list
             n_inputs = input_ids.size()[0]
             output_len = input_ids.size()[1] + generation_length
-            for i in tqdm.tqdm(range(0, n_inputs, batch_size)):
+            for i in tqdm(range(0, n_inputs, batch_size)):
                 batch_ids = input_ids[i:min(i+batch_size, n_inputs)]
 
                 # Input could be left padded, so we need to create an attention mask

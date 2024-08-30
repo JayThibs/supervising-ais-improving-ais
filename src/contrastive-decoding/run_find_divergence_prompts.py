@@ -1,4 +1,4 @@
-from assistant_find_divergence_prompts import DivergenceFinder
+from .assistant_find_divergence_prompts import DivergenceFinder
 import argparse
 
 # Set up argument parser
