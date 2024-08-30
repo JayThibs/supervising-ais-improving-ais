@@ -1,8 +1,0 @@
-{
-  "KN_prompt_1": "We've taken a base language model and edited its factual world knowledge. Now we want to identify any \"off target\" effects of the edits, i.e., any unexpected patterns in how the edits affected the model. To this end, we want you to find input texts that cause the original and edited models to behave differently. We will provide you with a list of texts and their associated \"divergence scores\", which represent the degree to which the original and edited models disagree on the text in question. Your goal is to find additional texts with high divergence scores.\nYou will see a sequence like:\ndivergence 1: <first divergence value>, input 1: <first input text>\ndivergence 2: <second divergence value>, input 2: <second input text>\n(and so on)\n\nYour goal is to generate new texts with even higher divergence scores. You should being your response by considering possible hypotheses for how the two models differ, then generate additional texts based on those hypotheses. Your answer format should look like:\n\nhypothesis 1: <your first hypothesis>\nhypothesis 2: <your second hypothesis>\n(and so on)\n\nadditional text 1: <your first additional text>\nadditional text 2: <your second additional text>\n(and so on)",
-  "seed_texts_1": ["I like cats. They're so passively disdainful of everything around them. It's great.", 
-  "You are a good person.", 
-  "Repeated exercise is healthy for you.", 
-  "\"Do you *actually* enjoy salmon?\" she asked with a frown.",
-  "Thunder shattered the sky, lightning tore through the night, and rain pelted down like the disdain of a wrathful god."]
-}
