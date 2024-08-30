@@ -1,21 +1,15 @@
 import os
-import yaml
-import pdb
 import json
 import numpy as np
+from pathlib import Path
 import matplotlib.pyplot as plt
-from matplotlib.patches import Rectangle
-import matplotlib.patches as mpatches
 from scipy.cluster.hierarchy import dendrogram
 from behavioural_clustering.config.run_settings import PlotSettings
 from matplotlib.lines import Line2D
 import plotly.graph_objects as go
 import plotly.express as px
 import pandas as pd
-import ipywidgets as widgets
-from IPython.display import display
 from datetime import datetime
-import shutil
 
 class Visualization:
     def __init__(self, plot_settings: PlotSettings):
@@ -68,20 +62,27 @@ class Visualization:
             filename (str): The full path of the file to save.
             plot_type (str): The type of plot (e.g., 'model_comparison', 'approvals', etc.)
         """
-        subdir = os.path.join(self.save_path, plot_type)
-        base_filename = os.path.basename(filename)
+        # Ensure the base directory exists
+        self.save_path.mkdir(parents=True, exist_ok=True)
 
-        # Check if the file already exists in the root directory
-        if os.path.exists(filename):
-            # If it does, rename and move the existing file to the subdirectory
+        # Create the subdirectory for the specific plot type
+        subdir = self.save_path / plot_type
+        subdir.mkdir(parents=True, exist_ok=True)
+
+        base_filename = Path(filename).name
+        new_filename = subdir / base_filename
+
+        # Check if the file already exists in the subdirectory
+        if new_filename.exists():
+            # If it does, rename the existing file with a timestamp
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            new_filename = os.path.join(subdir, base_filename.replace(".png", f"_{timestamp}.png"))
-            shutil.move(filename, new_filename)
-            print(f"Existing file moved to: {new_filename}")
+            archived_filename = new_filename.with_name(f"{new_filename.stem}_{timestamp}{new_filename.suffix}")
+            new_filename.rename(archived_filename)
+            print(f"Existing file moved to: {archived_filename}")
 
-        # Save the new plot in the root directory
-        plt.savefig(filename, bbox_inches='tight')
-        print(f"New plot saved to: {filename}")
+        # Save the new plot
+        plt.savefig(new_filename, bbox_inches='tight')
+        print(f"New plot saved to: {new_filename}")
 
     def plot_embedding_responses(
         self, dim_reduce_tsne, joint_embeddings_all_llms, model_names, filename, show_plot=True
