@@ -4,6 +4,7 @@
 # run_clustering.py
 
 import json
+import numpy as np
 from dataclasses import asdict, dataclass
 from behavioural_clustering.evaluation.clustering import (
     ClusteringPipeline,

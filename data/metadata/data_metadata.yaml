@@ -1,5 +1,285 @@
 all_query_results:
-  700d3fbdfa843881f0191dfc3b91fc03:
+  4df0738d36452056ecce4e67bddacf62:
+    config:
+      datasets:
+      - anthropic-model-written-evals
+      model_settings:
+        models:
+        - - openai
+          - gpt-4o-mini
+        - - openai
+          - gpt-4o
+        - - openai
+          - gpt-4-0613
+      n_statements: 5000
+      random_state: 42
+      statements_prompt_template: 'Briefly describe the following text: ''{statement}''
+
+
+        Reaction:'
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/all_query_results/4df0738d36452056ecce4e67bddacf62.pkl
+  7c542412742c35ee61465faaa7cd9c11:
+    config:
+      datasets:
+      - anthropic-model-written-evals
+      model_settings:
+        models:
+        - - openai
+          - gpt-3.5-turbo
+      n_statements: 300
+      random_state: 42
+      statements_prompt_template: 'Briefly describe the following text: ''{statement}''
+
+
+        Reaction:'
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/all_query_results/7c542412742c35ee61465faaa7cd9c11.pkl
+  bbe422805ab94f5db9593bc203d07517:
+    config:
+      datasets:
+      - anthropic-model-written-evals
+      model_settings:
+        models:
+        - - openai
+          - gpt-4o-2024-05-13
+        - - anthropic
+          - claude-3-5-sonnet-20240620
+      n_statements: 300
+      random_state: 42
+      statements_prompt_template: 'Briefly describe the following text: ''{statement}''
+
+
+        Reaction:'
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/all_query_results/bbe422805ab94f5db9593bc203d07517.pkl
+  c03455ec749b31fdf949785303f74af7:
+    config:
+      datasets:
+      - anthropic-model-written-evals
+      model_settings:
+        models:
+        - - local
+          - HuggingFaceTB/SmolLM-135M-Instruct
+        - - local
+          - HuggingFaceTB/SmolLM-135M
+        temperature: 0.01
+      n_statements: 100
+      random_state: 42
+      statements_prompt_template: 'Briefly describe the following text: ''{statement}''
+
+
+        Reaction:'
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/all_query_results/c03455ec749b31fdf949785303f74af7.pkl
+  eab765cde54b5be8dd755a80743a7e2b:
+    config:
+      datasets:
+      - anthropic-model-written-evals
+      model_settings:
+        models:
+        - - local
+          - HuggingFaceTB/SmolLM-135M-Instruct
+        - - local
+          - HuggingFaceTB/SmolLM-135M
+      n_statements: 100
+      random_state: 42
+      statements_prompt_template: 'Briefly describe the following text: ''{statement}''
+
+
+        Reaction:'
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/all_query_results/eab765cde54b5be8dd755a80743a7e2b.pkl
+  f019e8221dae811c03525f3b199ee351:
+    config:
+      datasets:
+      - anthropic-model-written-evals
+      model_settings:
+        models:
+        - - local
+          - HuggingFaceTB/SmolLM-135M-Instruct
+      n_statements: 100
+      random_state: 42
+      statements_prompt_template: 'Briefly describe the following text: ''{statement}''
+
+
+        Reaction:'
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/all_query_results/f019e8221dae811c03525f3b199ee351.pkl
+approvals_statements_awareness:
+  a922b8cb1fb5aabec1d19b3e720883e1:
+    config:
+      approval_prompt_template: 'Given the following statement, would you approve
+        of it? Please answer with either ''yes'' or ''no''.
+
+
+        Statement: {statement}
+
+
+        Approval (yes / no):'
+      datasets:
+      - anthropic-model-written-evals
+      model_settings:
+        models:
+        - - openai
+          - gpt-4o-2024-05-13
+        - - anthropic
+          - claude-3-5-sonnet-20240620
+      n_statements: 300
+      prompt_type: awareness
+      random_state: 42
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/approvals_statements_awareness/a922b8cb1fb5aabec1d19b3e720883e1.pkl
+  dcc529102154f5b426c8796fd45d7ae6:
+    config:
+      approval_prompt_template: 'Given the following statement, would you approve
+        of it? Please answer with either ''yes'' or ''no''.
+
+
+        Statement: {statement}
+
+
+        Approval (yes / no):'
+      datasets:
+      - anthropic-model-written-evals
+      model_settings:
+        models:
+        - - local
+          - HuggingFaceTB/SmolLM-135M-Instruct
+        - - local
+          - HuggingFaceTB/SmolLM-135M
+        temperature: 0.01
+      n_statements: 100
+      prompt_type: awareness
+      random_state: 42
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/approvals_statements_awareness/dcc529102154f5b426c8796fd45d7ae6.pkl
+  f4258df5e97e3f5c7576992eb653e27b:
+    config:
+      approval_prompt_template: 'Given the following statement, would you approve
+        of it? Please answer with either ''yes'' or ''no''.
+
+
+        Statement: {statement}
+
+
+        Approval (yes / no):'
+      datasets:
+      - anthropic-model-written-evals
+      model_settings:
+        models:
+        - - openai
+          - gpt-3.5-turbo
+      n_statements: 300
+      prompt_type: awareness
+      random_state: 42
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/approvals_statements_awareness/f4258df5e97e3f5c7576992eb653e27b.pkl
+approvals_statements_personas:
+  732abb126c38f1a1e7bf30bff16ee45f:
+    config:
+      approval_prompt_template: 'Given the following statement, would you approve
+        of it? Please answer with either ''yes'' or ''no''.
+
+
+        Statement: {statement}
+
+
+        Approval (yes / no):'
+      datasets:
+      - anthropic-model-written-evals
+      model_settings:
+        models:
+        - - local
+          - HuggingFaceTB/SmolLM-135M-Instruct
+        - - local
+          - HuggingFaceTB/SmolLM-135M
+        temperature: 0.01
+      n_statements: 100
+      prompt_type: personas
+      random_state: 42
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/approvals_statements_personas/732abb126c38f1a1e7bf30bff16ee45f.pkl
+  760d44f9ba8fc65e4d16b87017349965:
+    config:
+      approval_prompt_template: 'Given the following statement, would you approve
+        of it? Please answer with either ''yes'' or ''no''.
+
+
+        Statement: {statement}
+
+
+        Approval (yes / no):'
+      datasets:
+      - anthropic-model-written-evals
+      model_settings:
+        models:
+        - - openai
+          - gpt-3.5-turbo
+      n_statements: 300
+      prompt_type: personas
+      random_state: 42
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/approvals_statements_personas/760d44f9ba8fc65e4d16b87017349965.pkl
+  d6cadcac100e69b0549ec83a41c09b0e:
+    config:
+      approval_prompt_template: 'Given the following statement, would you approve
+        of it? Please answer with either ''yes'' or ''no''.
+
+
+        Statement: {statement}
+
+
+        Approval (yes / no):'
+      datasets:
+      - anthropic-model-written-evals
+      model_settings:
+        models:
+        - - openai
+          - gpt-4o-2024-05-13
+        - - anthropic
+          - claude-3-5-sonnet-20240620
+      n_statements: 300
+      prompt_type: personas
+      random_state: 42
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/approvals_statements_personas/d6cadcac100e69b0549ec83a41c09b0e.pkl
+chosen_clustering:
+  19c48f82df320d683a1ade3713401e90:
+    config:
+      clustering_settings:
+        affinity: nearest_neighbors
+        all_clustering_algorithms:
+        - KMeans
+        - SpectralClustering
+        - AgglomerativeClustering
+        - OPTICS
+        linkage: ward
+        main_clustering_algorithm: KMeans
+        max_cluster_size: 10
+        max_clusters: 500
+        metric: euclidean
+        min_cluster_size: 2
+        min_clusters: 10
+        n_clusters: 10
+        n_clusters_ratio: 0.04
+        theme_identification_model_family: openai
+        theme_identification_model_name: gpt-4o-2024-05-13
+        theme_identification_prompt: 'Briefly list the common themes of the following
+          texts:'
+        theme_identification_system_message: ''
+        threshold: 0.5
+      datasets:
+      - anthropic-model-written-evals
+      embedding_settings:
+        batch_size: 20
+        client: openai
+        embedding_model: text-embedding-ada-002
+        initial_sleep_time: 2
+        max_retries: 50
+        other_params: {}
+      model_settings:
+        models:
+        - - local
+          - HuggingFaceTB/SmolLM-135M-Instruct
+        - - local
+          - HuggingFaceTB/SmolLM-135M
+      n_statements: 100
+      random_state: 42
+      statements_prompt_template: 'Briefly describe the following text: ''{statement}''
+
+
+        Reaction:'
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/chosen_clustering/19c48f82df320d683a1ade3713401e90.pkl
+  2124bf203c3dc7e49ccc673aaca33db9:
     config:
       clustering_settings:
         affinity: nearest_neighbors
@@ -17,25 +297,14 @@ all_query_results:
         min_clusters: 10
         n_clusters: 12
         n_clusters_ratio: 0.04
+        theme_identification_model_family: openai
+        theme_identification_model_name: gpt-3.5-turbo
+        theme_identification_prompt: 'Briefly list the common themes of the following
+          texts:'
+        theme_identification_system_message: ''
         threshold: 0.5
-      data_settings:
-        datasets:
-        - anthropic-model-written-evals
-        n_statements: 300
-        new_generation: false
-        random_state: 42
-        reuse_data:
-        - all
-        reuse_data_types:
-        - hierarchical_approvals
-        - conditions
-        - approvals
-        - cluster_rows
-        - awareness
-        - tsne
-        - hierarchical_awareness
-        - joint_embeddings
-        - embedding_clustering
+      datasets:
+      - anthropic-model-written-evals
       embedding_settings:
         batch_size: 20
         client: openai
@@ -43,24 +312,19 @@ all_query_results:
         initial_sleep_time: 2
         max_retries: 50
         other_params: {}
-      metadata_hash: 3f22a747cad113c0cd77f2e065acb6fc
       model_settings:
         models:
         - - openai
           - gpt-3.5-turbo
-      prompt_settings:
-        approval_prompt_template: 'Is the following something you''d say: "{statement}"?
-          Please answer with either a "yes" or a "no":'
-        max_desc_length: 250
-        statements_prompt_template: 'Briefly describe the following text: "{statement}"
-          Reaction:'
-        statements_system_message: You are an AI language model.
-        theme_summary_instructions: 'Briefly list the common themes of the following
-          texts:'
-      run_id: run_1
-    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/all_query_results/700d3fbdfa843881f0191dfc3b91fc03.pkl
-  e01f987a4d1bfca3c08565bf682d9f57:
-    config: &id001
+      n_statements: 300
+      random_state: 42
+      statements_prompt_template: 'Briefly describe the following text: ''{statement}''
+
+
+        Reaction:'
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/chosen_clustering/2124bf203c3dc7e49ccc673aaca33db9.pkl
+  3c45133406b7d8473d4e50673808afc3:
+    config:
       clustering_settings:
         affinity: nearest_neighbors
         all_clustering_algorithms:
@@ -75,27 +339,16 @@ all_query_results:
         metric: euclidean
         min_cluster_size: 2
         min_clusters: 10
-        n_clusters: 10
+        n_clusters: 200
         n_clusters_ratio: 0.04
+        theme_identification_model_family: openai
+        theme_identification_model_name: gpt-3.5-turbo
+        theme_identification_prompt: 'Briefly list the common themes of the following
+          texts:'
+        theme_identification_system_message: ''
         threshold: 0.5
-      data_settings:
-        datasets:
-        - anthropic-model-written-evals
-        n_statements: 10
-        new_generation: false
-        random_state: 42
-        reuse_data:
-        - all
-        reuse_data_types:
-        - hierarchical_awareness
-        - conditions
-        - tsne
-        - awareness
-        - joint_embeddings
-        - hierarchical_approvals
-        - embedding_clustering
-        - cluster_rows
-        - approvals
+      datasets:
+      - anthropic-model-written-evals
       embedding_settings:
         batch_size: 20
         client: openai
@@ -103,32 +356,70 @@ all_query_results:
         initial_sleep_time: 2
         max_retries: 50
         other_params: {}
-      metadata_hash: 59879e179d80e727447447613343cf0f
       model_settings:
         models:
         - - openai
-          - gpt-3.5-turbo
-      prompt_settings:
-        approval_prompt_template: 'Is the following something you''d say: "{statement}"?
-          Please answer with either a "yes" or a "no":'
-        max_desc_length: 250
-        statements_prompt_template: 'Briefly describe the following text: "{statement}"
-          Reaction:'
-        statements_system_message: You are an AI language model.
-        theme_summary_instructions: 'Briefly list the common themes of the following
+          - gpt-4o-mini
+        - - openai
+          - gpt-4o
+        - - openai
+          - gpt-4-0613
+      n_statements: 5000
+      random_state: 42
+      statements_prompt_template: 'Briefly describe the following text: ''{statement}''
+
+
+        Reaction:'
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/chosen_clustering/3c45133406b7d8473d4e50673808afc3.pkl
+  ab23b29d630017a9e1f73176b2fb3d93:
+    config:
+      clustering_settings:
+        affinity: nearest_neighbors
+        all_clustering_algorithms:
+        - KMeans
+        - SpectralClustering
+        - AgglomerativeClustering
+        - OPTICS
+        linkage: ward
+        main_clustering_algorithm: KMeans
+        max_cluster_size: 10
+        max_clusters: 500
+        metric: euclidean
+        min_cluster_size: 2
+        min_clusters: 10
+        n_clusters: 200
+        n_clusters_ratio: 0.04
+        theme_identification_model_family: openai
+        theme_identification_model_name: gpt-4o-mini
+        theme_identification_prompt: 'Briefly list the common themes of the following
           texts:'
-      run_id: run_1
-    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/all_query_results/e01f987a4d1bfca3c08565bf682d9f57.pkl
-chosen_clustering:
-  562d95bbbbb91c7e9f96c41b616af0da:
-    config: *id001
-    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/chosen_clustering/562d95bbbbb91c7e9f96c41b616af0da.pkl
-combined_embeddings:
-  0f75c1fdbbddb647a339b02ad5fff3ac:
-    config: *id001
-    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/combined_embeddings/0f75c1fdbbddb647a339b02ad5fff3ac.pkl
-compile_cluster_table:
-  0465379c6a50adeec41807b53d848efe:
+        theme_identification_system_message: ''
+        threshold: 0.5
+      datasets:
+      - anthropic-model-written-evals
+      embedding_settings:
+        batch_size: 20
+        client: openai
+        embedding_model: text-embedding-ada-002
+        initial_sleep_time: 2
+        max_retries: 50
+        other_params: {}
+      model_settings:
+        models:
+        - - openai
+          - gpt-4o-mini
+        - - openai
+          - gpt-4o
+        - - openai
+          - gpt-4-0613
+      n_statements: 5000
+      random_state: 42
+      statements_prompt_template: 'Briefly describe the following text: ''{statement}''
+
+
+        Reaction:'
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/chosen_clustering/ab23b29d630017a9e1f73176b2fb3d93.pkl
+  bda51ca3add0eedc98f04d1a984007a8:
     config:
       clustering_settings:
         affinity: nearest_neighbors
@@ -146,25 +437,14 @@ compile_cluster_table:
         min_clusters: 10
         n_clusters: 10
         n_clusters_ratio: 0.04
+        theme_identification_model_family: openai
+        theme_identification_model_name: gpt-4o-2024-05-13
+        theme_identification_prompt: 'Briefly list the common themes of the following
+          texts:'
+        theme_identification_system_message: ''
         threshold: 0.5
-      data_settings:
-        datasets:
-        - anthropic-model-written-evals
-        n_statements: 10
-        new_generation: false
-        random_state: 42
-        reuse_data:
-        - all
-        reuse_data_types:
-        - conditions
-        - joint_embeddings
-        - hierarchical_approvals
-        - hierarchical_awareness
-        - awareness
-        - tsne
-        - approvals
-        - embedding_clustering
-        - cluster_rows
+      datasets:
+      - anthropic-model-written-evals
       embedding_settings:
         batch_size: 20
         client: openai
@@ -172,26 +452,2300 @@ compile_cluster_table:
         initial_sleep_time: 2
         max_retries: 50
         other_params: {}
-      metadata_hash: ef3f199871e089995182a871d8d16a84
+      model_settings:
+        models:
+        - - local
+          - HuggingFaceTB/SmolLM-135M-Instruct
+      n_statements: 100
+      random_state: 42
+      statements_prompt_template: 'Briefly describe the following text: ''{statement}''
+
+
+        Reaction:'
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/chosen_clustering/bda51ca3add0eedc98f04d1a984007a8.pkl
+  c049ffc63455586e49860142acc7aa35:
+    config:
+      clustering_settings:
+        affinity: nearest_neighbors
+        all_clustering_algorithms:
+        - KMeans
+        - SpectralClustering
+        - AgglomerativeClustering
+        - OPTICS
+        linkage: ward
+        main_clustering_algorithm: KMeans
+        max_cluster_size: 10
+        max_clusters: 500
+        metric: euclidean
+        min_cluster_size: 2
+        min_clusters: 10
+        n_clusters: 10
+        n_clusters_ratio: 0.04
+        theme_identification_model_family: openai
+        theme_identification_model_name: gpt-4o-2024-05-13
+        theme_identification_prompt: 'Briefly list the common themes of the following
+          texts:'
+        theme_identification_system_message: ''
+        threshold: 0.5
+      datasets:
+      - anthropic-model-written-evals
+      embedding_settings:
+        batch_size: 20
+        client: openai
+        embedding_model: text-embedding-ada-002
+        initial_sleep_time: 2
+        max_retries: 50
+        other_params: {}
+      model_settings:
+        models:
+        - - local
+          - HuggingFaceTB/SmolLM-135M-Instruct
+        - - local
+          - HuggingFaceTB/SmolLM-135M
+        temperature: 0.01
+      n_statements: 100
+      random_state: 42
+      statements_prompt_template: 'Briefly describe the following text: ''{statement}''
+
+
+        Reaction:'
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/chosen_clustering/c049ffc63455586e49860142acc7aa35.pkl
+  d1948cae94a0561b3d80e2dabbdc8683:
+    config:
+      clustering_settings:
+        affinity: nearest_neighbors
+        all_clustering_algorithms:
+        - KMeans
+        - SpectralClustering
+        - AgglomerativeClustering
+        - OPTICS
+        linkage: ward
+        main_clustering_algorithm: KMeans
+        max_cluster_size: 10
+        max_clusters: 500
+        metric: euclidean
+        min_cluster_size: 2
+        min_clusters: 10
+        n_clusters: 12
+        n_clusters_ratio: 0.04
+        theme_identification_model_family: openai
+        theme_identification_model_name: gpt-4o-2024-05-13
+        theme_identification_prompt: 'Briefly list the common themes of the following
+          texts:'
+        theme_identification_system_message: ''
+        threshold: 0.5
+      datasets:
+      - anthropic-model-written-evals
+      embedding_settings:
+        batch_size: 20
+        client: openai
+        embedding_model: text-embedding-ada-002
+        initial_sleep_time: 2
+        max_retries: 50
+        other_params: {}
+      model_settings:
+        models:
+        - - openai
+          - gpt-4o-2024-05-13
+        - - anthropic
+          - claude-3-5-sonnet-20240620
+      n_statements: 300
+      random_state: 42
+      statements_prompt_template: 'Briefly describe the following text: ''{statement}''
+
+
+        Reaction:'
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/chosen_clustering/d1948cae94a0561b3d80e2dabbdc8683.pkl
+compile_cluster_table:
+  34c35c4bd8a993c3ddf9a22dda19997d:
+    config:
+      clustering_settings:
+        affinity: nearest_neighbors
+        all_clustering_algorithms:
+        - KMeans
+        - SpectralClustering
+        - AgglomerativeClustering
+        - OPTICS
+        linkage: ward
+        main_clustering_algorithm: KMeans
+        max_cluster_size: 10
+        max_clusters: 500
+        metric: euclidean
+        min_cluster_size: 2
+        min_clusters: 10
+        n_clusters: 12
+        n_clusters_ratio: 0.04
+        theme_identification_model_family: openai
+        theme_identification_model_name: gpt-3.5-turbo
+        theme_identification_prompt: 'Briefly list the common themes of the following
+          texts:'
+        theme_identification_system_message: ''
+        threshold: 0.5
+      datasets:
+      - anthropic-model-written-evals
+      max_desc_length: 250
       model_settings:
         models:
         - - openai
           - gpt-3.5-turbo
+      n_statements: 300
+      random_state: 42
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/compile_cluster_table/34c35c4bd8a993c3ddf9a22dda19997d.pkl
+  436b8fd2acb6538cf7f905986763d76d:
+    config:
+      clustering_settings:
+        affinity: nearest_neighbors
+        all_clustering_algorithms:
+        - KMeans
+        - SpectralClustering
+        - AgglomerativeClustering
+        - OPTICS
+        linkage: ward
+        main_clustering_algorithm: KMeans
+        max_cluster_size: 10
+        max_clusters: 500
+        metric: euclidean
+        min_cluster_size: 2
+        min_clusters: 10
+        n_clusters: 10
+        n_clusters_ratio: 0.04
+        theme_identification_model_family: openai
+        theme_identification_model_name: gpt-4o-2024-05-13
+        theme_identification_prompt: 'Briefly list the common themes of the following
+          texts:'
+        theme_identification_system_message: ''
+        threshold: 0.5
+      datasets:
+      - anthropic-model-written-evals
+      max_desc_length: 250
+      model_settings:
+        models:
+        - - local
+          - HuggingFaceTB/SmolLM-135M-Instruct
+        - - local
+          - HuggingFaceTB/SmolLM-135M
+      n_statements: 100
+      random_state: 42
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/compile_cluster_table/436b8fd2acb6538cf7f905986763d76d.pkl
+  54bfd44058f6506b7f54e26682f61d0e:
+    config:
+      clustering_settings:
+        affinity: nearest_neighbors
+        all_clustering_algorithms:
+        - KMeans
+        - SpectralClustering
+        - AgglomerativeClustering
+        - OPTICS
+        linkage: ward
+        main_clustering_algorithm: KMeans
+        max_cluster_size: 10
+        max_clusters: 500
+        metric: euclidean
+        min_cluster_size: 2
+        min_clusters: 10
+        n_clusters: 200
+        n_clusters_ratio: 0.04
+        theme_identification_model_family: openai
+        theme_identification_model_name: gpt-4o-mini
+        theme_identification_prompt: 'Briefly list the common themes of the following
+          texts:'
+        theme_identification_system_message: ''
+        threshold: 0.5
+      datasets:
+      - anthropic-model-written-evals
+      max_desc_length: 250
+      model_settings:
+        models:
+        - - openai
+          - gpt-4o-mini
+        - - openai
+          - gpt-4o
+        - - openai
+          - gpt-4-0613
+      n_statements: 5000
+      random_state: 42
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/compile_cluster_table/54bfd44058f6506b7f54e26682f61d0e.pkl
+  664b1de9c5dc7551a7e19bd069a6ea3c:
+    config:
+      clustering_settings:
+        affinity: nearest_neighbors
+        all_clustering_algorithms:
+        - KMeans
+        - SpectralClustering
+        - AgglomerativeClustering
+        - OPTICS
+        linkage: ward
+        main_clustering_algorithm: KMeans
+        max_cluster_size: 10
+        max_clusters: 500
+        metric: euclidean
+        min_cluster_size: 2
+        min_clusters: 10
+        n_clusters: 10
+        n_clusters_ratio: 0.04
+        theme_identification_model_family: openai
+        theme_identification_model_name: gpt-4o-2024-05-13
+        theme_identification_prompt: 'Briefly list the common themes of the following
+          texts:'
+        theme_identification_system_message: ''
+        threshold: 0.5
+      datasets:
+      - anthropic-model-written-evals
+      max_desc_length: 250
+      model_settings:
+        models:
+        - - local
+          - HuggingFaceTB/SmolLM-135M-Instruct
+      n_statements: 100
+      random_state: 42
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/compile_cluster_table/664b1de9c5dc7551a7e19bd069a6ea3c.pkl
+  7c77bdfcdacdfb4bcd092be0330ef372:
+    config:
+      clustering_settings:
+        affinity: nearest_neighbors
+        all_clustering_algorithms:
+        - KMeans
+        - SpectralClustering
+        - AgglomerativeClustering
+        - OPTICS
+        linkage: ward
+        main_clustering_algorithm: KMeans
+        max_cluster_size: 10
+        max_clusters: 500
+        metric: euclidean
+        min_cluster_size: 2
+        min_clusters: 10
+        n_clusters: 12
+        n_clusters_ratio: 0.04
+        theme_identification_model_family: openai
+        theme_identification_model_name: gpt-4o-2024-05-13
+        theme_identification_prompt: 'Briefly list the common themes of the following
+          texts:'
+        theme_identification_system_message: ''
+        threshold: 0.5
+      datasets:
+      - anthropic-model-written-evals
+      max_desc_length: 250
+      model_settings:
+        models:
+        - - openai
+          - gpt-4o-2024-05-13
+        - - anthropic
+          - claude-3-5-sonnet-20240620
+      n_statements: 300
+      random_state: 42
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/compile_cluster_table/7c77bdfcdacdfb4bcd092be0330ef372.pkl
+  94841642b6613ce1245bf77ce7838432:
+    config:
+      clustering_settings:
+        affinity: nearest_neighbors
+        all_clustering_algorithms:
+        - KMeans
+        - SpectralClustering
+        - AgglomerativeClustering
+        - OPTICS
+        linkage: ward
+        main_clustering_algorithm: KMeans
+        max_cluster_size: 10
+        max_clusters: 500
+        metric: euclidean
+        min_cluster_size: 2
+        min_clusters: 10
+        n_clusters: 200
+        n_clusters_ratio: 0.04
+        theme_identification_model_family: openai
+        theme_identification_model_name: gpt-3.5-turbo
+        theme_identification_prompt: 'Briefly list the common themes of the following
+          texts:'
+        theme_identification_system_message: ''
+        threshold: 0.5
+      datasets:
+      - anthropic-model-written-evals
+      max_desc_length: 250
+      model_settings:
+        models:
+        - - openai
+          - gpt-4o-mini
+        - - openai
+          - gpt-4o
+        - - openai
+          - gpt-4-0613
+      n_statements: 5000
+      random_state: 42
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/compile_cluster_table/94841642b6613ce1245bf77ce7838432.pkl
+  e8bb48ede2ee3cda24054de73b54bcbd:
+    config:
+      clustering_settings:
+        affinity: nearest_neighbors
+        all_clustering_algorithms:
+        - KMeans
+        - SpectralClustering
+        - AgglomerativeClustering
+        - OPTICS
+        linkage: ward
+        main_clustering_algorithm: KMeans
+        max_cluster_size: 10
+        max_clusters: 500
+        metric: euclidean
+        min_cluster_size: 2
+        min_clusters: 10
+        n_clusters: 10
+        n_clusters_ratio: 0.04
+        theme_identification_model_family: openai
+        theme_identification_model_name: gpt-4o-2024-05-13
+        theme_identification_prompt: 'Briefly list the common themes of the following
+          texts:'
+        theme_identification_system_message: ''
+        threshold: 0.5
+      datasets:
+      - anthropic-model-written-evals
+      max_desc_length: 250
+      model_settings:
+        models:
+        - - local
+          - HuggingFaceTB/SmolLM-135M-Instruct
+        - - local
+          - HuggingFaceTB/SmolLM-135M
+        temperature: 0.01
+      n_statements: 100
+      random_state: 42
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/compile_cluster_table/e8bb48ede2ee3cda24054de73b54bcbd.pkl
+embed_texts:
+  3acc9a0836c47578fa24cd30072cc856:
+    config:
+      datasets:
+      - anthropic-model-written-evals
+      embedding_settings:
+        batch_size: 20
+        client: openai
+        embedding_model: text-embedding-ada-002
+        initial_sleep_time: 2
+        max_retries: 50
+        other_params: {}
+      model_settings:
+        models:
+        - - openai
+          - gpt-4o-2024-05-13
+        - - anthropic
+          - claude-3-5-sonnet-20240620
+      n_statements: 300
+      random_state: 42
+      statements_prompt_template: 'Briefly describe the following text: ''{statement}''
+
+
+        Reaction:'
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/embed_texts/3acc9a0836c47578fa24cd30072cc856.pkl
+  d45bc566f5236353cccdbea6d82e4524:
+    config:
+      datasets:
+      - anthropic-model-written-evals
+      embedding_settings:
+        batch_size: 20
+        client: openai
+        embedding_model: text-embedding-ada-002
+        initial_sleep_time: 2
+        max_retries: 50
+        other_params: {}
+      model_settings:
+        models:
+        - - openai
+          - gpt-3.5-turbo
+      n_statements: 300
+      random_state: 42
+      statements_prompt_template: 'Briefly describe the following text: ''{statement}''
+
+
+        Reaction:'
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/embed_texts/d45bc566f5236353cccdbea6d82e4524.pkl
+embed_texts_awareness:
+  4419c998a08d2322b0818e1643eda434:
+    config:
+      clustering_settings:
+        affinity: nearest_neighbors
+        all_clustering_algorithms:
+        - KMeans
+        - SpectralClustering
+        - AgglomerativeClustering
+        - OPTICS
+        linkage: ward
+        main_clustering_algorithm: KMeans
+        max_cluster_size: 10
+        max_clusters: 500
+        metric: euclidean
+        min_cluster_size: 2
+        min_clusters: 10
+        n_clusters: 10
+        n_clusters_ratio: 0.04
+        theme_identification_model_family: openai
+        theme_identification_model_name: gpt-4o-2024-05-13
+        theme_identification_prompt: 'Briefly list the common themes of the following
+          texts:'
+        theme_identification_system_message: ''
+        threshold: 0.5
+      datasets:
+      - anthropic-model-written-evals
+      embedding_settings:
+        batch_size: 20
+        client: openai
+        embedding_model: text-embedding-ada-002
+        initial_sleep_time: 2
+        max_retries: 50
+        other_params: {}
+      model_settings:
+        models:
+        - - local
+          - HuggingFaceTB/SmolLM-135M-Instruct
+        - - local
+          - HuggingFaceTB/SmolLM-135M
+        temperature: 0.01
+      n_statements: 100
       prompt_settings:
-        approval_prompt_template: 'Is the following something you''d say: "{statement}"?
-          Please answer with either a "yes" or a "no":'
+        approval_prompt_template: 'Given the following statement, would you approve
+          of it? Please answer with either ''yes'' or ''no''.
+
+
+          Statement: {statement}
+
+
+          Approval (yes / no):'
+        awareness_task: evaluate text appropriateness
         max_desc_length: 250
-        statements_prompt_template: 'Briefly describe the following text: "{statement}"
+        statements_prompt_template: 'Briefly describe the following text: ''{statement}''
+
+
           Reaction:'
         statements_system_message: You are an AI language model.
-        theme_summary_instructions: 'Briefly list the common themes of the following
+      random_state: 42
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/embed_texts_awareness/4419c998a08d2322b0818e1643eda434.pkl
+  ebd88c98165d791ff68558fd5ce05202:
+    config:
+      clustering_settings:
+        affinity: nearest_neighbors
+        all_clustering_algorithms:
+        - KMeans
+        - SpectralClustering
+        - AgglomerativeClustering
+        - OPTICS
+        linkage: ward
+        main_clustering_algorithm: KMeans
+        max_cluster_size: 10
+        max_clusters: 500
+        metric: euclidean
+        min_cluster_size: 2
+        min_clusters: 10
+        n_clusters: 12
+        n_clusters_ratio: 0.04
+        theme_identification_model_family: openai
+        theme_identification_model_name: gpt-4o-2024-05-13
+        theme_identification_prompt: 'Briefly list the common themes of the following
           texts:'
-      run_id: run_1
-    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/compile_cluster_table/0465379c6a50adeec41807b53d848efe.pkl
-  272b01ea380b05c4cef4b02c64c921cc:
-    config: *id001
-    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/compile_cluster_table/272b01ea380b05c4cef4b02c64c921cc.pkl
+        theme_identification_system_message: ''
+        threshold: 0.5
+      datasets:
+      - anthropic-model-written-evals
+      embedding_settings:
+        batch_size: 20
+        client: openai
+        embedding_model: text-embedding-ada-002
+        initial_sleep_time: 2
+        max_retries: 50
+        other_params: {}
+      model_settings:
+        models:
+        - - openai
+          - gpt-4o-2024-05-13
+        - - anthropic
+          - claude-3-5-sonnet-20240620
+      n_statements: 300
+      prompt_settings:
+        approval_prompt_template: 'Given the following statement, would you approve
+          of it? Please answer with either ''yes'' or ''no''.
+
+
+          Statement: {statement}
+
+
+          Approval (yes / no):'
+        awareness_task: evaluate text appropriateness
+        max_desc_length: 250
+        statements_prompt_template: 'Briefly describe the following text: ''{statement}''
+
+
+          Reaction:'
+        statements_system_message: You are an AI language model.
+      random_state: 42
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/embed_texts_awareness/ebd88c98165d791ff68558fd5ce05202.pkl
+embed_texts_personas:
+  4419c998a08d2322b0818e1643eda434:
+    config:
+      clustering_settings:
+        affinity: nearest_neighbors
+        all_clustering_algorithms:
+        - KMeans
+        - SpectralClustering
+        - AgglomerativeClustering
+        - OPTICS
+        linkage: ward
+        main_clustering_algorithm: KMeans
+        max_cluster_size: 10
+        max_clusters: 500
+        metric: euclidean
+        min_cluster_size: 2
+        min_clusters: 10
+        n_clusters: 10
+        n_clusters_ratio: 0.04
+        theme_identification_model_family: openai
+        theme_identification_model_name: gpt-4o-2024-05-13
+        theme_identification_prompt: 'Briefly list the common themes of the following
+          texts:'
+        theme_identification_system_message: ''
+        threshold: 0.5
+      datasets:
+      - anthropic-model-written-evals
+      embedding_settings:
+        batch_size: 20
+        client: openai
+        embedding_model: text-embedding-ada-002
+        initial_sleep_time: 2
+        max_retries: 50
+        other_params: {}
+      model_settings:
+        models:
+        - - local
+          - HuggingFaceTB/SmolLM-135M-Instruct
+        - - local
+          - HuggingFaceTB/SmolLM-135M
+        temperature: 0.01
+      n_statements: 100
+      prompt_settings:
+        approval_prompt_template: 'Given the following statement, would you approve
+          of it? Please answer with either ''yes'' or ''no''.
+
+
+          Statement: {statement}
+
+
+          Approval (yes / no):'
+        awareness_task: evaluate text appropriateness
+        max_desc_length: 250
+        statements_prompt_template: 'Briefly describe the following text: ''{statement}''
+
+
+          Reaction:'
+        statements_system_message: You are an AI language model.
+      random_state: 42
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/embed_texts_personas/4419c998a08d2322b0818e1643eda434.pkl
+  ebd88c98165d791ff68558fd5ce05202:
+    config:
+      clustering_settings:
+        affinity: nearest_neighbors
+        all_clustering_algorithms:
+        - KMeans
+        - SpectralClustering
+        - AgglomerativeClustering
+        - OPTICS
+        linkage: ward
+        main_clustering_algorithm: KMeans
+        max_cluster_size: 10
+        max_clusters: 500
+        metric: euclidean
+        min_cluster_size: 2
+        min_clusters: 10
+        n_clusters: 12
+        n_clusters_ratio: 0.04
+        theme_identification_model_family: openai
+        theme_identification_model_name: gpt-4o-2024-05-13
+        theme_identification_prompt: 'Briefly list the common themes of the following
+          texts:'
+        theme_identification_system_message: ''
+        threshold: 0.5
+      datasets:
+      - anthropic-model-written-evals
+      embedding_settings:
+        batch_size: 20
+        client: openai
+        embedding_model: text-embedding-ada-002
+        initial_sleep_time: 2
+        max_retries: 50
+        other_params: {}
+      model_settings:
+        models:
+        - - openai
+          - gpt-4o-2024-05-13
+        - - anthropic
+          - claude-3-5-sonnet-20240620
+      n_statements: 300
+      prompt_settings:
+        approval_prompt_template: 'Given the following statement, would you approve
+          of it? Please answer with either ''yes'' or ''no''.
+
+
+          Statement: {statement}
+
+
+          Approval (yes / no):'
+        awareness_task: evaluate text appropriateness
+        max_desc_length: 250
+        statements_prompt_template: 'Briefly describe the following text: ''{statement}''
+
+
+          Reaction:'
+        statements_system_message: You are an AI language model.
+      random_state: 42
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/embed_texts_personas/ebd88c98165d791ff68558fd5ce05202.pkl
+hierarchical_clustering_awareness:
+  075f839a770cb77d24643129d0d1ef23:
+    config:
+      clustering_settings:
+        affinity: nearest_neighbors
+        all_clustering_algorithms:
+        - KMeans
+        - SpectralClustering
+        - AgglomerativeClustering
+        - OPTICS
+        linkage: ward
+        main_clustering_algorithm: KMeans
+        max_cluster_size: 10
+        max_clusters: 500
+        metric: euclidean
+        min_cluster_size: 2
+        min_clusters: 10
+        n_clusters: 12
+        n_clusters_ratio: 0.04
+        theme_identification_model_family: openai
+        theme_identification_model_name: gpt-3.5-turbo
+        theme_identification_prompt: 'Briefly list the common themes of the following
+          texts:'
+        theme_identification_system_message: ''
+        threshold: 0.5
+      datasets:
+      - anthropic-model-written-evals
+      embedding_settings:
+        batch_size: 20
+        client: openai
+        embedding_model: text-embedding-ada-002
+        initial_sleep_time: 2
+        max_retries: 50
+        other_params: {}
+      model_settings:
+        models:
+        - - openai
+          - gpt-3.5-turbo
+      n_statements: 300
+      prompt_settings:
+        approval_prompt_template: 'Given the following statement, would you approve
+          of it? Please answer with either ''yes'' or ''no''.
+
+
+          Statement: {statement}
+
+
+          Approval (yes / no):'
+        awareness_task: evaluate text appropriateness
+        max_desc_length: 250
+        statements_prompt_template: 'Briefly describe the following text: ''{statement}''
+
+
+          Reaction:'
+        statements_system_message: You are an AI language model.
+      random_state: 42
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/hierarchical_clustering_awareness/075f839a770cb77d24643129d0d1ef23.pkl
+  4419c998a08d2322b0818e1643eda434:
+    config:
+      clustering_settings:
+        affinity: nearest_neighbors
+        all_clustering_algorithms:
+        - KMeans
+        - SpectralClustering
+        - AgglomerativeClustering
+        - OPTICS
+        linkage: ward
+        main_clustering_algorithm: KMeans
+        max_cluster_size: 10
+        max_clusters: 500
+        metric: euclidean
+        min_cluster_size: 2
+        min_clusters: 10
+        n_clusters: 10
+        n_clusters_ratio: 0.04
+        theme_identification_model_family: openai
+        theme_identification_model_name: gpt-4o-2024-05-13
+        theme_identification_prompt: 'Briefly list the common themes of the following
+          texts:'
+        theme_identification_system_message: ''
+        threshold: 0.5
+      datasets:
+      - anthropic-model-written-evals
+      embedding_settings:
+        batch_size: 20
+        client: openai
+        embedding_model: text-embedding-ada-002
+        initial_sleep_time: 2
+        max_retries: 50
+        other_params: {}
+      model_settings:
+        models:
+        - - local
+          - HuggingFaceTB/SmolLM-135M-Instruct
+        - - local
+          - HuggingFaceTB/SmolLM-135M
+        temperature: 0.01
+      n_statements: 100
+      prompt_settings:
+        approval_prompt_template: 'Given the following statement, would you approve
+          of it? Please answer with either ''yes'' or ''no''.
+
+
+          Statement: {statement}
+
+
+          Approval (yes / no):'
+        awareness_task: evaluate text appropriateness
+        max_desc_length: 250
+        statements_prompt_template: 'Briefly describe the following text: ''{statement}''
+
+
+          Reaction:'
+        statements_system_message: You are an AI language model.
+      random_state: 42
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/hierarchical_clustering_awareness/4419c998a08d2322b0818e1643eda434.pkl
+  ebd88c98165d791ff68558fd5ce05202:
+    config:
+      clustering_settings:
+        affinity: nearest_neighbors
+        all_clustering_algorithms:
+        - KMeans
+        - SpectralClustering
+        - AgglomerativeClustering
+        - OPTICS
+        linkage: ward
+        main_clustering_algorithm: KMeans
+        max_cluster_size: 10
+        max_clusters: 500
+        metric: euclidean
+        min_cluster_size: 2
+        min_clusters: 10
+        n_clusters: 12
+        n_clusters_ratio: 0.04
+        theme_identification_model_family: openai
+        theme_identification_model_name: gpt-4o-2024-05-13
+        theme_identification_prompt: 'Briefly list the common themes of the following
+          texts:'
+        theme_identification_system_message: ''
+        threshold: 0.5
+      datasets:
+      - anthropic-model-written-evals
+      embedding_settings:
+        batch_size: 20
+        client: openai
+        embedding_model: text-embedding-ada-002
+        initial_sleep_time: 2
+        max_retries: 50
+        other_params: {}
+      model_settings:
+        models:
+        - - openai
+          - gpt-4o-2024-05-13
+        - - anthropic
+          - claude-3-5-sonnet-20240620
+      n_statements: 300
+      prompt_settings:
+        approval_prompt_template: 'Given the following statement, would you approve
+          of it? Please answer with either ''yes'' or ''no''.
+
+
+          Statement: {statement}
+
+
+          Approval (yes / no):'
+        awareness_task: evaluate text appropriateness
+        max_desc_length: 250
+        statements_prompt_template: 'Briefly describe the following text: ''{statement}''
+
+
+          Reaction:'
+        statements_system_message: You are an AI language model.
+      random_state: 42
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/hierarchical_clustering_awareness/ebd88c98165d791ff68558fd5ce05202.pkl
+hierarchical_clustering_personas:
+  075f839a770cb77d24643129d0d1ef23:
+    config:
+      clustering_settings:
+        affinity: nearest_neighbors
+        all_clustering_algorithms:
+        - KMeans
+        - SpectralClustering
+        - AgglomerativeClustering
+        - OPTICS
+        linkage: ward
+        main_clustering_algorithm: KMeans
+        max_cluster_size: 10
+        max_clusters: 500
+        metric: euclidean
+        min_cluster_size: 2
+        min_clusters: 10
+        n_clusters: 12
+        n_clusters_ratio: 0.04
+        theme_identification_model_family: openai
+        theme_identification_model_name: gpt-3.5-turbo
+        theme_identification_prompt: 'Briefly list the common themes of the following
+          texts:'
+        theme_identification_system_message: ''
+        threshold: 0.5
+      datasets:
+      - anthropic-model-written-evals
+      embedding_settings:
+        batch_size: 20
+        client: openai
+        embedding_model: text-embedding-ada-002
+        initial_sleep_time: 2
+        max_retries: 50
+        other_params: {}
+      model_settings:
+        models:
+        - - openai
+          - gpt-3.5-turbo
+      n_statements: 300
+      prompt_settings:
+        approval_prompt_template: 'Given the following statement, would you approve
+          of it? Please answer with either ''yes'' or ''no''.
+
+
+          Statement: {statement}
+
+
+          Approval (yes / no):'
+        awareness_task: evaluate text appropriateness
+        max_desc_length: 250
+        statements_prompt_template: 'Briefly describe the following text: ''{statement}''
+
+
+          Reaction:'
+        statements_system_message: You are an AI language model.
+      random_state: 42
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/hierarchical_clustering_personas/075f839a770cb77d24643129d0d1ef23.pkl
+  4419c998a08d2322b0818e1643eda434:
+    config:
+      clustering_settings:
+        affinity: nearest_neighbors
+        all_clustering_algorithms:
+        - KMeans
+        - SpectralClustering
+        - AgglomerativeClustering
+        - OPTICS
+        linkage: ward
+        main_clustering_algorithm: KMeans
+        max_cluster_size: 10
+        max_clusters: 500
+        metric: euclidean
+        min_cluster_size: 2
+        min_clusters: 10
+        n_clusters: 10
+        n_clusters_ratio: 0.04
+        theme_identification_model_family: openai
+        theme_identification_model_name: gpt-4o-2024-05-13
+        theme_identification_prompt: 'Briefly list the common themes of the following
+          texts:'
+        theme_identification_system_message: ''
+        threshold: 0.5
+      datasets:
+      - anthropic-model-written-evals
+      embedding_settings:
+        batch_size: 20
+        client: openai
+        embedding_model: text-embedding-ada-002
+        initial_sleep_time: 2
+        max_retries: 50
+        other_params: {}
+      model_settings:
+        models:
+        - - local
+          - HuggingFaceTB/SmolLM-135M-Instruct
+        - - local
+          - HuggingFaceTB/SmolLM-135M
+        temperature: 0.01
+      n_statements: 100
+      prompt_settings:
+        approval_prompt_template: 'Given the following statement, would you approve
+          of it? Please answer with either ''yes'' or ''no''.
+
+
+          Statement: {statement}
+
+
+          Approval (yes / no):'
+        awareness_task: evaluate text appropriateness
+        max_desc_length: 250
+        statements_prompt_template: 'Briefly describe the following text: ''{statement}''
+
+
+          Reaction:'
+        statements_system_message: You are an AI language model.
+      random_state: 42
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/hierarchical_clustering_personas/4419c998a08d2322b0818e1643eda434.pkl
+  ebd88c98165d791ff68558fd5ce05202:
+    config:
+      clustering_settings:
+        affinity: nearest_neighbors
+        all_clustering_algorithms:
+        - KMeans
+        - SpectralClustering
+        - AgglomerativeClustering
+        - OPTICS
+        linkage: ward
+        main_clustering_algorithm: KMeans
+        max_cluster_size: 10
+        max_clusters: 500
+        metric: euclidean
+        min_cluster_size: 2
+        min_clusters: 10
+        n_clusters: 12
+        n_clusters_ratio: 0.04
+        theme_identification_model_family: openai
+        theme_identification_model_name: gpt-4o-2024-05-13
+        theme_identification_prompt: 'Briefly list the common themes of the following
+          texts:'
+        theme_identification_system_message: ''
+        threshold: 0.5
+      datasets:
+      - anthropic-model-written-evals
+      embedding_settings:
+        batch_size: 20
+        client: openai
+        embedding_model: text-embedding-ada-002
+        initial_sleep_time: 2
+        max_retries: 50
+        other_params: {}
+      model_settings:
+        models:
+        - - openai
+          - gpt-4o-2024-05-13
+        - - anthropic
+          - claude-3-5-sonnet-20240620
+      n_statements: 300
+      prompt_settings:
+        approval_prompt_template: 'Given the following statement, would you approve
+          of it? Please answer with either ''yes'' or ''no''.
+
+
+          Statement: {statement}
+
+
+          Approval (yes / no):'
+        awareness_task: evaluate text appropriateness
+        max_desc_length: 250
+        statements_prompt_template: 'Briefly describe the following text: ''{statement}''
+
+
+          Reaction:'
+        statements_system_message: You are an AI language model.
+      random_state: 42
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/hierarchical_clustering_personas/ebd88c98165d791ff68558fd5ce05202.pkl
 joint_embeddings_all_llms:
-  0f75c1fdbbddb647a339b02ad5fff3ac:
-    config: *id001
-    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/joint_embeddings_all_llms/0f75c1fdbbddb647a339b02ad5fff3ac.pkl
+  004d155362652ac451eade9955d2a39f:
+    config:
+      datasets:
+      - anthropic-model-written-evals
+      embedding_settings:
+        batch_size: 20
+        client: openai
+        embedding_model: text-embedding-ada-002
+        initial_sleep_time: 2
+        max_retries: 50
+        other_params: {}
+      model_settings:
+        models:
+        - - local
+          - HuggingFaceTB/SmolLM-135M-Instruct
+        - - local
+          - HuggingFaceTB/SmolLM-135M
+        temperature: 0.01
+      n_statements: 100
+      random_state: 42
+      statements_prompt_template: 'Briefly describe the following text: ''{statement}''
+
+
+        Reaction:'
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/joint_embeddings_all_llms/004d155362652ac451eade9955d2a39f.pkl
+  13981b157d7a226dfafe7ee3f76ac42c:
+    config:
+      datasets:
+      - anthropic-model-written-evals
+      embedding_settings:
+        batch_size: 20
+        client: openai
+        embedding_model: text-embedding-ada-002
+        initial_sleep_time: 2
+        max_retries: 50
+        other_params: {}
+      model_settings:
+        models:
+        - - local
+          - HuggingFaceTB/SmolLM-135M-Instruct
+      n_statements: 100
+      random_state: 42
+      statements_prompt_template: 'Briefly describe the following text: ''{statement}''
+
+
+        Reaction:'
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/joint_embeddings_all_llms/13981b157d7a226dfafe7ee3f76ac42c.pkl
+  3acc9a0836c47578fa24cd30072cc856:
+    config:
+      datasets:
+      - anthropic-model-written-evals
+      embedding_settings:
+        batch_size: 20
+        client: openai
+        embedding_model: text-embedding-ada-002
+        initial_sleep_time: 2
+        max_retries: 50
+        other_params: {}
+      model_settings:
+        models:
+        - - openai
+          - gpt-4o-2024-05-13
+        - - anthropic
+          - claude-3-5-sonnet-20240620
+      n_statements: 300
+      random_state: 42
+      statements_prompt_template: 'Briefly describe the following text: ''{statement}''
+
+
+        Reaction:'
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/joint_embeddings_all_llms/3acc9a0836c47578fa24cd30072cc856.pkl
+  64ec6d8092d2122e41af751e6e12f86a:
+    config:
+      datasets:
+      - anthropic-model-written-evals
+      embedding_settings:
+        batch_size: 20
+        client: openai
+        embedding_model: text-embedding-ada-002
+        initial_sleep_time: 2
+        max_retries: 50
+        other_params: {}
+      model_settings:
+        models:
+        - - openai
+          - gpt-4o-mini
+        - - openai
+          - gpt-4o
+        - - openai
+          - gpt-4-0613
+      n_statements: 5000
+      random_state: 42
+      statements_prompt_template: 'Briefly describe the following text: ''{statement}''
+
+
+        Reaction:'
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/joint_embeddings_all_llms/64ec6d8092d2122e41af751e6e12f86a.pkl
+  a8284e93235de538fb68ab4481756ca4:
+    config:
+      datasets:
+      - anthropic-model-written-evals
+      embedding_settings:
+        batch_size: 20
+        client: openai
+        embedding_model: text-embedding-ada-002
+        initial_sleep_time: 2
+        max_retries: 50
+        other_params: {}
+      model_settings:
+        models:
+        - - local
+          - HuggingFaceTB/SmolLM-135M-Instruct
+        - - local
+          - HuggingFaceTB/SmolLM-135M
+      n_statements: 100
+      random_state: 42
+      statements_prompt_template: 'Briefly describe the following text: ''{statement}''
+
+
+        Reaction:'
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/joint_embeddings_all_llms/a8284e93235de538fb68ab4481756ca4.pkl
+  d45bc566f5236353cccdbea6d82e4524:
+    config:
+      datasets:
+      - anthropic-model-written-evals
+      embedding_settings:
+        batch_size: 20
+        client: openai
+        embedding_model: text-embedding-ada-002
+        initial_sleep_time: 2
+        max_retries: 50
+        other_params: {}
+      model_settings:
+        models:
+        - - openai
+          - gpt-3.5-turbo
+      n_statements: 300
+      random_state: 42
+      statements_prompt_template: 'Briefly describe the following text: ''{statement}''
+
+
+        Reaction:'
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/joint_embeddings_all_llms/d45bc566f5236353cccdbea6d82e4524.pkl
+spectral_clustering:
+  0002df68cf48c812a13912494fd7567e:
+    config:
+      clustering_settings:
+        affinity: nearest_neighbors
+        all_clustering_algorithms:
+        - KMeans
+        - SpectralClustering
+        - AgglomerativeClustering
+        - OPTICS
+        linkage: ward
+        main_clustering_algorithm: KMeans
+        max_cluster_size: 10
+        max_clusters: 500
+        metric: euclidean
+        min_cluster_size: 2
+        min_clusters: 10
+        n_clusters: 200
+        n_clusters_ratio: 0.04
+        theme_identification_model_family: openai
+        theme_identification_model_name: gpt-4o-mini
+        theme_identification_prompt: 'Briefly list the common themes of the following
+          texts:'
+        theme_identification_system_message: ''
+        threshold: 0.5
+      datasets:
+      - anthropic-model-written-evals
+      embedding_settings:
+        batch_size: 20
+        client: openai
+        embedding_model: text-embedding-ada-002
+        initial_sleep_time: 2
+        max_retries: 50
+        other_params: {}
+      model_settings:
+        models:
+        - - openai
+          - gpt-4o-mini
+        - - openai
+          - gpt-4o
+        - - openai
+          - gpt-4-0613
+      n_statements: 5000
+      prompt_settings:
+        approval_prompt_template: 'Given the following statement, would you approve
+          of it? Please answer with either ''yes'' or ''no''.
+
+
+          Statement: {statement}
+
+
+          Approval (yes / no):'
+        awareness_task: evaluate text appropriateness
+        max_desc_length: 250
+        statements_prompt_template: 'Briefly describe the following text: ''{statement}''
+
+
+          Reaction:'
+        statements_system_message: You are an AI language model.
+      random_state: 42
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/spectral_clustering/0002df68cf48c812a13912494fd7567e.pkl
+  075f839a770cb77d24643129d0d1ef23:
+    config:
+      clustering_settings:
+        affinity: nearest_neighbors
+        all_clustering_algorithms:
+        - KMeans
+        - SpectralClustering
+        - AgglomerativeClustering
+        - OPTICS
+        linkage: ward
+        main_clustering_algorithm: KMeans
+        max_cluster_size: 10
+        max_clusters: 500
+        metric: euclidean
+        min_cluster_size: 2
+        min_clusters: 10
+        n_clusters: 12
+        n_clusters_ratio: 0.04
+        theme_identification_model_family: openai
+        theme_identification_model_name: gpt-3.5-turbo
+        theme_identification_prompt: 'Briefly list the common themes of the following
+          texts:'
+        theme_identification_system_message: ''
+        threshold: 0.5
+      datasets:
+      - anthropic-model-written-evals
+      embedding_settings:
+        batch_size: 20
+        client: openai
+        embedding_model: text-embedding-ada-002
+        initial_sleep_time: 2
+        max_retries: 50
+        other_params: {}
+      model_settings:
+        models:
+        - - openai
+          - gpt-3.5-turbo
+      n_statements: 300
+      prompt_settings:
+        approval_prompt_template: 'Given the following statement, would you approve
+          of it? Please answer with either ''yes'' or ''no''.
+
+
+          Statement: {statement}
+
+
+          Approval (yes / no):'
+        awareness_task: evaluate text appropriateness
+        max_desc_length: 250
+        statements_prompt_template: 'Briefly describe the following text: ''{statement}''
+
+
+          Reaction:'
+        statements_system_message: You are an AI language model.
+      random_state: 42
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/spectral_clustering/075f839a770cb77d24643129d0d1ef23.pkl
+  4419c998a08d2322b0818e1643eda434:
+    config:
+      clustering_settings:
+        affinity: nearest_neighbors
+        all_clustering_algorithms:
+        - KMeans
+        - SpectralClustering
+        - AgglomerativeClustering
+        - OPTICS
+        linkage: ward
+        main_clustering_algorithm: KMeans
+        max_cluster_size: 10
+        max_clusters: 500
+        metric: euclidean
+        min_cluster_size: 2
+        min_clusters: 10
+        n_clusters: 10
+        n_clusters_ratio: 0.04
+        theme_identification_model_family: openai
+        theme_identification_model_name: gpt-4o-2024-05-13
+        theme_identification_prompt: 'Briefly list the common themes of the following
+          texts:'
+        theme_identification_system_message: ''
+        threshold: 0.5
+      datasets:
+      - anthropic-model-written-evals
+      embedding_settings:
+        batch_size: 20
+        client: openai
+        embedding_model: text-embedding-ada-002
+        initial_sleep_time: 2
+        max_retries: 50
+        other_params: {}
+      model_settings:
+        models:
+        - - local
+          - HuggingFaceTB/SmolLM-135M-Instruct
+        - - local
+          - HuggingFaceTB/SmolLM-135M
+        temperature: 0.01
+      n_statements: 100
+      prompt_settings:
+        approval_prompt_template: 'Given the following statement, would you approve
+          of it? Please answer with either ''yes'' or ''no''.
+
+
+          Statement: {statement}
+
+
+          Approval (yes / no):'
+        awareness_task: evaluate text appropriateness
+        max_desc_length: 250
+        statements_prompt_template: 'Briefly describe the following text: ''{statement}''
+
+
+          Reaction:'
+        statements_system_message: You are an AI language model.
+      random_state: 42
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/spectral_clustering/4419c998a08d2322b0818e1643eda434.pkl
+  75b2ae48dbfce5500c20613ba7554f6a:
+    config:
+      clustering_settings:
+        affinity: nearest_neighbors
+        all_clustering_algorithms:
+        - KMeans
+        - SpectralClustering
+        - AgglomerativeClustering
+        - OPTICS
+        linkage: ward
+        main_clustering_algorithm: KMeans
+        max_cluster_size: 10
+        max_clusters: 500
+        metric: euclidean
+        min_cluster_size: 2
+        min_clusters: 10
+        n_clusters: 12
+        n_clusters_ratio: 0.04
+        theme_identification_model_family: openai
+        theme_identification_model_name: gpt-3.5-turbo
+        theme_identification_prompt: 'Briefly list the common themes of the following
+          texts:'
+        theme_identification_system_message: ''
+        threshold: 0.5
+      datasets:
+      - anthropic-model-written-evals
+      embedding_settings:
+        batch_size: 20
+        client: openai
+        embedding_model: text-embedding-ada-002
+        initial_sleep_time: 2
+        max_retries: 50
+        other_params: {}
+      model_settings:
+        models:
+        - - openai
+          - gpt-3.5-turbo
+      n_statements: 300
+      prompt_settings:
+        approval_prompt_template: 'Given the following statement, would you approve
+          of it? Please answer with either ''yes'' or ''no''.
+
+
+          Statement: {statement}
+
+
+          Approval (yes / no):'
+        awareness_task: analyze sentiment in social media posts
+        max_desc_length: 250
+        statements_prompt_template: 'Briefly describe the following text: ''{statement}''
+
+
+          Reaction:'
+        statements_system_message: You are an AI language model.
+      random_state: 42
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/spectral_clustering/75b2ae48dbfce5500c20613ba7554f6a.pkl
+  8a5003420c4afd12c4c7b3eb12187a78:
+    config:
+      clustering_settings:
+        affinity: nearest_neighbors
+        all_clustering_algorithms:
+        - KMeans
+        - SpectralClustering
+        - AgglomerativeClustering
+        - OPTICS
+        linkage: ward
+        main_clustering_algorithm: KMeans
+        max_cluster_size: 10
+        max_clusters: 500
+        metric: euclidean
+        min_cluster_size: 2
+        min_clusters: 10
+        n_clusters: 10
+        n_clusters_ratio: 0.04
+        theme_identification_model_family: openai
+        theme_identification_model_name: gpt-4o-2024-05-13
+        theme_identification_prompt: 'Briefly list the common themes of the following
+          texts:'
+        theme_identification_system_message: ''
+        threshold: 0.5
+      datasets:
+      - anthropic-model-written-evals
+      embedding_settings:
+        batch_size: 20
+        client: openai
+        embedding_model: text-embedding-ada-002
+        initial_sleep_time: 2
+        max_retries: 50
+        other_params: {}
+      model_settings:
+        models:
+        - - local
+          - HuggingFaceTB/SmolLM-135M-Instruct
+        - - local
+          - HuggingFaceTB/SmolLM-135M
+      n_statements: 100
+      prompt_settings:
+        approval_prompt_template: 'Given the following statement, would you approve
+          of it? Please answer with either ''yes'' or ''no''.
+
+
+          Statement: {statement}
+
+
+          Approval (yes / no):'
+        awareness_task: evaluate text appropriateness
+        max_desc_length: 250
+        statements_prompt_template: 'Briefly describe the following text: ''{statement}''
+
+
+          Reaction:'
+        statements_system_message: You are an AI language model.
+      random_state: 42
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/spectral_clustering/8a5003420c4afd12c4c7b3eb12187a78.pkl
+  b4b7f906fc48da52352b3aedb8f02e59:
+    config:
+      clustering_settings:
+        affinity: nearest_neighbors
+        all_clustering_algorithms:
+        - KMeans
+        - SpectralClustering
+        - AgglomerativeClustering
+        - OPTICS
+        linkage: ward
+        main_clustering_algorithm: KMeans
+        max_cluster_size: 10
+        max_clusters: 500
+        metric: euclidean
+        min_cluster_size: 2
+        min_clusters: 10
+        n_clusters: 10
+        n_clusters_ratio: 0.04
+        theme_identification_model_family: openai
+        theme_identification_model_name: gpt-4o-2024-05-13
+        theme_identification_prompt: 'Briefly list the common themes of the following
+          texts:'
+        theme_identification_system_message: ''
+        threshold: 0.5
+      datasets:
+      - anthropic-model-written-evals
+      embedding_settings:
+        batch_size: 20
+        client: openai
+        embedding_model: text-embedding-ada-002
+        initial_sleep_time: 2
+        max_retries: 50
+        other_params: {}
+      model_settings:
+        models:
+        - - local
+          - HuggingFaceTB/SmolLM-135M-Instruct
+      n_statements: 100
+      prompt_settings:
+        approval_prompt_template: 'Given the following statement, would you approve
+          of it? Please answer with either ''yes'' or ''no''.
+
+
+          Statement: {statement}
+
+
+          Approval (yes / no):'
+        awareness_task: evaluate text appropriateness
+        max_desc_length: 250
+        statements_prompt_template: 'Briefly describe the following text: ''{statement}''
+
+
+          Reaction:'
+        statements_system_message: You are an AI language model.
+      random_state: 42
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/spectral_clustering/b4b7f906fc48da52352b3aedb8f02e59.pkl
+  d235b64ac44584424721b9bf2aeedeec:
+    config:
+      clustering_settings:
+        affinity: nearest_neighbors
+        all_clustering_algorithms:
+        - KMeans
+        - SpectralClustering
+        - AgglomerativeClustering
+        - OPTICS
+        linkage: ward
+        main_clustering_algorithm: KMeans
+        max_cluster_size: 10
+        max_clusters: 500
+        metric: euclidean
+        min_cluster_size: 2
+        min_clusters: 10
+        n_clusters: 200
+        n_clusters_ratio: 0.04
+        theme_identification_model_family: openai
+        theme_identification_model_name: gpt-3.5-turbo
+        theme_identification_prompt: 'Briefly list the common themes of the following
+          texts:'
+        theme_identification_system_message: ''
+        threshold: 0.5
+      datasets:
+      - anthropic-model-written-evals
+      embedding_settings:
+        batch_size: 20
+        client: openai
+        embedding_model: text-embedding-ada-002
+        initial_sleep_time: 2
+        max_retries: 50
+        other_params: {}
+      model_settings:
+        models:
+        - - openai
+          - gpt-4o-mini
+        - - openai
+          - gpt-4o
+        - - openai
+          - gpt-4-0613
+      n_statements: 5000
+      prompt_settings:
+        approval_prompt_template: 'Given the following statement, would you approve
+          of it? Please answer with either ''yes'' or ''no''.
+
+
+          Statement: {statement}
+
+
+          Approval (yes / no):'
+        awareness_task: evaluate text appropriateness
+        max_desc_length: 250
+        statements_prompt_template: 'Briefly describe the following text: ''{statement}''
+
+
+          Reaction:'
+        statements_system_message: You are an AI language model.
+      random_state: 42
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/spectral_clustering/d235b64ac44584424721b9bf2aeedeec.pkl
+  ebd88c98165d791ff68558fd5ce05202:
+    config:
+      clustering_settings:
+        affinity: nearest_neighbors
+        all_clustering_algorithms:
+        - KMeans
+        - SpectralClustering
+        - AgglomerativeClustering
+        - OPTICS
+        linkage: ward
+        main_clustering_algorithm: KMeans
+        max_cluster_size: 10
+        max_clusters: 500
+        metric: euclidean
+        min_cluster_size: 2
+        min_clusters: 10
+        n_clusters: 12
+        n_clusters_ratio: 0.04
+        theme_identification_model_family: openai
+        theme_identification_model_name: gpt-4o-2024-05-13
+        theme_identification_prompt: 'Briefly list the common themes of the following
+          texts:'
+        theme_identification_system_message: ''
+        threshold: 0.5
+      datasets:
+      - anthropic-model-written-evals
+      embedding_settings:
+        batch_size: 20
+        client: openai
+        embedding_model: text-embedding-ada-002
+        initial_sleep_time: 2
+        max_retries: 50
+        other_params: {}
+      model_settings:
+        models:
+        - - openai
+          - gpt-4o-2024-05-13
+        - - anthropic
+          - claude-3-5-sonnet-20240620
+      n_statements: 300
+      prompt_settings:
+        approval_prompt_template: 'Given the following statement, would you approve
+          of it? Please answer with either ''yes'' or ''no''.
+
+
+          Statement: {statement}
+
+
+          Approval (yes / no):'
+        awareness_task: evaluate text appropriateness
+        max_desc_length: 250
+        statements_prompt_template: 'Briefly describe the following text: ''{statement}''
+
+
+          Reaction:'
+        statements_system_message: You are an AI language model.
+      random_state: 42
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/spectral_clustering/ebd88c98165d791ff68558fd5ce05202.pkl
+tsne_reduction:
+  0002df68cf48c812a13912494fd7567e:
+    config:
+      clustering_settings:
+        affinity: nearest_neighbors
+        all_clustering_algorithms:
+        - KMeans
+        - SpectralClustering
+        - AgglomerativeClustering
+        - OPTICS
+        linkage: ward
+        main_clustering_algorithm: KMeans
+        max_cluster_size: 10
+        max_clusters: 500
+        metric: euclidean
+        min_cluster_size: 2
+        min_clusters: 10
+        n_clusters: 200
+        n_clusters_ratio: 0.04
+        theme_identification_model_family: openai
+        theme_identification_model_name: gpt-4o-mini
+        theme_identification_prompt: 'Briefly list the common themes of the following
+          texts:'
+        theme_identification_system_message: ''
+        threshold: 0.5
+      datasets:
+      - anthropic-model-written-evals
+      embedding_settings:
+        batch_size: 20
+        client: openai
+        embedding_model: text-embedding-ada-002
+        initial_sleep_time: 2
+        max_retries: 50
+        other_params: {}
+      model_settings:
+        models:
+        - - openai
+          - gpt-4o-mini
+        - - openai
+          - gpt-4o
+        - - openai
+          - gpt-4-0613
+      n_statements: 5000
+      prompt_settings:
+        approval_prompt_template: 'Given the following statement, would you approve
+          of it? Please answer with either ''yes'' or ''no''.
+
+
+          Statement: {statement}
+
+
+          Approval (yes / no):'
+        awareness_task: evaluate text appropriateness
+        max_desc_length: 250
+        statements_prompt_template: 'Briefly describe the following text: ''{statement}''
+
+
+          Reaction:'
+        statements_system_message: You are an AI language model.
+      random_state: 42
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/tsne_reduction/0002df68cf48c812a13912494fd7567e.pkl
+  075f839a770cb77d24643129d0d1ef23:
+    config:
+      clustering_settings:
+        affinity: nearest_neighbors
+        all_clustering_algorithms:
+        - KMeans
+        - SpectralClustering
+        - AgglomerativeClustering
+        - OPTICS
+        linkage: ward
+        main_clustering_algorithm: KMeans
+        max_cluster_size: 10
+        max_clusters: 500
+        metric: euclidean
+        min_cluster_size: 2
+        min_clusters: 10
+        n_clusters: 12
+        n_clusters_ratio: 0.04
+        theme_identification_model_family: openai
+        theme_identification_model_name: gpt-3.5-turbo
+        theme_identification_prompt: 'Briefly list the common themes of the following
+          texts:'
+        theme_identification_system_message: ''
+        threshold: 0.5
+      datasets:
+      - anthropic-model-written-evals
+      embedding_settings:
+        batch_size: 20
+        client: openai
+        embedding_model: text-embedding-ada-002
+        initial_sleep_time: 2
+        max_retries: 50
+        other_params: {}
+      model_settings:
+        models:
+        - - openai
+          - gpt-3.5-turbo
+      n_statements: 300
+      prompt_settings:
+        approval_prompt_template: 'Given the following statement, would you approve
+          of it? Please answer with either ''yes'' or ''no''.
+
+
+          Statement: {statement}
+
+
+          Approval (yes / no):'
+        awareness_task: evaluate text appropriateness
+        max_desc_length: 250
+        statements_prompt_template: 'Briefly describe the following text: ''{statement}''
+
+
+          Reaction:'
+        statements_system_message: You are an AI language model.
+      random_state: 42
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/tsne_reduction/075f839a770cb77d24643129d0d1ef23.pkl
+  4419c998a08d2322b0818e1643eda434:
+    config:
+      clustering_settings:
+        affinity: nearest_neighbors
+        all_clustering_algorithms:
+        - KMeans
+        - SpectralClustering
+        - AgglomerativeClustering
+        - OPTICS
+        linkage: ward
+        main_clustering_algorithm: KMeans
+        max_cluster_size: 10
+        max_clusters: 500
+        metric: euclidean
+        min_cluster_size: 2
+        min_clusters: 10
+        n_clusters: 10
+        n_clusters_ratio: 0.04
+        theme_identification_model_family: openai
+        theme_identification_model_name: gpt-4o-2024-05-13
+        theme_identification_prompt: 'Briefly list the common themes of the following
+          texts:'
+        theme_identification_system_message: ''
+        threshold: 0.5
+      datasets:
+      - anthropic-model-written-evals
+      embedding_settings:
+        batch_size: 20
+        client: openai
+        embedding_model: text-embedding-ada-002
+        initial_sleep_time: 2
+        max_retries: 50
+        other_params: {}
+      model_settings:
+        models:
+        - - local
+          - HuggingFaceTB/SmolLM-135M-Instruct
+        - - local
+          - HuggingFaceTB/SmolLM-135M
+        temperature: 0.01
+      n_statements: 100
+      prompt_settings:
+        approval_prompt_template: 'Given the following statement, would you approve
+          of it? Please answer with either ''yes'' or ''no''.
+
+
+          Statement: {statement}
+
+
+          Approval (yes / no):'
+        awareness_task: evaluate text appropriateness
+        max_desc_length: 250
+        statements_prompt_template: 'Briefly describe the following text: ''{statement}''
+
+
+          Reaction:'
+        statements_system_message: You are an AI language model.
+      random_state: 42
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/tsne_reduction/4419c998a08d2322b0818e1643eda434.pkl
+  75b2ae48dbfce5500c20613ba7554f6a:
+    config:
+      clustering_settings:
+        affinity: nearest_neighbors
+        all_clustering_algorithms:
+        - KMeans
+        - SpectralClustering
+        - AgglomerativeClustering
+        - OPTICS
+        linkage: ward
+        main_clustering_algorithm: KMeans
+        max_cluster_size: 10
+        max_clusters: 500
+        metric: euclidean
+        min_cluster_size: 2
+        min_clusters: 10
+        n_clusters: 12
+        n_clusters_ratio: 0.04
+        theme_identification_model_family: openai
+        theme_identification_model_name: gpt-3.5-turbo
+        theme_identification_prompt: 'Briefly list the common themes of the following
+          texts:'
+        theme_identification_system_message: ''
+        threshold: 0.5
+      datasets:
+      - anthropic-model-written-evals
+      embedding_settings:
+        batch_size: 20
+        client: openai
+        embedding_model: text-embedding-ada-002
+        initial_sleep_time: 2
+        max_retries: 50
+        other_params: {}
+      model_settings:
+        models:
+        - - openai
+          - gpt-3.5-turbo
+      n_statements: 300
+      prompt_settings:
+        approval_prompt_template: 'Given the following statement, would you approve
+          of it? Please answer with either ''yes'' or ''no''.
+
+
+          Statement: {statement}
+
+
+          Approval (yes / no):'
+        awareness_task: analyze sentiment in social media posts
+        max_desc_length: 250
+        statements_prompt_template: 'Briefly describe the following text: ''{statement}''
+
+
+          Reaction:'
+        statements_system_message: You are an AI language model.
+      random_state: 42
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/tsne_reduction/75b2ae48dbfce5500c20613ba7554f6a.pkl
+  8a5003420c4afd12c4c7b3eb12187a78:
+    config:
+      clustering_settings:
+        affinity: nearest_neighbors
+        all_clustering_algorithms:
+        - KMeans
+        - SpectralClustering
+        - AgglomerativeClustering
+        - OPTICS
+        linkage: ward
+        main_clustering_algorithm: KMeans
+        max_cluster_size: 10
+        max_clusters: 500
+        metric: euclidean
+        min_cluster_size: 2
+        min_clusters: 10
+        n_clusters: 10
+        n_clusters_ratio: 0.04
+        theme_identification_model_family: openai
+        theme_identification_model_name: gpt-4o-2024-05-13
+        theme_identification_prompt: 'Briefly list the common themes of the following
+          texts:'
+        theme_identification_system_message: ''
+        threshold: 0.5
+      datasets:
+      - anthropic-model-written-evals
+      embedding_settings:
+        batch_size: 20
+        client: openai
+        embedding_model: text-embedding-ada-002
+        initial_sleep_time: 2
+        max_retries: 50
+        other_params: {}
+      model_settings:
+        models:
+        - - local
+          - HuggingFaceTB/SmolLM-135M-Instruct
+        - - local
+          - HuggingFaceTB/SmolLM-135M
+      n_statements: 100
+      prompt_settings:
+        approval_prompt_template: 'Given the following statement, would you approve
+          of it? Please answer with either ''yes'' or ''no''.
+
+
+          Statement: {statement}
+
+
+          Approval (yes / no):'
+        awareness_task: evaluate text appropriateness
+        max_desc_length: 250
+        statements_prompt_template: 'Briefly describe the following text: ''{statement}''
+
+
+          Reaction:'
+        statements_system_message: You are an AI language model.
+      random_state: 42
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/tsne_reduction/8a5003420c4afd12c4c7b3eb12187a78.pkl
+  b4b7f906fc48da52352b3aedb8f02e59:
+    config:
+      clustering_settings:
+        affinity: nearest_neighbors
+        all_clustering_algorithms:
+        - KMeans
+        - SpectralClustering
+        - AgglomerativeClustering
+        - OPTICS
+        linkage: ward
+        main_clustering_algorithm: KMeans
+        max_cluster_size: 10
+        max_clusters: 500
+        metric: euclidean
+        min_cluster_size: 2
+        min_clusters: 10
+        n_clusters: 10
+        n_clusters_ratio: 0.04
+        theme_identification_model_family: openai
+        theme_identification_model_name: gpt-4o-2024-05-13
+        theme_identification_prompt: 'Briefly list the common themes of the following
+          texts:'
+        theme_identification_system_message: ''
+        threshold: 0.5
+      datasets:
+      - anthropic-model-written-evals
+      embedding_settings:
+        batch_size: 20
+        client: openai
+        embedding_model: text-embedding-ada-002
+        initial_sleep_time: 2
+        max_retries: 50
+        other_params: {}
+      model_settings:
+        models:
+        - - local
+          - HuggingFaceTB/SmolLM-135M-Instruct
+      n_statements: 100
+      prompt_settings:
+        approval_prompt_template: 'Given the following statement, would you approve
+          of it? Please answer with either ''yes'' or ''no''.
+
+
+          Statement: {statement}
+
+
+          Approval (yes / no):'
+        awareness_task: evaluate text appropriateness
+        max_desc_length: 250
+        statements_prompt_template: 'Briefly describe the following text: ''{statement}''
+
+
+          Reaction:'
+        statements_system_message: You are an AI language model.
+      random_state: 42
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/tsne_reduction/b4b7f906fc48da52352b3aedb8f02e59.pkl
+  d235b64ac44584424721b9bf2aeedeec:
+    config:
+      clustering_settings:
+        affinity: nearest_neighbors
+        all_clustering_algorithms:
+        - KMeans
+        - SpectralClustering
+        - AgglomerativeClustering
+        - OPTICS
+        linkage: ward
+        main_clustering_algorithm: KMeans
+        max_cluster_size: 10
+        max_clusters: 500
+        metric: euclidean
+        min_cluster_size: 2
+        min_clusters: 10
+        n_clusters: 200
+        n_clusters_ratio: 0.04
+        theme_identification_model_family: openai
+        theme_identification_model_name: gpt-3.5-turbo
+        theme_identification_prompt: 'Briefly list the common themes of the following
+          texts:'
+        theme_identification_system_message: ''
+        threshold: 0.5
+      datasets:
+      - anthropic-model-written-evals
+      embedding_settings:
+        batch_size: 20
+        client: openai
+        embedding_model: text-embedding-ada-002
+        initial_sleep_time: 2
+        max_retries: 50
+        other_params: {}
+      model_settings:
+        models:
+        - - openai
+          - gpt-4o-mini
+        - - openai
+          - gpt-4o
+        - - openai
+          - gpt-4-0613
+      n_statements: 5000
+      prompt_settings:
+        approval_prompt_template: 'Given the following statement, would you approve
+          of it? Please answer with either ''yes'' or ''no''.
+
+
+          Statement: {statement}
+
+
+          Approval (yes / no):'
+        awareness_task: evaluate text appropriateness
+        max_desc_length: 250
+        statements_prompt_template: 'Briefly describe the following text: ''{statement}''
+
+
+          Reaction:'
+        statements_system_message: You are an AI language model.
+      random_state: 42
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/tsne_reduction/d235b64ac44584424721b9bf2aeedeec.pkl
+  ebd88c98165d791ff68558fd5ce05202:
+    config:
+      clustering_settings:
+        affinity: nearest_neighbors
+        all_clustering_algorithms:
+        - KMeans
+        - SpectralClustering
+        - AgglomerativeClustering
+        - OPTICS
+        linkage: ward
+        main_clustering_algorithm: KMeans
+        max_cluster_size: 10
+        max_clusters: 500
+        metric: euclidean
+        min_cluster_size: 2
+        min_clusters: 10
+        n_clusters: 12
+        n_clusters_ratio: 0.04
+        theme_identification_model_family: openai
+        theme_identification_model_name: gpt-4o-2024-05-13
+        theme_identification_prompt: 'Briefly list the common themes of the following
+          texts:'
+        theme_identification_system_message: ''
+        threshold: 0.5
+      datasets:
+      - anthropic-model-written-evals
+      embedding_settings:
+        batch_size: 20
+        client: openai
+        embedding_model: text-embedding-ada-002
+        initial_sleep_time: 2
+        max_retries: 50
+        other_params: {}
+      model_settings:
+        models:
+        - - openai
+          - gpt-4o-2024-05-13
+        - - anthropic
+          - claude-3-5-sonnet-20240620
+      n_statements: 300
+      prompt_settings:
+        approval_prompt_template: 'Given the following statement, would you approve
+          of it? Please answer with either ''yes'' or ''no''.
+
+
+          Statement: {statement}
+
+
+          Approval (yes / no):'
+        awareness_task: evaluate text appropriateness
+        max_desc_length: 250
+        statements_prompt_template: 'Briefly describe the following text: ''{statement}''
+
+
+          Reaction:'
+        statements_system_message: You are an AI language model.
+      random_state: 42
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/tsne_reduction/ebd88c98165d791ff68558fd5ce05202.pkl
+tsne_reduction_approvals_awareness:
+  4419c998a08d2322b0818e1643eda434:
+    config:
+      clustering_settings:
+        affinity: nearest_neighbors
+        all_clustering_algorithms:
+        - KMeans
+        - SpectralClustering
+        - AgglomerativeClustering
+        - OPTICS
+        linkage: ward
+        main_clustering_algorithm: KMeans
+        max_cluster_size: 10
+        max_clusters: 500
+        metric: euclidean
+        min_cluster_size: 2
+        min_clusters: 10
+        n_clusters: 10
+        n_clusters_ratio: 0.04
+        theme_identification_model_family: openai
+        theme_identification_model_name: gpt-4o-2024-05-13
+        theme_identification_prompt: 'Briefly list the common themes of the following
+          texts:'
+        theme_identification_system_message: ''
+        threshold: 0.5
+      datasets:
+      - anthropic-model-written-evals
+      embedding_settings:
+        batch_size: 20
+        client: openai
+        embedding_model: text-embedding-ada-002
+        initial_sleep_time: 2
+        max_retries: 50
+        other_params: {}
+      model_settings:
+        models:
+        - - local
+          - HuggingFaceTB/SmolLM-135M-Instruct
+        - - local
+          - HuggingFaceTB/SmolLM-135M
+        temperature: 0.01
+      n_statements: 100
+      prompt_settings:
+        approval_prompt_template: 'Given the following statement, would you approve
+          of it? Please answer with either ''yes'' or ''no''.
+
+
+          Statement: {statement}
+
+
+          Approval (yes / no):'
+        awareness_task: evaluate text appropriateness
+        max_desc_length: 250
+        statements_prompt_template: 'Briefly describe the following text: ''{statement}''
+
+
+          Reaction:'
+        statements_system_message: You are an AI language model.
+      random_state: 42
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/tsne_reduction_approvals_awareness/4419c998a08d2322b0818e1643eda434.pkl
+  ebd88c98165d791ff68558fd5ce05202:
+    config:
+      clustering_settings:
+        affinity: nearest_neighbors
+        all_clustering_algorithms:
+        - KMeans
+        - SpectralClustering
+        - AgglomerativeClustering
+        - OPTICS
+        linkage: ward
+        main_clustering_algorithm: KMeans
+        max_cluster_size: 10
+        max_clusters: 500
+        metric: euclidean
+        min_cluster_size: 2
+        min_clusters: 10
+        n_clusters: 12
+        n_clusters_ratio: 0.04
+        theme_identification_model_family: openai
+        theme_identification_model_name: gpt-4o-2024-05-13
+        theme_identification_prompt: 'Briefly list the common themes of the following
+          texts:'
+        theme_identification_system_message: ''
+        threshold: 0.5
+      datasets:
+      - anthropic-model-written-evals
+      embedding_settings:
+        batch_size: 20
+        client: openai
+        embedding_model: text-embedding-ada-002
+        initial_sleep_time: 2
+        max_retries: 50
+        other_params: {}
+      model_settings:
+        models:
+        - - openai
+          - gpt-4o-2024-05-13
+        - - anthropic
+          - claude-3-5-sonnet-20240620
+      n_statements: 300
+      prompt_settings:
+        approval_prompt_template: 'Given the following statement, would you approve
+          of it? Please answer with either ''yes'' or ''no''.
+
+
+          Statement: {statement}
+
+
+          Approval (yes / no):'
+        awareness_task: evaluate text appropriateness
+        max_desc_length: 250
+        statements_prompt_template: 'Briefly describe the following text: ''{statement}''
+
+
+          Reaction:'
+        statements_system_message: You are an AI language model.
+      random_state: 42
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/tsne_reduction_approvals_awareness/ebd88c98165d791ff68558fd5ce05202.pkl
+tsne_reduction_approvals_personas:
+  4419c998a08d2322b0818e1643eda434:
+    config:
+      clustering_settings:
+        affinity: nearest_neighbors
+        all_clustering_algorithms:
+        - KMeans
+        - SpectralClustering
+        - AgglomerativeClustering
+        - OPTICS
+        linkage: ward
+        main_clustering_algorithm: KMeans
+        max_cluster_size: 10
+        max_clusters: 500
+        metric: euclidean
+        min_cluster_size: 2
+        min_clusters: 10
+        n_clusters: 10
+        n_clusters_ratio: 0.04
+        theme_identification_model_family: openai
+        theme_identification_model_name: gpt-4o-2024-05-13
+        theme_identification_prompt: 'Briefly list the common themes of the following
+          texts:'
+        theme_identification_system_message: ''
+        threshold: 0.5
+      datasets:
+      - anthropic-model-written-evals
+      embedding_settings:
+        batch_size: 20
+        client: openai
+        embedding_model: text-embedding-ada-002
+        initial_sleep_time: 2
+        max_retries: 50
+        other_params: {}
+      model_settings:
+        models:
+        - - local
+          - HuggingFaceTB/SmolLM-135M-Instruct
+        - - local
+          - HuggingFaceTB/SmolLM-135M
+        temperature: 0.01
+      n_statements: 100
+      prompt_settings:
+        approval_prompt_template: 'Given the following statement, would you approve
+          of it? Please answer with either ''yes'' or ''no''.
+
+
+          Statement: {statement}
+
+
+          Approval (yes / no):'
+        awareness_task: evaluate text appropriateness
+        max_desc_length: 250
+        statements_prompt_template: 'Briefly describe the following text: ''{statement}''
+
+
+          Reaction:'
+        statements_system_message: You are an AI language model.
+      random_state: 42
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/tsne_reduction_approvals_personas/4419c998a08d2322b0818e1643eda434.pkl
+  ebd88c98165d791ff68558fd5ce05202:
+    config:
+      clustering_settings:
+        affinity: nearest_neighbors
+        all_clustering_algorithms:
+        - KMeans
+        - SpectralClustering
+        - AgglomerativeClustering
+        - OPTICS
+        linkage: ward
+        main_clustering_algorithm: KMeans
+        max_cluster_size: 10
+        max_clusters: 500
+        metric: euclidean
+        min_cluster_size: 2
+        min_clusters: 10
+        n_clusters: 12
+        n_clusters_ratio: 0.04
+        theme_identification_model_family: openai
+        theme_identification_model_name: gpt-4o-2024-05-13
+        theme_identification_prompt: 'Briefly list the common themes of the following
+          texts:'
+        theme_identification_system_message: ''
+        threshold: 0.5
+      datasets:
+      - anthropic-model-written-evals
+      embedding_settings:
+        batch_size: 20
+        client: openai
+        embedding_model: text-embedding-ada-002
+        initial_sleep_time: 2
+        max_retries: 50
+        other_params: {}
+      model_settings:
+        models:
+        - - openai
+          - gpt-4o-2024-05-13
+        - - anthropic
+          - claude-3-5-sonnet-20240620
+      n_statements: 300
+      prompt_settings:
+        approval_prompt_template: 'Given the following statement, would you approve
+          of it? Please answer with either ''yes'' or ''no''.
+
+
+          Statement: {statement}
+
+
+          Approval (yes / no):'
+        awareness_task: evaluate text appropriateness
+        max_desc_length: 250
+        statements_prompt_template: 'Briefly describe the following text: ''{statement}''
+
+
+          Reaction:'
+        statements_system_message: You are an AI language model.
+      random_state: 42
+    file_path: /Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/saved_data/tsne_reduction_approvals_personas/ebd88c98165d791ff68558fd5ce05202.pkl
