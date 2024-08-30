@@ -3,9 +3,14 @@ import pandas as pd
 from pathlib import Path
 from typing import List
 
-def list_table_files(directory: Path) -> List[str]:
-    """List all CSV files in the given directory."""
-    return [f.name for f in directory.glob('*.csv')]
+def list_table_files(data_accessor):
+    """List all CSV files in the saved_data directory."""
+    csv_files = []
+    for run_id in data_accessor.run_metadata.keys():
+        for data_type in data_accessor.run_metadata[run_id]["data_file_ids"].keys():
+            if data_type.endswith("_table"):
+                csv_files.append(f"{run_id}_{data_type}")
+    return csv_files
 
 def load_table(file_path: Path) -> pd.DataFrame:
     """Load a CSV file into a pandas DataFrame."""
