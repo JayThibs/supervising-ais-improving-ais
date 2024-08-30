@@ -42,7 +42,7 @@ class ModelEvaluationManager:
             "model_name": model,
             "system_message": system_message
         }
-        model_instance = initialize_model(model_info, temperature=0, max_tokens=5)
+        model_instance = initialize_model(model_info, temperature=self.settings.model_settings.temperature, max_tokens=5)
 
         r = model_instance.generate(prompt=prompt).lower()
 

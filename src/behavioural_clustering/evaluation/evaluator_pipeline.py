@@ -282,13 +282,17 @@ class EvaluatorPipeline:
 
         clusters_desc_table = [header_labels]
         
-        self.cluster_analyzer.cluster_approval_stats(
+        csv_file_path = self.cluster_analyzer.cluster_approval_stats(
             self.approvals_data[prompt_type],
             np.array(embeddings),  # Convert back to numpy array for clustering
             self.model_eval_manager.model_info_list,
             {prompt_type: self.approval_prompts[prompt_type]},
             clusters_desc_table
         )
+
+        # Save the CSV file path in the metadata
+        metadata_config[f"cluster_table_csv_{prompt_type}"] = str(csv_file_path)
+
         self.visualize_approvals(prompt_type, metadata_config)
 
     def run_hierarchical_clustering(self, metadata_config: Dict[str, Any]) -> None:
@@ -397,7 +401,7 @@ class EvaluatorPipeline:
         self.viz.plot_embedding_responses(
             dim_reduce_tsne, 
             self.joint_embeddings_all_llms, 
-            self.model_names, 
+            self.model_names,  # Pass all model names
             self.generate_plot_filename(self.model_names, "tsne_embedding_responses"),
             show_plot=not self.run_settings.plot_settings.hide_model_comparison
         )
@@ -461,18 +465,22 @@ class EvaluatorPipeline:
         # Add number of statements to the filename
         n_statements = self.run_settings.data_settings.n_statements
         
-        # Generate the new filename
-        filename = f"{self.run_settings.directory_settings.viz_dir}/" + "-".join(model_names) + f"-{plot_type}-{n_statements}_statements.png"
+        # Generate the new filename with all model names, replacing "/" with "_"
+        model_names_str = "-".join([name.replace("/", "_") for name in model_names])
+        filename = f"{model_names_str}-{plot_type}-{n_statements}_statements.png"
+        
+        # Construct the full path
+        full_path = self.run_settings.directory_settings.viz_dir / filename
         
         # Check if the file already exists
-        if os.path.exists(filename):
+        if full_path.exists():
             # If it does, rename the existing file with a timestamp
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            new_filename = filename.replace(".png", f"_{timestamp}.png")
-            os.rename(filename, new_filename)
+            new_filename = full_path.with_name(f"{full_path.stem}_{timestamp}{full_path.suffix}")
+            full_path.rename(new_filename)
             print(f"Existing file renamed to: {new_filename}")
         
-        return filename
+        return str(full_path)
 
     def save_run_data(self) -> None:
         """
@@ -530,5 +538,15 @@ class EvaluatorPipeline:
 
     def save_run_metadata(self, metadata: Dict[str, Any]):
         self.run_metadata[self.run_id] = metadata
+        
+        # Add CSV file paths to run metadata
+        csv_files = {}
+        for key, value in metadata.items():
+            if key.startswith('cluster_table_csv_'):
+                csv_files[key] = value
+        
+        if csv_files:
+            self.run_metadata[self.run_id]['cluster_table_csv_files'] = csv_files
+
         with open(self.run_metadata_file, 'w') as f:
             yaml.dump(self.run_metadata, f, default_flow_style=False)

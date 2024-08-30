@@ -16,6 +16,7 @@ from scipy.cluster.hierarchy import linkage
 import logging
 from behavioural_clustering.models.model_factory import initialize_model
 from behavioural_clustering.config.run_settings import RunSettings
+from datetime import datetime
 
 logging.basicConfig(
     level=logging.INFO,
@@ -104,7 +105,7 @@ class ClusterAnalyzer:
         prompt_dict: Dict,
         clusters_desc_table: List[List[str]],
         reuse_cluster_rows: bool = False,
-    ) -> None:
+    ) -> str:
         
         prompt_approver_type = list(prompt_dict.keys())[0]
         prompt_labels = list(prompt_dict[prompt_approver_type].keys())
@@ -124,9 +125,9 @@ class ClusterAnalyzer:
             if isinstance(embeddings, list):
                 embeddings = np.array(embeddings)
 
-            for response_type in response_types:
-                for model_info in model_info_list:
-                    model_name = model_info['model_name']
+            for model_info in model_info_list:
+                model_name = model_info['model_name']
+                for response_type in response_types:
                     for i in range(len(prompt_labels)):
                         for j in range(i + 1, len(prompt_labels)):
                             print(f"{model_name}: {prompt_labels[i]} vs {prompt_labels[j]}")
@@ -134,8 +135,10 @@ class ClusterAnalyzer:
                                 approvals_statements_and_embeddings,
                                 [prompt_labels[i], prompt_labels[j]],
                                 response_type,
+                                model_name
                             )
                 logger.info("\n")
+
             logger.info("Calculating rows...")
             clustering_result = self.clustering.cluster_embeddings(embeddings, n_clusters=self.settings.clustering_settings.n_clusters)
             rows = self.compile_cluster_table(
@@ -159,10 +162,12 @@ class ClusterAnalyzer:
         header_labels.append("Inputs Themes")
         
         clusters_desc_table = [header_labels]
-        self.create_cluster_table(
+        csv_file_path = self.create_cluster_table(
             clusters_desc_table, rows, table_pickle_path, prompt_approver_type
         )
-      
+
+        return csv_file_path  # Return the CSV file path
+
     def get_cluster_approval_stats(self, approvals_statements_and_embeddings, approvals_prompts_dict, cluster_labels, cluster_ID, model_name):
         inputs = []
         cluster_size = 0
@@ -189,7 +194,7 @@ class ClusterAnalyzer:
         rows: List[List[str]],
         table_pickle_path: str,
         prompt_approver_type: str
-    ) -> None:
+    ) -> str:
         # Ensure that the number of columns in rows matches clusters_desc_table
         if len(clusters_desc_table[0]) != len(rows[0]):
             # Adjust the number of columns in rows to match clusters_desc_table
@@ -209,6 +214,8 @@ class ClusterAnalyzer:
             writer = csv.writer(file)
             writer.writerows(clusters_desc_table)
         logger.info(f"Table also saved in CSV format at {csv_file_path}")
+
+        return csv_file_path  # Return the CSV file path
 
     @staticmethod
     def lookup_response_type_int(response_type: str) -> Optional[int]:
@@ -233,7 +240,8 @@ class ClusterAnalyzer:
         self,
         approvals_statements_and_embeddings: List,
         persona_names: List[str],
-        response_type: str
+        response_type: str,
+        model_name: str
     ) -> None:
         """
         Compare the responses across multiple models or conditions for a specific response type.
@@ -247,50 +255,53 @@ class ClusterAnalyzer:
             persona_names (List[str]): Names of the models/conditions to compare.
                 ex: ["Google Chat", "Bing Chat"]
             response_type (str): Type of response to analyze (e.g., "approve", "disapprove").
+            model_name (str): Name of the model being analyzed.
 
         Returns:
             None: Results are logged rather than returned.
         """
-        # Convert response type to integer representation
-        # For ex: "approve" -> 1, "disapprove" -> 0, "no response" -> -1
         response_type_int = self.lookup_response_type_int(response_type)
         if response_type_int is None:
-            # Error handling for invalid response type
-            raise ValueError(f"Invalid response type: {response_type}. Please use 'approve', 'disapprove', or 'no response'. Or, create a custom function to handle this.")
+            raise ValueError(f"Invalid response type: {response_type}. Please use 'approve', 'disapprove', or 'no response'.")
 
-        # Create boolean masks for responses of each model/condition
         masks = [
             np.array([
-                list(e['approvals'].values())[0][persona_name] == response_type_int 
+                e['approvals'][model_name][persona_name] == response_type_int 
                 for e in approvals_statements_and_embeddings
             ]) 
             for persona_name in persona_names
         ]
 
-        # Log the number of responses for each model/condition
+        # Log the number of responses for each prompt
         for name, mask in zip(persona_names, masks):
-            logger.info(f'{name} "{response_type}" responses: {sum(mask)}')
+            logger.info(f'{model_name} - {name} "{response_type}" responses: {sum(mask)}')
 
-        # Create and log a confusion matrix and Pearson correlation for each pair of models
-        for name1, name2 in combinations(persona_names, 2):
-            i = persona_names.index(name1)
-            j = persona_names.index(name2)
-            
-            logger.info(f'Intersection matrix for {name1} and {name2} "{response_type}" responses:')
-            conf_matrix = sklearn.metrics.confusion_matrix(masks[i], masks[j])
-            conf_rows = [
-                ["", f"Not In {name1}", f"In {name1}"],
-                [f"Not In {name2}", conf_matrix[0][0], conf_matrix[1][0]],
-                [f"In {name2}", conf_matrix[0][1], conf_matrix[1][1]]
-            ]
-            t = AsciiTable(conf_rows)
-            t.inner_row_border = True
-            logger.info(t.table)
+        # Create and log a confusion matrix and Pearson correlation
+        name1, name2 = persona_names
+        logger.info(f'Intersection matrix for {model_name} - {name1} and {name2} "{response_type}" responses:')
+        conf_matrix = sklearn.metrics.confusion_matrix(masks[0], masks[1])
+        
+        # Ensure the confusion matrix is 2x2
+        if conf_matrix.shape == (1, 2):
+            conf_matrix = np.vstack([conf_matrix, [0, 0]])
+        elif conf_matrix.shape == (2, 1):
+            conf_matrix = np.hstack([conf_matrix, [[0], [0]]])
+        elif conf_matrix.shape == (1, 1):
+            conf_matrix = np.array([[conf_matrix[0, 0], 0], [0, 0]])
+        
+        conf_rows = [
+            ["", f"Not In {name1}", f"In {name1}"],
+            [f"Not In {name2}", conf_matrix[0][0], conf_matrix[1][0]],
+            [f"In {name2}", conf_matrix[0][1], conf_matrix[1][1]]
+        ]
+        t = AsciiTable(conf_rows)
+        t.inner_row_border = True
+        logger.info(t.table)
 
-            # Calculate and log Pearson correlation
-            pearson_r = scipy.stats.pearsonr(masks[i], masks[j])
-            logger.info(f'Pearson correlation between "{response_type}" responses for {name1} and {name2}: {round(pearson_r.correlation, 5)}')
-            logger.info(f"(P-value {round(pearson_r.pvalue, 5)})")
+        # Calculate and log Pearson correlation
+        pearson_r = scipy.stats.pearsonr(masks[0], masks[1])
+        logger.info(f'Pearson correlation between "{response_type}" responses for {model_name} - {name1} and {name2}: {round(pearson_r.correlation, 5)}')
+        logger.info(f"(P-value {round(pearson_r.pvalue, 5)})")
 
     def calculate_hierarchical_cluster_data(
         self,
@@ -519,10 +530,9 @@ class ClusterAnalyzer:
     def display_statement_themes(self, chosen_clustering, rows, model_info_list):
         print(f"Chosen clustering: {chosen_clustering}")
         print(f"Rows: {rows}")
+        
         # Create a table and save it in a readable format (CSV) for easy visualization in VSCode
-        model_columns = [
-            model_info["model_name"] for model_info in model_info_list
-        ]  # Extract model names from model_info_list
+        model_columns = [model_info["model_name"] for model_info in model_info_list]
         table_headers = (
             [
                 "ID",  # cluster ID
@@ -535,14 +545,25 @@ class ClusterAnalyzer:
                 "Interaction Themes",  # LLM says the theme of the input and response together
             ]
         )
-        csv_file_path = (
-            self.settings.directory_settings.tables_dir
-            / "cluster_results_table_statement_responses.csv"
-        )
+
+        # Generate a unique filename based on run parameters
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        model_names_str = "-".join([model_info["model_name"].replace("/", "_") for model_info in model_info_list])
+        n_clusters = self.settings.clustering_settings.n_clusters
+        n_statements = self.settings.data_settings.n_statements
+        clustering_algorithm = self.settings.clustering_settings.main_clustering_algorithm
+
+        filename = f"cluster_results_table_statement_responses_{model_names_str}_{n_clusters}clusters_{n_statements}statements_{clustering_algorithm}_{timestamp}.csv"
+
+        # Ensure we're using the correct path and the filename doesn't contain any directory separators
+        csv_file_path = self.settings.directory_settings.tables_dir / filename.replace("/", "_")
+
         with open(csv_file_path, mode="w", newline="", encoding="utf-8") as file:
             writer = csv.writer(file)
             writer.writerow(table_headers)
             writer.writerows(rows)
+
+        print(f"Cluster results table saved to: {csv_file_path}")
 
         # Display the table in the console
         t = PrettyTable()

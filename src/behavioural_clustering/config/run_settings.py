@@ -73,6 +73,7 @@ class DataSettings:
 
 @dataclass
 class ModelSettings:
+    temperature: float = 0.01
     models: List[Tuple[str, str]] = field(
         default_factory=lambda: [("openai", "gpt-3.5-turbo")]
     )

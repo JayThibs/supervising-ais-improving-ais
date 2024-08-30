@@ -7,7 +7,7 @@ from tenacity import retry, wait_random_exponential, stop_after_attempt
 load_dotenv()
 
 class OpenAIModel:
-    def __init__(self, model, system_message, temperature=0.1, max_tokens=150):
+    def __init__(self, model, system_message, temperature=0.01, max_tokens=150):
         self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens
@@ -40,7 +40,7 @@ class OpenAIModel:
 
 
 class AnthropicModel:
-    def __init__(self, model, system_message, temperature=0.1, max_tokens=150):
+    def __init__(self, model, system_message, temperature=0.01, max_tokens=150):
         self.model = model
         self.system_message = system_message
         self.temperature = temperature

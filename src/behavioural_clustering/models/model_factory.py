@@ -1,6 +1,6 @@
 from .local_models import LocalModel
 
-def initialize_model(model_info, temperature=0.1, max_tokens=150):
+def initialize_model(model_info, temperature=0.01, max_tokens=150):
     model_family = model_info["model_family"]
     model_name = model_info["model_name"]
     system_message = model_info.get("system_message", "")

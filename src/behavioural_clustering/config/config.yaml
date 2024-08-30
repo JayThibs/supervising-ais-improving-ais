@@ -59,8 +59,8 @@ full_run:
   name: full_run
   model_settings:
     models:
-      - [openai, gpt-4o-mini]
-      - [openai, gpt-4o]
+      - [openai, gpt-4-mini]
+      - [openai, gpt-4]
       - [openai, gpt-4-0613]
   data_settings:
     datasets:
@@ -104,3 +104,22 @@ gpt3_reuse:
     reuse_data:
       - all
     new_generation: false
+
+local_model_run:
+  name: local_model_run
+  model_settings:
+    models:
+      - [local, HuggingFaceTB/SmolLM-135M-Instruct]
+      - [local, HuggingFaceTB/SmolLM-135M]
+  data_settings:
+    datasets:
+      - anthropic-model-written-evals
+    n_statements: 100
+    reuse_data:
+      - all
+    new_generation: false
+  plot_settings:
+    hide_plots:
+      - all
+  prompt_settings:
+    awareness_task: "evaluate text appropriateness"
