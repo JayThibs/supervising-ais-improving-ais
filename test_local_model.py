@@ -1,8 +1,40 @@
+import sys
 import os
+
+# Add the project root directory to the Python path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import argparse
+import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from behavioural_clustering.models.local_models import LocalModel
 from behavioural_clustering.utils.resource_management import ResourceManager
+from dotenv import load_dotenv
+
+# Print current working directory and Python path
+print("Current working directory:", os.getcwd())
+print("Python path:", sys.path)
+
+# Set the project root to the current directory
+project_root = os.getcwd()
+sys.path.append(project_root)
+print("Added to Python path:", project_root)
+
+# Print contents of the src directory
+src_dir = os.path.join(project_root, "src")
+print("Contents of src directory:", os.listdir(src_dir))
+
+# Attempt to import and print the result
+try:
+    from src.contrastive_decoding.contrastive_decoding import ContrastiveDecoder
+    print("Import successful")
+except ImportError as e:
+    print("Import failed:", str(e))
+
+load_dotenv()
+
+# Now you can access the token like this:
+hf_token = os.getenv("HUGGING_FACE_TOKEN")
 
 def download_model(model_name):
     print(f"Downloading {model_name}...")
@@ -10,7 +42,8 @@ def download_model(model_name):
     AutoModelForCausalLM.from_pretrained(model_name)
     print(f"{model_name} downloaded successfully.")
 
-def test_local_model(test_both=False):
+def test_local_model(test_both=False, use_contrastive_decoding=False):
+    model_names = ["google/gemma-2b-it", "google/gemma-2-2b-it"]
     model_names = [
         "HuggingFaceTB/SmolLM-135M-Instruct",
         "HuggingFaceTB/SmolLM-135M"
@@ -57,9 +90,28 @@ def test_local_model(test_both=False):
         print(f"Prompt: {prompt}")
         print(f"Generated text: {generated_text}")
 
+    if use_contrastive_decoding and len(local_models) == 2:
+        print("\nTesting Contrastive Decoding:")
+        cd = ContrastiveDecoder(
+            model=local_models[0].model,
+            comparison_model=local_models[1].model,
+            tokenizer=local_models[0].tokenizer,
+            device=device,
+            generation_length=50,
+            generations_per_prefix=1,
+            starting_model_weight=1,
+            comparison_model_weight=-1,
+            single_prefix=prompt,
+            return_divergences=True
+        )
+        result = cd.decode()
+        print(f"Contrastive Decoding result: {result['texts'][0]}")
+        print(f"Divergence: {result['divergences'][0]}")
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Test local model(s)")
     parser.add_argument("--test-both", action="store_true", help="Test both models instead of just one")
+    parser.add_argument("--use-contrastive-decoding", action="store_true", help="Use contrastive decoding")
     args = parser.parse_args()
 
-    test_local_model(test_both=args.test_both)
+    test_local_model(test_both=args.test_both, use_contrastive_decoding=args.use_contrastive_decoding)
