@@ -8,7 +8,6 @@ import argparse
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from behavioural_clustering.models.local_models import LocalModel
-from behavioural_clustering.utils.resource_management import ResourceManager
 from dotenv import load_dotenv
 
 # Print current working directory and Python path
@@ -59,11 +58,6 @@ def test_local_model(test_both=False, use_contrastive_decoding=False):
 
     # Initialize and load the models
     local_models = [LocalModel(model_name) for model_name in model_names]
-
-    # Check if there's enough space for the model(s)
-    resource_manager = ResourceManager()
-    device = resource_manager.get_available_devices()[0]  # Get the first available device
-    total_memory = resource_manager.get_device_memory(device)
     
     model_memory_requirements = {
         model.model_name_or_path: model.get_memory_footprint() 
@@ -72,13 +66,7 @@ def test_local_model(test_both=False, use_contrastive_decoding=False):
     
     total_required_memory = sum(model_memory_requirements.values())
     
-    print(f"Total available memory on {device}: {total_memory / 1e9:.2f} GB")
     print(f"Total required memory for model(s): {total_required_memory / 1e9:.2f} GB")
-    
-    if total_required_memory <= total_memory:
-        print("There is enough space to fit the model(s).")
-    else:
-        print("There is not enough space to fit the model(s) simultaneously.")
 
     # Test generation with the model(s)
     prompt = "Write a short story about a robot learning to paint:"
@@ -96,7 +84,7 @@ def test_local_model(test_both=False, use_contrastive_decoding=False):
             model=local_models[0].model,
             comparison_model=local_models[1].model,
             tokenizer=local_models[0].tokenizer,
-            device=device,
+            device="auto",
             generation_length=50,
             generations_per_prefix=1,
             starting_model_weight=1,
