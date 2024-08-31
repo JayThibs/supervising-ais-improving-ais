@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 import csv
 import random
 import time
@@ -162,11 +163,24 @@ class ClusterAnalyzer:
         header_labels.append("Inputs Themes")
         
         clusters_desc_table = [header_labels]
-        csv_file_path = self.create_cluster_table(
-            clusters_desc_table, rows, table_pickle_path, prompt_approver_type
+
+        # Generate a unique filename based on run parameters
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        model_names_str = "-".join([model_info["model_name"].replace("/", "_") for model_info in model_info_list])
+        n_clusters = self.settings.clustering_settings.n_clusters
+        n_statements = self.settings.data_settings.n_statements
+        clustering_algorithm = self.settings.clustering_settings.main_clustering_algorithm
+
+        filename = f"cluster_results_table_{prompt_approver_type}_{model_names_str}_{n_clusters}clusters_{n_statements}statements_{clustering_algorithm}_{timestamp}.csv"
+
+        # Ensure we're using the correct path and the filename doesn't contain any directory separators
+        csv_file_path = self.settings.directory_settings.tables_dir / filename.replace("/", "_")
+
+        self.create_cluster_table(
+            clusters_desc_table, rows, table_pickle_path, csv_file_path
         )
 
-        return csv_file_path  # Return the CSV file path
+        return str(csv_file_path)  # Return the CSV file path as a string
 
     def get_cluster_approval_stats(self, approvals_statements_and_embeddings, approvals_prompts_dict, cluster_labels, cluster_ID, model_name):
         inputs = []
@@ -193,8 +207,8 @@ class ClusterAnalyzer:
         clusters_desc_table: List[List[str]],
         rows: List[List[str]],
         table_pickle_path: str,
-        prompt_approver_type: str
-    ) -> str:
+        csv_file_path: Path
+    ) -> None:
         # Ensure that the number of columns in rows matches clusters_desc_table
         if len(clusters_desc_table[0]) != len(rows[0]):
             # Adjust the number of columns in rows to match clusters_desc_table
@@ -209,13 +223,10 @@ class ClusterAnalyzer:
         with open(table_pickle_path, "wb") as file:
             pickle.dump(clusters_desc_table, file)
 
-        csv_file_path = os.path.join(self.settings.directory_settings.tables_dir, f"cluster_results_table_{prompt_approver_type}.csv")
         with open(csv_file_path, mode="w", newline="", encoding="utf-8") as file:
             writer = csv.writer(file)
             writer.writerows(clusters_desc_table)
         logger.info(f"Table also saved in CSV format at {csv_file_path}")
-
-        return csv_file_path  # Return the CSV file path
 
     @staticmethod
     def lookup_response_type_int(response_type: str) -> Optional[int]:
@@ -362,7 +373,8 @@ class ClusterAnalyzer:
         data: List,
         model_info_list: List[Dict],
         data_type: str = "joint_embeddings",
-        max_desc_length: int = 250
+        max_desc_length: int = 250,
+        run_settings: RunSettings = None
     ) -> List[List[str]]:
         include_responses_and_interactions = data_type in ["joint_embeddings"]
 
@@ -381,7 +393,8 @@ class ClusterAnalyzer:
                 theme_identification_model_info=self.theme_identification_model_info,
                 data_type=data_type,
                 include_responses_and_interactions=include_responses_and_interactions,
-                max_desc_length=max_desc_length
+                max_desc_length=max_desc_length,
+                run_settings=run_settings
             )
             rows.append(row)
 
@@ -398,7 +411,8 @@ class ClusterAnalyzer:
         theme_identification_model_info: Dict,
         data_type: str = "joint_embeddings",
         include_responses_and_interactions: bool = True,
-        max_desc_length: int = 250
+        max_desc_length: int = 250,
+        run_settings: RunSettings = None
     ) -> List[str]:
         row = [str(cluster_id)]
 
@@ -428,13 +442,21 @@ class ClusterAnalyzer:
                     row.append(f"{round(100 * frac, 1)}%")
 
         inputs_themes_str = self.identify_theme(
-            texts=inputs, theme_identification_model_info=theme_identification_model_info, sampled_texts=5
+            texts=inputs,
+            theme_identification_model_info=theme_identification_model_info,
+            sampled_texts=5,
+            max_tokens=run_settings.model_settings.identify_theme_max_tokens,
+            max_total_tokens=run_settings.model_settings.identify_theme_max_total_tokens
         )[:max_desc_length]
         row.append(inputs_themes_str)
 
         if include_responses_and_interactions and responses is not None:
             responses_themes_str = self.identify_theme(
-                texts=responses, theme_identification_model_info=theme_identification_model_info, sampled_texts=5
+                texts=responses,
+                theme_identification_model_info=theme_identification_model_info,
+                sampled_texts=5,
+                max_tokens=run_settings.model_settings.identify_theme_max_tokens,
+                max_total_tokens=run_settings.model_settings.identify_theme_max_total_tokens
             )[:max_desc_length]
 
             interactions = [
@@ -442,7 +464,11 @@ class ClusterAnalyzer:
                 for input, response in zip(inputs, responses)
             ]
             interactions_themes_str = self.identify_theme(
-                texts=interactions, theme_identification_model_info=theme_identification_model_info, sampled_texts=5
+                texts=interactions,
+                theme_identification_model_info=theme_identification_model_info,
+                sampled_texts=5,
+                max_tokens=run_settings.model_settings.identify_theme_max_tokens,
+                max_total_tokens=run_settings.model_settings.identify_theme_max_total_tokens
             )[:max_desc_length]
 
             row.append(responses_themes_str)
@@ -508,9 +534,11 @@ class ClusterAnalyzer:
         theme_identification_model_info: Dict,
         sampled_texts: int = 5,
         temp: float = 0.5,
-        max_tokens: int = 70,
-        max_total_tokens: int = 250,
+        max_tokens: int = None,
+        max_total_tokens: int = None,
     ) -> str:
+        max_tokens = max_tokens or self.run_settings.model_settings.identify_theme_max_tokens
+        max_total_tokens = max_total_tokens or self.run_settings.model_settings.identify_theme_max_total_tokens
         prompt = theme_identification_model_info.get("theme_identification_prompt", self.settings.clustering_settings.theme_identification_prompt)
         sampled_texts = random.sample(texts, min(len(texts), sampled_texts))
         theme_identify_prompt = prompt + "\n\n"
@@ -520,8 +548,18 @@ class ClusterAnalyzer:
         model_instance = initialize_model(theme_identification_model_info, temp, max_tokens)
         for _ in range(20):
             try:
-                completion = model_instance.generate(theme_identify_prompt)[:max_total_tokens].replace("\n", " ")
-                return completion
+                start_time = time.time()
+                while True:
+                    try:
+                        completion = model_instance.generate(theme_identify_prompt)
+                        break
+                    except Exception as e:
+                        if time.time() - start_time > 20:
+                            raise e
+                        print(f"Exception: {type(e).__name__}, {str(e)}")
+                        print("Retrying generation due to exception...")
+                        time.sleep(2)
+                return completion[:max_total_tokens].replace("\n", " ")
             except Exception as e:
                 logger.error(f"API error: {e}")
                 time.sleep(2)

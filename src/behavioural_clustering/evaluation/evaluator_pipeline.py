@@ -17,6 +17,7 @@ from behavioural_clustering.models.local_models import LocalModel
 from behavioural_clustering.evaluation.model_evaluation_manager import ModelEvaluationManager
 from behavioural_clustering.evaluation.approval_evaluation_manager import ApprovalEvaluationManager
 from behavioural_clustering.utils.embedding_manager import EmbeddingManager
+from behavioural_clustering.utils.resource_management import ResourceManager
 
 class EvaluatorPipeline:
     def __init__(self, run_settings: RunSettings):
@@ -29,7 +30,10 @@ class EvaluatorPipeline:
         self.run_settings = run_settings
         self.run_sections = run_settings.run_only if run_settings.run_only else run_settings.run_sections
         self.setup_directories()
-        self.setup_models()
+        self.llms = self.run_settings.model_settings.models
+        self.model_names = [model for _, model in self.llms]
+        self.embedding_model_name = self.run_settings.embedding_settings.embedding_model
+        self.model_evaluation_manager = ModelEvaluationManager(run_settings, self.llms)
         self.run_id = self.generate_run_id()
         self.data_handler = DataHandler(self.run_settings.directory_settings.data_dir, self.run_id)
         self.run_metadata_file = self.run_settings.directory_settings.data_dir / "metadata" / "run_metadata.yaml"
@@ -66,19 +70,12 @@ class EvaluatorPipeline:
             else:
                 print(f"Warning: {dir_name} not found in directory_settings")
 
-    def setup_models(self) -> None:
-        self.llms = self.run_settings.model_settings.models
-        self.model_names = [model for _, model in self.llms]
-        self.local_models = {model: LocalModel(model_name_or_path=model) for model_family, model in self.llms if model_family == "local"}
-        self.embedding_model_name = self.run_settings.embedding_settings.embedding_model
-
     def setup_managers(self) -> None:
         self.data_prep = DataPreparation()
         self.viz = Visualization(self.run_settings.plot_settings)
         self.clustering = Clustering(self.run_settings)
         self.cluster_analyzer = ClusterAnalyzer(self.run_settings)
-        self.model_eval_manager = ModelEvaluationManager(self.run_settings, self.llms, self.embedding_manager)
-        self.approval_eval_manager = ApprovalEvaluationManager(self.run_settings, self.model_eval_manager)
+        self.approval_eval_manager = ApprovalEvaluationManager(self.run_settings, self.model_evaluation_manager)
 
     def run_evaluations(self) -> None:
         """
@@ -99,6 +96,9 @@ class EvaluatorPipeline:
             - Triggers model comparison, prompt evaluations, and hierarchical clustering as specified.
             - Saves the run data upon completion.
         """
+        # Unload all models and clear memory before starting a new run
+        self.model_evaluation_manager.unload_all_models()
+
         print(f"Data settings: {self.run_settings.data_settings}")
         self.text_subset = self.data_prep.load_and_preprocess_data(self.run_settings.data_settings)
         
@@ -147,7 +147,7 @@ class EvaluatorPipeline:
         self.query_results_per_model = self.load_data("all_query_results", metadata_config)
         if self.query_results_per_model is None:
             print("Generating new query results...")
-            self.query_results_per_model = self.model_eval_manager.generate_responses(self.text_subset)
+            self.query_results_per_model = self.model_evaluation_manager.generate_responses(self.text_subset)
             self.data_handler.save_data(self.query_results_per_model, "all_query_results", metadata_config)
         else:
             print("Loaded existing query results.")
@@ -204,9 +204,10 @@ class EvaluatorPipeline:
             self.rows = self.cluster_analyzer.compile_cluster_table(
                 clustering=self.chosen_clustering,
                 data=self.joint_embeddings_all_llms,
-                model_info_list=self.model_eval_manager.model_info_list,
+                model_info_list=self.model_evaluation_manager.model_info_list,
                 data_type="joint_embeddings",
-                max_desc_length=self.run_settings.prompt_settings.max_desc_length
+                max_desc_length=self.run_settings.prompt_settings.max_desc_length,
+                run_settings=self.run_settings
             )
             self.data_handler.save_data(self.rows, "compile_cluster_table", metadata_config)
         else:
@@ -274,7 +275,7 @@ class EvaluatorPipeline:
 
         # Analyze cluster approval statistics and visualize approvals
         header_labels = ["ID", "N"]
-        for model_info in self.model_eval_manager.model_info_list:
+        for model_info in self.model_evaluation_manager.model_info_list:
             model_name = model_info['model_name']
             for prompt in self.approval_prompts[prompt_type]:
                 header_labels.append(f"{model_name} - {prompt}")
@@ -284,10 +285,11 @@ class EvaluatorPipeline:
         
         csv_file_path = self.cluster_analyzer.cluster_approval_stats(
             self.approvals_data[prompt_type],
-            np.array(embeddings),  # Convert back to numpy array for clustering
-            self.model_eval_manager.model_info_list,
+            np.array(embeddings),
+            self.model_evaluation_manager.model_info_list,
             {prompt_type: self.approval_prompts[prompt_type]},
-            clusters_desc_table
+            clusters_desc_table,
+            run_settings=self.run_settings
         )
 
         # Save the CSV file path in the metadata
@@ -345,7 +347,8 @@ class EvaluatorPipeline:
                         data=self.approvals_data[prompt_type],
                         model_info_list=[{'model_name': model_name}],
                         data_type="approvals",
-                        max_desc_length=self.run_settings.prompt_settings.max_desc_length
+                        max_desc_length=self.run_settings.prompt_settings.max_desc_length,
+                        run_settings=self.run_settings
                     )
                     
                     hierarchy_data[model_name] = self.cluster_analyzer.calculate_hierarchical_cluster_data(
@@ -405,7 +408,7 @@ class EvaluatorPipeline:
             self.generate_plot_filename(self.model_names, "tsne_embedding_responses"),
             show_plot=not self.run_settings.plot_settings.hide_model_comparison
         )
-        self.cluster_analyzer.display_statement_themes(self.chosen_clustering, self.rows, self.model_eval_manager.model_info_list)
+        self.cluster_analyzer.display_statement_themes(self.chosen_clustering, self.rows, self.model_evaluation_manager.model_info_list)
 
         # Add spectral clustering visualization
         if not self.run_settings.plot_settings.hide_spectral:
