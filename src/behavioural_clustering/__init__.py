@@ -14,7 +14,6 @@ from .config.run_configuration_manager import RunConfigurationManager
 from .utils.visualization import Visualization
 from .utils.data_preparation import DataPreparation, DataHandler
 from .utils.model_utils import query_model_on_statements
-from .utils.resource_management import ResourceManager
 
 # Evaluation
 from .evaluation.evaluator_pipeline import EvaluatorPipeline
@@ -32,7 +31,7 @@ __all__ = [
     
     # Utilities
     'Visualization', 'DataPreparation', 'DataHandler', 
-    'query_model_on_statements', 'ResourceManager',
+    'query_model_on_statements',
     
     # Evaluation
     'EvaluatorPipeline', 'ModelEvaluationManager'
