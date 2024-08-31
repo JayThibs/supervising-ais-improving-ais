@@ -17,7 +17,6 @@ from behavioural_clustering.models.local_models import LocalModel
 from behavioural_clustering.evaluation.model_evaluation_manager import ModelEvaluationManager
 from behavioural_clustering.evaluation.approval_evaluation_manager import ApprovalEvaluationManager
 from behavioural_clustering.utils.embedding_manager import EmbeddingManager
-from behavioural_clustering.utils.resource_management import ResourceManager
 
 class EvaluatorPipeline:
     def __init__(self, run_settings: RunSettings):
