@@ -77,6 +77,10 @@ class ModelSettings:
     models: List[Tuple[str, str]] = field(
         default_factory=lambda: [("openai", "gpt-3.5-turbo")]
     )
+    generate_responses_max_tokens: int = 150
+    get_model_approval_max_tokens: int = 50
+    identify_theme_max_tokens: int = 70
+    identify_theme_max_total_tokens: int = 250
 
 
 @dataclass
