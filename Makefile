@@ -7,10 +7,11 @@ conda:
 	conda env update --prune -f environment.yml
 	echo "RUN THE FOLLOWING COMMAND: conda activate supervising-ais"
 
-# (Removed for now since Poetry doesn't work well on Windows) Compile and install exact python packages
-poetry:
-	pip install poetry
-	poetry install
+test-run:
+	python behavioural_clustering/main.py --model_family="openai" --model="gpt-3.5-turbo" --test_mode
+
+full-run:
+	python behavioural_clustering/main.py --model_family="openai" --model="gpt-3.5-turbo"
 
 # Lint
 lint:
