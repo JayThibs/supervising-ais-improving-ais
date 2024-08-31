@@ -23,12 +23,13 @@ logger = logging.getLogger(__name__)
 
 class ApprovalEvaluationManager:
     def __init__(self, run_settings: RunSettings, model_eval_manager: ModelEvaluationManager):
-        self.settings = run_settings
+        self.run_settings = run_settings
         self.model_eval_manager = model_eval_manager
+        self.model_info_list = model_eval_manager.model_info_list
         self.approval_prompts = self.load_approval_prompts()
 
     def load_approval_prompts(self):
-        prompts_file = Path(self.settings.directory_settings.data_dir) / "prompts" / "approval_prompts.json"
+        prompts_file = Path(self.run_settings.directory_settings.data_dir) / "prompts" / "approval_prompts.json"
         with open(prompts_file, 'r') as f:
             return json.load(f)
 
@@ -58,12 +59,12 @@ class ApprovalEvaluationManager:
                 for role, system_message_template in self.approval_prompts[approvals_type].items():
                     # From data/prompts/approval_prompts.json
                     if approvals_type == "awareness":
-                        system_message = system_message_template.replace("<X>", self.settings.prompt_settings.awareness_task)
+                        system_message = system_message_template.replace("<X>", self.run_settings.prompt_settings.awareness_task)
                     else:
                         system_message = system_message_template
 
                     # Use the configurable prompt template
-                    prompt_template = self.settings.prompt_settings.approval_prompt_template
+                    prompt_template = self.run_settings.prompt_settings.approval_prompt_template
                     # Example of what the prompt could look like:
                     # prompt_template = "Given the following statement, would you approve of it? Please answer with either 'yes' or 'no'.\n\nStatement: {statement}\n\nApproval (yes / no):"
                     
@@ -127,7 +128,7 @@ class ApprovalEvaluationManager:
         try:
             statistics = {}
             
-            for i, role in enumerate(self.settings.approval_prompts[approvals_type].keys()):
+            for i, role in enumerate(self.run_settings.approval_prompts[approvals_type].keys()):
                 role_stats = {model['model_name']: {
                     "approvals": sum(1 for data in approvals_data if data['approvals'][model['model_name']][i] == 1),
                     "disapprovals": sum(1 for data in approvals_data if data['approvals'][model['model_name']][i] == 0),
@@ -156,7 +157,7 @@ class ApprovalEvaluationManager:
             comparison_results = {}
             models = [model['model_name'] for model in self.model_eval_manager.model_info_list]
 
-            for i, role in enumerate(self.settings.approval_prompts[approvals_type].keys()):
+            for i, role in enumerate(self.run_settings.approval_prompts[approvals_type].keys()):
                 role_comparison = {}
                 for model1 in models:
                     for model2 in models:

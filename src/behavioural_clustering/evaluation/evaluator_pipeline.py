@@ -33,6 +33,7 @@ class EvaluatorPipeline:
         self.model_names = [model for _, model in self.llms]
         self.embedding_model_name = self.run_settings.embedding_settings.embedding_model
         self.model_evaluation_manager = ModelEvaluationManager(run_settings, self.llms)
+        self.model_info_list = self.model_evaluation_manager.model_info_list
         self.run_id = self.generate_run_id()
         self.data_handler = DataHandler(self.run_settings.directory_settings.data_dir, self.run_id)
         self.run_metadata_file = self.run_settings.directory_settings.data_dir / "metadata" / "run_metadata.yaml"
@@ -203,7 +204,7 @@ class EvaluatorPipeline:
             self.rows = self.cluster_analyzer.compile_cluster_table(
                 clustering=self.chosen_clustering,
                 data=self.joint_embeddings_all_llms,
-                model_info_list=self.model_evaluation_manager.model_info_list,
+                model_info_list=self.model_info_list,  # Use self.model_info_list here
                 data_type="joint_embeddings",
                 max_desc_length=self.run_settings.prompt_settings.max_desc_length,
                 run_settings=self.run_settings
@@ -274,7 +275,7 @@ class EvaluatorPipeline:
 
         # Analyze cluster approval statistics and visualize approvals
         header_labels = ["ID", "N"]
-        for model_info in self.model_evaluation_manager.model_info_list:
+        for model_info in self.model_info_list:
             model_name = model_info['model_name']
             for prompt in self.approval_prompts[prompt_type]:
                 header_labels.append(f"{model_name} - {prompt}")
@@ -285,10 +286,9 @@ class EvaluatorPipeline:
         csv_file_path = self.cluster_analyzer.cluster_approval_stats(
             self.approvals_data[prompt_type],
             np.array(embeddings),
-            self.model_evaluation_manager.model_info_list,
+            self.model_info_list,  # Use self.model_info_list here
             {prompt_type: self.approval_prompts[prompt_type]},
             clusters_desc_table,
-            run_settings=self.run_settings
         )
 
         # Save the CSV file path in the metadata
@@ -346,8 +346,7 @@ class EvaluatorPipeline:
                         data=self.approvals_data[prompt_type],
                         model_info_list=[{'model_name': model_name}],
                         data_type="approvals",
-                        max_desc_length=self.run_settings.prompt_settings.max_desc_length,
-                        run_settings=self.run_settings
+                        max_desc_length=self.run_settings.prompt_settings.max_desc_length
                     )
                     
                     hierarchy_data[model_name] = self.cluster_analyzer.calculate_hierarchical_cluster_data(
@@ -407,7 +406,7 @@ class EvaluatorPipeline:
             self.generate_plot_filename(self.model_names, "tsne_embedding_responses"),
             show_plot=not self.run_settings.plot_settings.hide_model_comparison
         )
-        self.cluster_analyzer.display_statement_themes(self.chosen_clustering, self.rows, self.model_evaluation_manager.model_info_list)
+        self.cluster_analyzer.display_statement_themes(self.chosen_clustering, self.rows, self.model_info_list)
 
         # Add spectral clustering visualization
         if not self.run_settings.plot_settings.hide_spectral:

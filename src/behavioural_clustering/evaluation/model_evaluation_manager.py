@@ -9,6 +9,7 @@ class ModelEvaluationManager:
         self.settings = run_settings
         self.llms = llms
         self.models = {}  # Store initialized models
+        self.model_info_list = [{"model_family": family, "model_name": name} for family, name in llms]
 
     def unload_all_models(self):
         self.models.clear()

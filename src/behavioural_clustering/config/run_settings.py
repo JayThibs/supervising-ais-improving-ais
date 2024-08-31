@@ -283,11 +283,13 @@ class RunSettings:
     run_sections: List[str] = field(default_factory=list)
     approval_prompts: Dict[str, Dict[str, str]] = field(default_factory=dict)
     run_only: List[str] = field(default_factory=list)
+    model_info_list: List[Dict[str, str]] = field(default_factory=list)
 
     def __post_init__(self):
         self.load_approval_prompts()
         self.update_n_clusters()
         self.update_tsne_settings()
+        self.model_info_list = [{"model_family": family, "model_name": name} for family, name in self.model_settings.models]
 
     def update_n_clusters(self):
         if self.clustering_settings.n_clusters is None:

@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 class Clustering:
     def __init__(self, run_settings: RunSettings):
-        self.settings = run_settings.clustering_settings
+        self.clustering_settings = run_settings.clustering_settings
         self.algorithm_map = {
             "SpectralClustering": SpectralClustering,
             "KMeans": KMeans,
@@ -48,8 +48,8 @@ class Clustering:
         multiple: bool = False,
         **kwargs
     ) -> Union[Dict[str, object], object]:
-        clustering_algorithm = clustering_algorithm or self.settings.main_clustering_algorithm
-        n_clusters = n_clusters or self.settings.n_clusters
+        clustering_algorithm = clustering_algorithm or self.clustering_settings.main_clustering_algorithm
+        n_clusters = n_clusters or self.clustering_settings.n_clusters
         if multiple:
             return self._run_multiple_clustering(embeddings, n_clusters, **kwargs)
         else:
@@ -91,12 +91,12 @@ class Clustering:
 
 class ClusterAnalyzer:
     def __init__(self, run_settings: RunSettings):
-        self.settings = run_settings
+        self.run_settings = run_settings
         self.clustering = Clustering(run_settings)
         self.theme_identification_model_info = {}
-        self.theme_identification_model_info["model_name"] = self.settings.clustering_settings.theme_identification_model_name
-        self.theme_identification_model_info["model_family"] = self.settings.clustering_settings.theme_identification_model_family
-        self.theme_identification_model_info["system_message"] = self.settings.clustering_settings.theme_identification_system_message
+        self.theme_identification_model_info["model_name"] = self.run_settings.clustering_settings.theme_identification_model_name
+        self.theme_identification_model_info["model_family"] = self.run_settings.clustering_settings.theme_identification_model_family
+        self.theme_identification_model_info["system_message"] = self.run_settings.clustering_settings.theme_identification_system_message
 
     def cluster_approval_stats(
         self,
@@ -112,7 +112,7 @@ class ClusterAnalyzer:
         prompt_labels = list(prompt_dict[prompt_approver_type].keys())
         response_types = ["approve", "disapprove"]
 
-        pickle_base_path = self.settings.directory_settings.pickle_dir
+        pickle_base_path = self.run_settings.directory_settings.pickle_dir
         rows_pickle_path = os.path.join(pickle_base_path, f"rows_{prompt_approver_type}.pkl")
         clustering_pickle_path = os.path.join(pickle_base_path, f"clustering_{prompt_approver_type}.pkl")
         table_pickle_path = os.path.join(pickle_base_path, f"clusters_desc_table_{prompt_approver_type}.pkl")
@@ -141,13 +141,13 @@ class ClusterAnalyzer:
                 logger.info("\n")
 
             logger.info("Calculating rows...")
-            clustering_result = self.clustering.cluster_embeddings(embeddings, n_clusters=self.settings.clustering_settings.n_clusters)
+            clustering_result = self.clustering.cluster_embeddings(embeddings, n_clusters=self.run_settings.clustering_settings.n_clusters)
             rows = self.compile_cluster_table(
                 clustering=clustering_result,
                 data=approvals_statements_and_embeddings,
                 model_info_list=model_info_list,
                 data_type="approvals",
-                max_desc_length=self.settings.prompt_settings.max_desc_length
+                max_desc_length=self.run_settings.prompt_settings.max_desc_length
             )
 
             with open(rows_pickle_path, "wb") as file:
@@ -167,14 +167,14 @@ class ClusterAnalyzer:
         # Generate a unique filename based on run parameters
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         model_names_str = "-".join([model_info["model_name"].replace("/", "_") for model_info in model_info_list])
-        n_clusters = self.settings.clustering_settings.n_clusters
-        n_statements = self.settings.data_settings.n_statements
-        clustering_algorithm = self.settings.clustering_settings.main_clustering_algorithm
+        n_clusters = self.run_settings.clustering_settings.n_clusters
+        n_statements = self.run_settings.data_settings.n_statements
+        clustering_algorithm = self.run_settings.clustering_settings.main_clustering_algorithm
 
         filename = f"cluster_results_table_{prompt_approver_type}_{model_names_str}_{n_clusters}clusters_{n_statements}statements_{clustering_algorithm}_{timestamp}.csv"
 
         # Ensure we're using the correct path and the filename doesn't contain any directory separators
-        csv_file_path = self.settings.directory_settings.tables_dir / filename.replace("/", "_")
+        csv_file_path = self.run_settings.directory_settings.tables_dir / filename.replace("/", "_")
 
         self.create_cluster_table(
             clusters_desc_table, rows, table_pickle_path, csv_file_path
@@ -394,7 +394,7 @@ class ClusterAnalyzer:
                 data_type=data_type,
                 include_responses_and_interactions=include_responses_and_interactions,
                 max_desc_length=max_desc_length,
-                run_settings=run_settings
+                run_settings=self.run_settings
             )
             rows.append(row)
 
@@ -445,8 +445,8 @@ class ClusterAnalyzer:
             texts=inputs,
             theme_identification_model_info=theme_identification_model_info,
             sampled_texts=5,
-            max_tokens=run_settings.model_settings.identify_theme_max_tokens,
-            max_total_tokens=run_settings.model_settings.identify_theme_max_total_tokens
+            max_tokens=self.run_settings.model_settings.identify_theme_max_tokens,
+            max_total_tokens=self.run_settings.model_settings.identify_theme_max_total_tokens
         )[:max_desc_length]
         row.append(inputs_themes_str)
 
@@ -455,8 +455,8 @@ class ClusterAnalyzer:
                 texts=responses,
                 theme_identification_model_info=theme_identification_model_info,
                 sampled_texts=5,
-                max_tokens=run_settings.model_settings.identify_theme_max_tokens,
-                max_total_tokens=run_settings.model_settings.identify_theme_max_total_tokens
+                max_tokens=self.run_settings.model_settings.identify_theme_max_tokens,
+                max_total_tokens=self.run_settings.model_settings.identify_theme_max_total_tokens
             )[:max_desc_length]
 
             interactions = [
@@ -467,8 +467,8 @@ class ClusterAnalyzer:
                 texts=interactions,
                 theme_identification_model_info=theme_identification_model_info,
                 sampled_texts=5,
-                max_tokens=run_settings.model_settings.identify_theme_max_tokens,
-                max_total_tokens=run_settings.model_settings.identify_theme_max_total_tokens
+                max_tokens=self.run_settings.model_settings.identify_theme_max_tokens,
+                max_total_tokens=self.run_settings.model_settings.identify_theme_max_total_tokens
             )[:max_desc_length]
 
             row.append(responses_themes_str)
@@ -539,7 +539,7 @@ class ClusterAnalyzer:
     ) -> str:
         max_tokens = max_tokens or self.run_settings.model_settings.identify_theme_max_tokens
         max_total_tokens = max_total_tokens or self.run_settings.model_settings.identify_theme_max_total_tokens
-        prompt = theme_identification_model_info.get("theme_identification_prompt", self.settings.clustering_settings.theme_identification_prompt)
+        prompt = theme_identification_model_info.get("theme_identification_prompt", self.run_settings.clustering_settings.theme_identification_prompt)
         sampled_texts = random.sample(texts, min(len(texts), sampled_texts))
         theme_identify_prompt = prompt + "\n\n"
         for i, text in enumerate(sampled_texts):
@@ -587,14 +587,14 @@ class ClusterAnalyzer:
         # Generate a unique filename based on run parameters
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         model_names_str = "-".join([model_info["model_name"].replace("/", "_") for model_info in model_info_list])
-        n_clusters = self.settings.clustering_settings.n_clusters
-        n_statements = self.settings.data_settings.n_statements
-        clustering_algorithm = self.settings.clustering_settings.main_clustering_algorithm
+        n_clusters = self.run_settings.clustering_settings.n_clusters
+        n_statements = self.run_settings.data_settings.n_statements
+        clustering_algorithm = self.run_settings.clustering_settings.main_clustering_algorithm
 
         filename = f"cluster_results_table_statement_responses_{model_names_str}_{n_clusters}clusters_{n_statements}statements_{clustering_algorithm}_{timestamp}.csv"
 
         # Ensure we're using the correct path and the filename doesn't contain any directory separators
-        csv_file_path = self.settings.directory_settings.tables_dir / filename.replace("/", "_")
+        csv_file_path = self.run_settings.directory_settings.tables_dir / filename.replace("/", "_")
 
         with open(csv_file_path, mode="w", newline="", encoding="utf-8") as file:
             writer = csv.writer(file)
