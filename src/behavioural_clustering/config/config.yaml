@@ -109,12 +109,12 @@ local_model_run:
   name: local_model_run
   model_settings:
     models:
-      - [local, HuggingFaceTB/SmolLM-135M-Instruct]
-      - [local, HuggingFaceTB/SmolLM-135M]
+      - [local, "HuggingFaceTB/SmolLM-135M-Instruct"]
+      - [local, "HuggingFaceTB/SmolLM-135M"]
   data_settings:
     datasets:
       - anthropic-model-written-evals
-    n_statements: 100
+    n_statements: 60
     reuse_data:
       - all
     new_generation: false
