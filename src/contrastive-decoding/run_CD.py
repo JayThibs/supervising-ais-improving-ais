@@ -1,43 +1,99 @@
+import json
 import pandas as pd
+from pathlib import Path
 import argparse
+import pickle
+from model_comparison_helpers import load_jsonl_data
 from contrastive_decoding import ContrastiveDecoder
 from automated_divergence_analyzer import AutomatedDivergenceAnalyzer
+import pdb
 
 parser = argparse.ArgumentParser(description='Run contrastive decoding.')
 parser.add_argument('--target', type=str, default='debug', help='Target to run.')
-parser.add_argument('--interp_weight', type=float, default=None, help='Mixes a certain fraction of the comparison model into the starting model. I.e., the weights of the starting model become starting_model_weight * (1 - interp_weight) + comparison_model_weight * interp_weight.')
+parser.add_argument('--interp_weight', type=float, default=None, help='Mixes a certain fraction of the comparison model into the starting model.')
 parser.add_argument('--n_examples', type=int, default=None, help='Number of examples to run. If None, use the default in the target.')
 parser.add_argument('--run_automated_analysis', action='store_true', help='Run automated divergence analysis')
 parser.add_argument('--num_iterations', type=int, default=5, help='Number of iterations for automated analysis')
+parser.add_argument('--interactive', action='store_true', help='Interactively select keys from JSONL files')
+parser.add_argument('--save_selection', action='store_true', help='Save the key selection for future use')
+parser.add_argument('--use_saved_selection', action='store_true', help='Use previously saved key selection')
 args = parser.parse_args()
 
 target = args.target.lower()
 
+# Load saved key selection if requested
+selected_keys = None
+if args.use_saved_selection:
+    try:
+        with open('key_selection.pkl', 'rb') as f:
+            selected_keys = pickle.load(f)
+        print("Loaded saved key selection.")
+    except FileNotFoundError:
+       print("No saved key selection found. Proceeding with interactive selection.")
+       args.interactive = True
+
 if target == 'debug':
        kwargs = {
-           "save_texts_loc": "outputs/debug_output_log.txt",
-           "model_name": "gpt2",
-           "starting_model_path": "gpt2",
-           "comparison_model_path": "gpt2",
-           "tokenizer_family": "gpt2",
-           "limit_to_starting_model_top_p": 0.9,
-           "prefixes_path": "prefix_folder/20_5_token_gpt_prefixes.txt",
-           "return_divergences": True,
-           "sort_by_divergences": True,
-           "generation_length": 20,
-           "return_perplexities": True,
-           "return_all_token_divergences": True,
-           "generations_per_prefix": 20,
-           "batch_size": 5,
-           "n_prefixes": 5,
-           "include_prefix_in_divergences": False,
-           "sampling": True,
-           "starting_model_weight": 1,
-           "comparison_model_weight": -1,
-           "set_prefix_len": 5,
-           "divergence_fnct": "l1",
-           "quantize": False
-       }
+              "save_texts_loc": "outputs/debug_output_log.txt",
+              "model_name": "gpt2",
+              "starting_model_path": "gpt2",
+              "comparison_model_path": "gpt2",
+              "tokenizer_family": "gpt2",
+              "limit_to_starting_model_top_p": 0.9,
+              "use_jsonl_data": False,
+              "jsonl_data_dir": None,
+              "prefixes_path": "prefix_folder/20_5_token_gpt_prefixes.txt",
+              "return_divergences": True,
+              "sort_by_divergences": True,
+              "generation_length": 20,
+              "return_perplexities": True,
+              "return_all_token_divergences": True,
+              "generations_per_prefix": 20,
+              "batch_size": 5,
+              "n_prefixes": 5,
+              "include_prefix_in_divergences": False,
+              "sampling": True,
+              "starting_model_weight": 1,
+              "comparison_model_weight": -1,
+              "set_prefix_len": 5,
+              "divergence_fnct": "l1",
+              "quantize": False
+              }
+    
+if target in ['smol_models']:
+    # Load JSONL data
+    text_set = load_jsonl_data(
+        data_dir="data/evals/anthropic-model-written-evals",
+        selected_keys=selected_keys,
+        interactive=args.interactive,
+        save_selection=args.save_selection
+    )
+
+    kwargs = {
+        "save_texts_loc": "outputs/smol_models_output_log.txt",
+        "model_name": "HuggingFaceTB/SmolLM-135M-Instruct",
+        "starting_model_path": "HuggingFaceTB/SmolLM-135M-Instruct",
+        "comparison_model_path": "HuggingFaceTB/SmolLM-135M",
+        "tokenizer_family": "HuggingFaceTB/SmolLM-135M-Instruct",
+        "limit_to_starting_model_top_p": 0.9,
+        "text_set": text_set,  # Add this line to use the loaded JSONL data
+        "return_divergences": True,
+        "sort_by_divergences": True,
+        "generation_length": 50,
+        "return_perplexities": True,
+        "return_all_token_divergences": True,
+        "generations_per_prefix": 1,
+        "batch_size": 1,
+        "n_prefixes": 100,
+        "include_prefix_in_divergences": False,
+        "sampling": True,
+        "starting_model_weight": 1,
+        "comparison_model_weight": -1,
+        "set_prefix_len": None,
+        "divergence_fnct": "l1",
+        "quantize": False,
+        "device": "auto",
+    }
 
 # CUDA_VISIBLE_DEVICES=0 python run_CD.py --target llama3_instruct &> runtime_logs/llama3_instruct-no_prefix_KL_runtime_log_1.txt
 if target in ['llama3_instruct']:
@@ -142,6 +198,7 @@ if target in ['llama3_instruct-llama3']:
               "device": "cuda:0"
        }
 
+print(kwargs)
 
 # CUDA_VISIBLE_DEVICES=2 python run_CD.py --target llama3_instruct-llama3-interp --interp_weight 0.01 &> runtime_logs/llama3_instruct-llama3-interp_0.01-no_prefix_KL_runtime_log_1.txt
 if target in ['llama3_instruct-llama3-interp']:
@@ -606,6 +663,8 @@ if target in ['llama3-social-bias']:
               "print_texts": True
        }
 
+cd = ContrastiveDecoder(**kwargs)
+cd.decode()
 
 if args.run_automated_analysis:
     analyzer = AutomatedDivergenceAnalyzer(
@@ -621,9 +680,6 @@ if args.run_automated_analysis:
             "emotional intelligence",
             "cultural sensitivity"
         ],
-        device=kwargs['device']
+        device=cd.device
     )
     analyzer.run_analysis_loop(num_iterations=args.num_iterations)
-else:
-    cd = ContrastiveDecoder(**kwargs)
-    cd.decode()

@@ -23,6 +23,10 @@ from transformers import (
 )
 
 from collections import OrderedDict
+import json
+from pathlib import Path
+from collections import defaultdict
+import pickle
 
 class LRUCache(OrderedDict):
     def __init__(self, max_size : int = 2):
@@ -38,62 +42,76 @@ class LRUCache(OrderedDict):
 # Adapted from: https://github.com/xiamengzhou/training_trajectory_analysis/blob/main/utils.py
 def build_contrastive_lm(superclass : Type[PreTrainedModel]) -> Type[PreTrainedModel]:
     class CausalLMSubtract(superclass):
-        def __init__(self,
-                     config,
-                     starting_model_weight : float = 1,
-                     comparison_model_weight : float = -1,
-                     limit_to_starting_model_top_p : Optional[float] = None,
-                     similarity_gating_intensity : Optional[float] = None,
-                     comparison_model_prefix_ids : Optional[List[int]] = None,
-                     starting_model_prefix_ids : Optional[List[int]] = None,
-                     bnb_config : Optional[dict] = None,
-                     cache_attn : bool = False):
+        def __init__(self, config, **kwargs):
+            print("Initializing ContrastiveLM")
+            # Extract custom parameters
+            self.starting_model_weight = kwargs.pop('starting_model_weight', 1)
+            self.comparison_model_weight = kwargs.pop('comparison_model_weight', -1)
+            self.limit_to_starting_model_top_p = kwargs.pop('limit_to_starting_model_top_p', None)
+            self.similarity_gating_intensity = kwargs.pop('similarity_gating_intensity', None)
+            self.comparison_model_prefix_ids = kwargs.pop('comparison_model_prefix_ids', None)
+            self.starting_model_prefix_ids = kwargs.pop('starting_model_prefix_ids', None)
+            self.cache_attn = kwargs.pop('cache_attn', False)
+
+            # Initialize the base class
             super().__init__(config)
+
             self.comparison_lm = None
-            self.starting_model_weight = starting_model_weight
-            self.comparison_model_weight = comparison_model_weight
-
-            self.similarity_gating_intensity = similarity_gating_intensity
-            self.limit_to_starting_model_top_p = limit_to_starting_model_top_p
-
-            self.comparison_model_prefix_ids = comparison_model_prefix_ids
-            self.starting_model_prefix_ids = starting_model_prefix_ids
-
             self.comparison_model_prefix_ids_added = False
             self.starting_model_prefix_ids_added = False
 
             self.past_starting_attn_storage = LRUCache(max_size=2)
             self.past_comparison_attn_storage = LRUCache(max_size=2)
-            self.cache_attn = cache_attn
 
-            if not comparison_model_prefix_ids is None:
-                self.n_comparison_model_prefix_ids = comparison_model_prefix_ids.size()[-1]
+            if self.comparison_model_prefix_ids is not None:
+                self.n_comparison_model_prefix_ids = self.comparison_model_prefix_ids.size()[-1]
             else:
                 self.n_comparison_model_prefix_ids = 0
-            if not starting_model_prefix_ids is None:
-                self.n_starting_model_prefix_ids = starting_model_prefix_ids.size()[-1]
+            if self.starting_model_prefix_ids is not None:
+                self.n_starting_model_prefix_ids = self.starting_model_prefix_ids.size()[-1]
             else:
                 self.n_starting_model_prefix_ids = 0
+                
+        @classmethod
+        def from_pretrained(cls, pretrained_model_name_or_path, *model_args, **kwargs):
+                print(f"Calling from_pretrained for {cls.__name__}")
+                model = super().from_pretrained(pretrained_model_name_or_path, *model_args, **kwargs)
+                
+                # Set custom attributes
+                model.starting_model_weight = kwargs.get('starting_model_weight', 1)
+                model.comparison_model_weight = kwargs.get('comparison_model_weight', -1)
+                model.limit_to_starting_model_top_p = kwargs.get('limit_to_starting_model_top_p', None)
+                model.similarity_gating_intensity = kwargs.get('similarity_gating_intensity', None)
+                model.comparison_model_prefix_ids = kwargs.get('comparison_model_prefix_ids', None)
+                model.starting_model_prefix_ids = kwargs.get('starting_model_prefix_ids', None)
+                model.cache_attn = kwargs.get('cache_attn', False)
 
+                return model
+            
         def forward(self, **kwargs):
             starting_model_input = kwargs.copy()
             comparison_model_input = kwargs.copy()
 
             # Handle past_key_values
-            if 'past_key_values' in kwargs:
+            if 'past_key_values' in kwargs and kwargs['past_key_values'] is not None:
                 if isinstance(kwargs['past_key_values'], tuple) and len(kwargs['past_key_values']) == 2:
                     starting_model_input['past_key_values'] = kwargs['past_key_values'][0]
                     comparison_model_input['past_key_values'] = kwargs['past_key_values'][1]
                 else:
-                    # If past_key_values is not in the expected format, remove it
                     starting_model_input.pop('past_key_values', None)
                     comparison_model_input.pop('past_key_values', None)
 
+            # Ensure inputs are on the correct device
+            starting_model_input = {k: v.to(self.device) if isinstance(v, torch.Tensor) else v 
+                                    for k, v in starting_model_input.items()}
+            
             starting_model_output = super().forward(**starting_model_input)
 
             if self.comparison_lm is not None:
+                comparison_model_input = {k: v.to(self.comparison_lm.device) if isinstance(v, torch.Tensor) else v 
+                                        for k, v in comparison_model_input.items()}
                 comparison_model_output = self.comparison_lm(**comparison_model_input)
-                comparison_model_logits = comparison_model_output.logits
+                comparison_model_logits = comparison_model_output.logits.to(self.device)
             else:
                 comparison_model_logits = torch.zeros_like(starting_model_output.logits)
 
@@ -121,6 +139,7 @@ def build_contrastive_lm(superclass : Type[PreTrainedModel]) -> Type[PreTrainedM
                                          KL_distribution_choice: str = "auto",
                                          progress_bar: bool = False
                                         ) -> dict:
+            print(f"Calculating divergences for {self.__class__.__name__}")
             n_texts = len(text_ids)
             n_batches = n_texts // batch_size + (n_texts % batch_size != 0)
             divergences = []
@@ -128,6 +147,7 @@ def build_contrastive_lm(superclass : Type[PreTrainedModel]) -> Type[PreTrainedM
             all_vocab_divergences = []
             starting_model_perplexities = []
             comparison_model_perplexities = []
+            
             for i in tqdm(range(n_batches), disable=not progress_bar, desc="Calculating divergences"):
                 batch_start = i * batch_size
                 batch_end = min((i + 1) * batch_size, n_texts)
@@ -148,14 +168,6 @@ def build_contrastive_lm(superclass : Type[PreTrainedModel]) -> Type[PreTrainedM
                 div_starting_model_logits = starting_model_logits.clone()
                 div_comparison_model_logits = comparison_model_logits.clone()
                 
-                # TODO:
-                # if not logits_comparison_top_p is None:
-                    # For each token in comparison_model_logits:
-                    #     - compute vocab probabilities via softmax over the logits
-                    #     - find the smallest n such that the total probability of the n most probable vocab entries is at least logits_comparison_top_p
-                    #     - select only the top n vocab logits from comparison_model_logits
-                # ^ Also need to change calculations of divergence so they can handle different vocab sizes for each token
-
                 if end_tokens_to_only_consider > 0:
                     div_starting_model_logits = starting_model_logits[:, -end_tokens_to_only_consider:, :]
                     div_comparison_model_logits = comparison_model_logits[:, -end_tokens_to_only_consider:, :]
@@ -195,12 +207,12 @@ def build_contrastive_lm(superclass : Type[PreTrainedModel]) -> Type[PreTrainedM
                         # Computes one divergence value for every token in every sequence in the batch (output is of size batch_size x sequence_length):
                         token_divergences = [[loss_fct(div_comparison_model_logits[i,j,:], div_starting_model_logits[i,j,:]).item() for j in range(div_comparison_model_logits.size()[1])] for i in range(len(div_comparison_model_logits))]
                 
-                divergences = divergences + batch_divergences
+                divergences.extend(batch_divergences)
                 
                 if return_all_token_divergences:
-                    all_token_divergences = all_token_divergences + token_divergences
+                    all_token_divergences.extend(token_divergences)
                 if return_all_vocab_divergences:
-                    all_vocab_divergences = all_vocab_divergences + vocab_divergences
+                    all_vocab_divergences.extend(vocab_divergences)
 
                 if return_perplexities:
                     starting_model_batch_losses = torch.tensor([LM_loss(ids, logits, vocab_size).item() for logits,ids in zip(starting_model_logits, current_ids)])
@@ -212,8 +224,8 @@ def build_contrastive_lm(superclass : Type[PreTrainedModel]) -> Type[PreTrainedM
                     starting_model_batch_perplexities = torch.exp(starting_model_batch_losses).tolist()
                     comparison_model_batch_perplexities = torch.exp(comparison_model_batch_losses).tolist()
 
-                    starting_model_perplexities = starting_model_perplexities + starting_model_batch_perplexities
-                    comparison_model_perplexities = comparison_model_perplexities + comparison_model_batch_perplexities
+                    starting_model_perplexities.extend(starting_model_batch_perplexities)
+                    comparison_model_perplexities.extend(comparison_model_batch_perplexities)
 
             result = {'divergences': divergences[:len(divergences)]}
             if return_perplexities:
@@ -243,7 +255,7 @@ def LM_loss(labels : torch.Tensor,
     return loss
 
 
-def get_cls(model_name : str) -> Type[PreTrainedModel]:
+def get_cls(model_name: str) -> Type[PreTrainedModel]:
     model_name = str.lower(model_name)
     if "gpt2" in model_name:
         return GPT2LMHeadModel
@@ -257,8 +269,10 @@ def get_cls(model_name : str) -> Type[PreTrainedModel]:
         return MistralForCausalLM
     if "gptneox" in model_name:
         return GPTNeoXForCausalLM
-    else:
-        raise ValueError("Model name not recognized.")
+    if "smollm" in model_name:
+        return AutoModelForCausalLM
+    # If none of the above conditions are met, use AutoModelForCausalLM as a fallback
+    return AutoModelForCausalLM
 
 def instantiate_models(
         model_name : str = "gpt2-xl",
@@ -267,7 +281,7 @@ def instantiate_models(
         starting_model_weight : float = -1,
         comparison_model_weight : float = 1,
         tokenizer_family : str = "gpt2",
-        device : Optional[str] = "cuda:0",
+        device : Optional[str] = "auto",
         starting_model_device : Optional[str] = None,
         comparison_model_device : Optional[str] = None,
         limit_to_starting_model_top_p : Optional[float] = None,
@@ -280,115 +294,190 @@ def instantiate_models(
         comparison_model_interpolation_weight : Optional[float] = None,
         ) -> Tuple[PreTrainedModel, PreTrainedModel, PreTrainedTokenizer]:
 
-    # Currently not working; must only use single device:
-    if starting_model_device is not None and comparison_model_device is not None:
-        starting_model_device_map = {"": int(starting_model_device.split(":")[1])}
-        comparison_model_device_map = {"": int(comparison_model_device.split(":")[1])}
-    elif device is not None:
-        if device.startswith("cuda"):
-            starting_model_device_map = {"": int(device.split(":")[1])}
-            comparison_model_device_map = {"": int(device.split(":")[1])}
-        elif device == "cpu":
-            starting_model_device_map = "cpu"
-            comparison_model_device_map = "cpu"
+    # Determine the device to use
+    if device == "auto":
+        if torch.cuda.is_available():
+            device = "cuda"
+        elif torch.backends.mps.is_available():
+            device = "mps"
         else:
-            raise ValueError("Device not recognized.")
+            device = "cpu"
+
+    print(f"Using device: {device}")
+
+    # Disable quantization for MPS
+    if device == "mps":
+        no_quantize_starting_model = True
+        bnb_config = None
+
+    # Set up device maps
+    if device == "mps" or device == "cpu":
+        starting_model_device_map = device
+        comparison_model_device_map = device
     else:
-        raise ValueError("Device not specified.")
+        if starting_model_device is not None and comparison_model_device is not None:
+            starting_model_device_map = {"": starting_model_device}
+            comparison_model_device_map = {"": comparison_model_device}
+        else:
+            starting_model_device_map = {"": device}
+            comparison_model_device_map = {"": device}
     
     print("Starting model device_map:", starting_model_device_map)
     print("Comparison model device_map:", comparison_model_device_map)
+
+    # Load the comparison model if needed
     if comparison_model_weight != 0 or (comparison_model_interpolation_weight is not None and comparison_model_interpolation_weight != 0):
         comparison_model = AutoModelForCausalLM.from_pretrained(comparison_model_path, 
                                                                 device_map=comparison_model_device_map,
-                                                                quantization_config=bnb_config if not no_quantize_starting_model else None)#.to(device)
+                                                                quantization_config=bnb_config if not no_quantize_starting_model else None)
         comparison_model = comparison_model.eval()
     else:
         comparison_model = None
 
     model_class = get_cls(model_name)
+    print(f"Model class: {model_class.__name__}")
     set_verbosity_error()
 
-    model = build_contrastive_lm(model_class).from_pretrained(
+    # Load the starting model
+    ContrastiveLM = build_contrastive_lm(model_class)
+    print(f"ContrastiveLM class: {ContrastiveLM.__name__}")
+    model = ContrastiveLM.from_pretrained(
         starting_model_path,
-        starting_model_weight=starting_model_weight, 
+        quantization_config=bnb_config if not no_quantize_starting_model else None,
+        device_map=starting_model_device_map,
+        starting_model_weight=starting_model_weight,
         comparison_model_weight=comparison_model_weight,
         limit_to_starting_model_top_p=limit_to_starting_model_top_p,
         similarity_gating_intensity=similarity_gating_intensity,
         comparison_model_prefix_ids=comparison_model_prefix_ids,
         starting_model_prefix_ids=starting_model_prefix_ids,
-        quantization_config=bnb_config if not no_quantize_starting_model else None,
-        device_map=starting_model_device_map,
-        cache_attn=cache_attn,
-    ).eval()#.to(device)
-    #print(model)
-    #for name, param in model.named_parameters():
-    #    print('name:', name, 'precision:', param.dtype)
+        cache_attn=cache_attn
+    )
+    print(f"Model: {model.__class__.__name__}")
+    print(f"Model methods: {[method for method in dir(model) if not method.startswith('__')]}")
+    model = model.eval()
     model.comparison_lm = comparison_model
 
+    # Load the tokenizer
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_family)
-    #print(tokenizer)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = 'right'
 
+    # Interpolate model weights if needed
     if comparison_model_interpolation_weight is not None and comparison_model_interpolation_weight != 0:
         starting_model_params = [p for n, p in model.named_parameters() if not "comparison_lm" in n]
         comparison_model_params = [p for n, p in model.named_parameters() if "comparison_lm" in n]
-        # Interpolate between the two sets of parameters
         for sparam, cparam in zip(starting_model_params, comparison_model_params):
             before_dtype = sparam.data.dtype
             integer_dtype = before_dtype in [torch.int8, torch.int16, torch.int32, torch.int64, torch.uint8, torch.quint8, torch.qint8, torch.qint32, torch.quint2x4, torch.quint4x2]
-            full_precision_sparam = sparam.data.to(torch.float64) 
-            full_precision_cparam = cparam.data.to(torch.float64)
+            full_precision_sparam = sparam.data.to(torch.float32)  # Changed from float64 to float32
+            full_precision_cparam = cparam.data.to(torch.float32)  # Changed from float64 to float32
             sparam.data = comparison_model_interpolation_weight * full_precision_sparam + (1 - comparison_model_interpolation_weight) * full_precision_cparam
             if not integer_dtype:
                 sparam.data = sparam.data.to(before_dtype)
             else:
-                # Round to the nearest integer before sending to the original dtype
                 sparam.data = sparam.data.round().to(before_dtype)
         if comparison_model_weight == 0:
             del model.comparison_lm
             model.comparison_lm = None
             comparison_model = None
+
     return model, comparison_model, tokenizer
 
+def load_jsonl_data(data_dir: str = "data/evals/anthropic-model-written-evals", 
+                    selected_keys: Optional[Dict[str, List[str]]] = None,
+                    interactive: bool = False,
+                    save_selection: bool = False) -> List[str]:
+    """
+    Load data from JSONL files in the specified directory and its subdirectories.
+    
+    Args:
+    - data_dir (str): Path to the directory containing JSONL files.
+    - selected_keys (Optional[Dict[str, List[str]]]): Dictionary of file patterns and their selected keys.
+    - interactive (bool): If True, prompt the user to select keys for each file pattern.
+    - save_selection (bool): If True, save the key selection for future use.
+    
+    Returns:
+    - List[str]: A list of prompts extracted from the JSONL files.
+    """
+    data_path = Path(data_dir)
+    prompts = []
+    file_patterns = defaultdict(set)
+    
+    # First pass: identify all unique key sets
+    for jsonl_file in data_path.rglob("*.jsonl"):
+        with jsonl_file.open() as f:
+            keys = set()
+            for line in f:
+                try:
+                    data = json.loads(line)
+                    keys.update(data.keys())
+                except json.JSONDecodeError:
+                    print(f"Error decoding JSON in file: {jsonl_file}")
+                    continue
+            file_patterns[tuple(sorted(keys))].add(str(jsonl_file.relative_to(data_path)))
+
+    if interactive or selected_keys is None:
+        selected_keys = {}
+        for keys, files in file_patterns.items():
+            print(f"\nFound files with keys: {', '.join(keys)}")
+            print(f"Example files: {', '.join(list(files)[:5])}")
+            selected = input("Enter the keys you want to include (comma-separated), or press Enter to skip: ").strip()
+            if selected:
+                selected_keys[','.join(keys)] = [k.strip() for k in selected.split(',')]
+
+        if save_selection:
+            with open('key_selection.pkl', 'wb') as f:
+                pickle.dump(selected_keys, f)
+            print("Key selection saved for future use.")
+    
+    # Second pass: extract data based on selected keys
+    for jsonl_file in data_path.rglob("*.jsonl"):
+        with jsonl_file.open() as f:
+            for line in f:
+                try:
+                    data = json.loads(line)
+                    keys = ','.join(sorted(data.keys()))
+                    if keys in selected_keys:
+                        for key in selected_keys[keys]:
+                            if key in data:
+                                prompts.append(data[key])
+                                break
+                except json.JSONDecodeError:
+                    print(f"Error decoding JSON in file: {jsonl_file}")
+                    continue
+    
+    return prompts
+
+# Modify the get_input_ids function to include the new parameters
 def get_input_ids(
-        tokenizer : PreTrainedTokenizer,
-        single_prefix : Optional[str] = None,
-        text_set : Optional[List[str]] = None,
-        prefixes_path : Optional[str] = None,
-        set_prefix_len : Optional[int] = None,
-        n_prefixes : Optional[int] = None,
-        device : str = "cuda:0"
+        tokenizer: PreTrainedTokenizer,
+        single_prefix: Optional[str] = None,
+        text_set: Optional[List[str]] = None,
+        prefixes_path: Optional[str] = None,
+        set_prefix_len: Optional[int] = None,
+        n_prefixes: Optional[int] = None,
+        device: str = "cuda:0",
+        use_jsonl_data: bool = False,
+        jsonl_data_dir: str = "data/evals/anthropic-model-written-evals",
+        selected_keys: Optional[Dict[str, List[str]]] = None,
+        interactive: bool = False,
+        save_selection: bool = False
         ) -> torch.Tensor:
     """
     Generates input IDs from text inputs using a specified tokenizer.
 
-    This function supports generating input IDs from a single prefix, a list of text strings,
-    or text strings read from a file (either .txt or .csv format). It allows for truncation
-    or padding to a specified length, filtering out entries with padding tokens, and selecting 
-    a specific number of prefixes.
+    This function now supports loading data from JSONL files with flexible key selection.
 
-    Parameters:
-    - tokenizer (PreTrainedTokenizer): The tokenizer to use for encoding the text inputs.
-    - single_prefix (Optional[str]): A single text string to be repeated n_prefixes times. Default is None.
-    - text_set (Optional[List[str]]): A list of text strings to be encoded. Default is None.
-    - prefixes_path (Optional[str]): Path to a file (.txt or .csv) containing text strings to be encoded. Default is None.
-    - set_prefix_len (Optional[int]): The length to which the input sequences should be truncated or padded. Default is None.
-    - n_prefixes (Optional[int]): The number of times single_prefix should be repeated. Only used if single_prefix is not None. Default is None. If single_prefix is None, n_prefixes serves to truncate the input IDs to the first n_prefixes.
-    - device (str): The device to which the resulting tensor of input IDs should be sent. Default is "cuda:0".
-
-    Returns:
-    - torch.Tensor: A tensor of input IDs corresponding to the encoded text inputs.
-
-    Note:
-    - If set_prefix_len is provided, the input sequences will be truncated or padded to this length.
-      Additionally, for non-GPT tokenizers, any entry in the resulting input IDs that contains a padding
-      token will be filtered out.
+    New Parameters:
+    - selected_keys (Optional[Dict[str, List[str]]]): Dictionary of file patterns and their selected keys.
+    - interactive (bool): If True, prompt the user to select keys for each file pattern.
+    - save_selection (bool): If True, save the key selection for future use.
     """
-    
-    if not single_prefix is None:
+    if use_jsonl_data:
+        prompt = load_jsonl_data(jsonl_data_dir, selected_keys, interactive, save_selection)
+    elif not single_prefix is None:
         prompt = [single_prefix]
         if not n_prefixes is None:
             prompt = [single_prefix] * n_prefixes
@@ -402,6 +491,7 @@ def get_input_ids(
         prompt = text_set
     else:
         raise ValueError("No input method specified.")
+    
     input_ids = tokenizer.batch_encode_plus(prompt, padding=True, truncation=True, return_tensors="pt", max_length=set_prefix_len)['input_ids'].to(device)
     if not n_prefixes is None:
         input_ids = input_ids[:n_prefixes]

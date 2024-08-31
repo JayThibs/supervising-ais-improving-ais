@@ -1,20 +1,17 @@
 import torch
-from .model_comparison_helpers import instantiate_models
+from model_comparison_helpers import instantiate_models
 import pandas as pd
 import json
 from openai import OpenAI
 import re
 from random import sample
-from .contrastive_decoding import ContrastiveDecoder
+from contrastive_decoding import ContrastiveDecoder
 import numpy as np
 from transformers import BitsAndBytesConfig, AutoModelForCausalLM, AutoTokenizer, PreTrainedModel, PreTrainedTokenizer, AutoModel
 from terminaltables import AsciiTable
 import textwrap
-import pickle
 from typing import Optional, List, Tuple
-import sys
-sys.path.append("outputs/")
-from outputs.quick_cluster import read_past_embeddings_or_generate_new
+from quick_cluster import read_past_embeddings_or_generate_new
 
 def get_results_embeddings_and_divergences(texts : List[str],
                                            local_embedding_model_str : str,

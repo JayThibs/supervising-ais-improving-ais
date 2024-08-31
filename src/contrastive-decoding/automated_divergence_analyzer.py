@@ -1,7 +1,7 @@
 import os
 import torch
 import random
-from .assistant_find_divergence_prompts import DivergenceFinder
+from assistant_find_divergence_prompts import DivergenceFinder
 import numpy as np
 from sklearn.cluster import KMeans
 from typing import List, Dict, Any

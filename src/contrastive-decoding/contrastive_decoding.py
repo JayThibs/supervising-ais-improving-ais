@@ -7,7 +7,7 @@ from transformers import BitsAndBytesConfig, PreTrainedTokenizer
 from typing import Optional, List
 import datetime
 
-from .model_comparison_helpers import instantiate_models, get_input_ids
+from model_comparison_helpers import instantiate_models, get_input_ids
 
 
 class ContrastiveDecoder:
@@ -68,6 +68,8 @@ class ContrastiveDecoder:
         for key, value in kwargs.items():
             setattr(self, key, value)
 
+        self.device = self._get_device(kwargs.get('device', 'auto'))
+        
         #torch.autograd.set_detect_anomaly(True)
         with torch.no_grad():
             if self.model is None or self.tokenizer is None:
@@ -99,6 +101,20 @@ class ContrastiveDecoder:
                     cache_attn = self.cache_attn,
                     comparison_model_interpolation_weight = self.comparison_model_interpolation_weight
                 )
+
+        # Ensure self.model is the custom ContrastiveLM instance
+        if not hasattr(self.model, 'calculate_current_divergence'):
+            raise AttributeError("The model does not have the 'calculate_current_divergence' method. Make sure you're using the custom ContrastiveLM model.")
+
+    def _get_device(self, device):
+        if device == "auto":
+            if torch.cuda.is_available():
+                return torch.device("cuda")
+            elif torch.backends.mps.is_available():
+                return torch.device("mps")
+            else:
+                return torch.device("cpu")
+        return torch.device(device)
 
     def decode(self, **kwargs) -> dict:
         if kwargs:
@@ -345,32 +361,70 @@ class ContrastiveDecoder:
                 # Input could be left padded, so we need to create an attention mask
                 attention_mask = torch.ones_like(batch_ids)
                 attention_mask[batch_ids == self.tokenizer.pad_token_id] = 0
-                if not num_beams is None:
-                    generations_batch = model.generate(batch_ids, 
-                                                       attention_mask=attention_mask,
-                                                       do_sample=sampling, 
-                                                       max_new_tokens=generation_length, 
-                                                       min_length=output_len, 
-                                                       top_k=None, 
-                                                       top_p=top_p, 
-                                                       num_return_sequences=generations_per_prefix,
-                                                       num_beams=num_beams,
-                                                       num_beam_groups=num_beam_groups,
-                                                       diversity_penalty=diversity_penalty,
-                                                       temperature=temperature,
-                                                       return_dict_in_generate=True
-                                                      ).sequences.tolist()
-                else:
-                    generations_batch = model.generate(batch_ids, 
-                                                    do_sample=sampling, 
-                                                    max_new_tokens=generation_length, 
-                                                    min_length=output_len, 
-                                                    top_k=None, 
-                                                    top_p=top_p, 
-                                                    num_return_sequences=generations_per_prefix,
-                                                    temperature=temperature,
-                                                    return_dict_in_generate=True
-                                                    ).sequences.tolist()
+                
+                try:
+                    if not num_beams is None:
+                        generations_batch = model.generate(batch_ids, 
+                                                           attention_mask=attention_mask,
+                                                           do_sample=sampling, 
+                                                           max_new_tokens=generation_length, 
+                                                           min_length=output_len, 
+                                                           top_k=None, 
+                                                           top_p=top_p, 
+                                                           num_return_sequences=generations_per_prefix,
+                                                           num_beams=num_beams,
+                                                           num_beam_groups=num_beam_groups,
+                                                           diversity_penalty=diversity_penalty,
+                                                           temperature=temperature,
+                                                           return_dict_in_generate=True
+                                                          ).sequences.tolist()
+                    else:
+                        generations_batch = model.generate(batch_ids, 
+                                                        do_sample=sampling, 
+                                                        max_new_tokens=generation_length, 
+                                                        min_length=output_len, 
+                                                        top_k=None, 
+                                                        top_p=top_p, 
+                                                        num_return_sequences=generations_per_prefix,
+                                                        temperature=temperature,
+                                                        return_dict_in_generate=True
+                                                        ).sequences.tolist()
+                except NotImplementedError as e:
+                    if "MPS" in str(e):
+                        print("MPS device not supported for this operation. Falling back to CPU.")
+                        model = model.to("cpu")
+                        batch_ids = batch_ids.to("cpu")
+                        attention_mask = attention_mask.to("cpu")
+                        if not num_beams is None:
+                            generations_batch = model.generate(batch_ids, 
+                                                               attention_mask=attention_mask,
+                                                               do_sample=sampling, 
+                                                               max_new_tokens=generation_length, 
+                                                               min_length=output_len, 
+                                                               top_k=None, 
+                                                               top_p=top_p, 
+                                                               num_return_sequences=generations_per_prefix,
+                                                               num_beams=num_beams,
+                                                               num_beam_groups=num_beam_groups,
+                                                               diversity_penalty=diversity_penalty,
+                                                               temperature=temperature,
+                                                               return_dict_in_generate=True
+                                                              ).sequences.tolist()
+                        else:
+                            generations_batch = model.generate(batch_ids, 
+                                                            do_sample=sampling, 
+                                                            max_new_tokens=generation_length, 
+                                                            min_length=output_len, 
+                                                            top_k=None, 
+                                                            top_p=top_p, 
+                                                            num_return_sequences=generations_per_prefix,
+                                                            temperature=temperature,
+                                                            return_dict_in_generate=True
+                                                            ).sequences.tolist()
+                        model = model.to(self.device)
+                    else:
+                        raise e
+                
                 self.generations += generations_batch
                 
                 # If divergences are calculated, update self.divergences
