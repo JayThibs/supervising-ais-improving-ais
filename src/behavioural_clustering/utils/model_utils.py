@@ -4,32 +4,37 @@ from behavioural_clustering.models.model_factory import initialize_model
 
 
 def query_model_on_statements(
-    statements, model_family, model_name, prompt_template, system_message
+    statements, model_family, model_name, prompt_template, system_message, model=None, max_tokens=None
 ):
     query_results = {}
     inputs, responses, full_conversations = [], [], []
-    model_info = {}
-    model_info["model_family"] = model_family
-    model_info["model_name"] = model_name
-    model_info["system_message"] = system_message
+    model_info = {
+        "model_family": model_family,
+        "model_name": model_name,
+        "system_message": system_message
+    }
     query_results["model_info"] = model_info
     num_statements = len(statements)
 
     print("query_model_on_statements...")
 
-    model_instance = initialize_model(model_info)
+    if model is None:
+        model = initialize_model(model_info)
 
     for i, statement in enumerate(statements):
         print(f"Statement {i} / {num_statements} [{model_name}]:", statement)
         prompt = prompt_template.format(statement=statement)
         print("Prompt:", prompt)
+        
         for j in range(10):
             try:
                 start_time = time.time()
                 while True:
                     try:
-                        response = model_instance.generate(prompt)
-
+                        if model_family == "local":
+                            response = model.generate(prompt, max_tokens=max_tokens)
+                        else:
+                            response = model.generate(prompt, max_tokens=max_tokens)
                         break
                     except Exception as e:
                         if time.time() - start_time > 20:
@@ -48,6 +53,7 @@ def query_model_on_statements(
                 print(f"Exception: {type(e).__name__}, {str(e)}")
                 print("Skipping API error", j)
                 time.sleep(2)
+        
         print("Response:", response)
         inputs.append(statement)
         responses.append(response)

@@ -28,13 +28,16 @@ class LocalModel:
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_name_or_path)
         print(f"Model loaded successfully on device: {self.device}")
 
-    def generate(self, prompt):
+    def generate(self, prompt, max_tokens=None):
         if self.model is None or self.tokenizer is None:
             raise ValueError("Model not loaded. Call load() method first.")
 
         print("Generating with local model...")
         inputs = self.tokenizer(prompt, return_tensors="pt").to(self.device)
         
+        # Use max_tokens if provided, otherwise use self.max_length
+        max_new_tokens = max_tokens if max_tokens is not None else self.max_length
+
         try:
             with torch.no_grad():
                 outputs = self.model.generate(
@@ -42,7 +45,7 @@ class LocalModel:
                     do_sample=True,
                     temperature=self.temperature,
                     top_p=self.top_p,
-                    max_new_tokens=self.max_length,
+                    max_new_tokens=max_new_tokens,
                     num_return_sequences=1
                 )
         except NotImplementedError as e:
@@ -56,7 +59,7 @@ class LocalModel:
                         do_sample=True,
                         temperature=self.temperature,
                         top_p=self.top_p,
-                        max_new_tokens=self.max_length,
+                        max_new_tokens=max_new_tokens,
                         num_return_sequences=1
                     )
                 self.model = self.model.to(self.device)
