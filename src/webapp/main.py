@@ -2,6 +2,8 @@ import streamlit as st
 import sys
 from pathlib import Path
 
+st.set_page_config(page_title="Behavioural Clustering Analysis", layout="wide")
+
 src_dir = Path(__file__).resolve().parents[2]
 sys.path.append(str(src_dir))
 
@@ -10,8 +12,6 @@ from webapp.components.sidebar import sidebar
 from behavioural_clustering.config.run_configuration_manager import RunConfigurationManager
 from behavioural_clustering.utils.data_accessor import DataAccessor
 from behavioural_clustering.evaluation.evaluator_pipeline import EvaluatorPipeline
-
-st.set_page_config(page_title="Behavioural Clustering Analysis", layout="wide")
 
 @st.cache_resource
 def get_data_accessor():
@@ -54,7 +54,7 @@ def main():
     if 'selected_config' not in st.session_state:
         st.session_state.selected_config = 'Default Run'
 
-    # Sidebar
+    # Sidebar navigation
     page = sidebar()
 
     # Main content

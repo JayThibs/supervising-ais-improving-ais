@@ -2,8 +2,9 @@ import streamlit as st
 from typing import List, Tuple
 
 def sidebar():
-    st.sidebar.title("Navigation")
-    page = st.sidebar.radio("Go to", ["Run Analysis", "View Results", "Compare Models", "View Tables", "View Treemap"])
+    with st.sidebar:
+        st.title("Navigation")
+        page = st.radio("Go to", ["Run Analysis", "View Results", "Compare Models", "View Tables", "View Treemap"])
     return page
 
 def get_selected_models() -> List[Tuple[str, str]]:

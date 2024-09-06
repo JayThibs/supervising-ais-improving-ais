@@ -19,23 +19,19 @@ def load_table(file_path: Path) -> pd.DataFrame:
 def show():
     st.title("Table Viewer")
 
-    # Assuming the tables are stored in the data/results/tables directory
-    tables_dir = Path("data/results/tables")
-
-    if not tables_dir.exists():
-        st.error(f"Error: {tables_dir} does not exist.")
-        return
-
-    table_files = list_table_files(tables_dir)
+    data_accessor = st.session_state.data_accessor
+    
+    table_files = list_table_files(data_accessor)
 
     if not table_files:
-        st.warning(f"No CSV files found in {tables_dir}")
+        st.warning("No table files found")
         return
 
     selected_table = st.selectbox("Select a table to view:", table_files)
 
     if selected_table:
-        file_path = tables_dir / selected_table
+        run_id, data_type = selected_table.split('_', 1)
+        file_path = data_accessor.get_file_path(run_id, data_type)
         df = load_table(file_path)
 
         st.subheader(f"Displaying table: {selected_table}")
@@ -61,6 +57,6 @@ def show():
         st.download_button(
             label="Download full CSV",
             data=df.to_csv(index=False).encode('utf-8'),
-            file_name=selected_table,
+            file_name=f"{selected_table}.csv",
             mime='text/csv',
         )

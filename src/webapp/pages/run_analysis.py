@@ -1,6 +1,15 @@
 import streamlit as st
 from behavioural_clustering.evaluation.evaluator_pipeline import EvaluatorPipeline
 from webapp.components.sidebar import get_selected_models
+from pathlib import Path
+import yaml
+
+def get_run_metadata():
+    base_dir = Path(__file__).resolve().parents[3] / "data"
+    metadata_path = base_dir / "metadata" / "run_metadata.yaml"
+    
+    with open(metadata_path, 'r') as file:
+        return yaml.safe_load(file)
 
 def initialize_session_state(run_settings):
     if 'n_statements' not in st.session_state:
