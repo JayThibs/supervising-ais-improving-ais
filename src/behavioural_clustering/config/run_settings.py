@@ -79,8 +79,8 @@ class ModelSettings:
     )
     generate_responses_max_tokens: int = 150
     get_model_approval_max_tokens: int = 50
-    identify_theme_max_tokens: int = 70
-    identify_theme_max_total_tokens: int = 250
+    identify_theme_max_tokens: int = 150
+    identify_theme_max_total_tokens: int = 400
 
 
 @dataclass
@@ -124,11 +124,11 @@ class PlotSettings:
             "colors": [],
             "shapes": [],
             "labels": [],
-            "sizes": [30, 60, 90, 120],
+            "sizes": [8, 8, 8, 8],
             "order": None,
             "font_size": 12,
             "legend_font_size": 10,
-            "marker_size": 100,
+            "marker_size": 8,
             "alpha": 0.7,
         },
     })
@@ -204,7 +204,7 @@ class PlotSettings:
                 "colors": self.colors[:num_prompts],
                 "shapes": self.shapes[:num_prompts],
                 "labels": list(prompts.keys()),
-                "sizes": [self.plot_aesthetics["approvals"]["marker_size"]] * num_prompts,  # Use a single size
+                "sizes": [self.plot_aesthetics["approvals"]["marker_size"]] * num_prompts,
                 "order": None,
                 "font_size": self.plot_aesthetics["approvals"]["font_size"],
                 "legend_font_size": self.plot_aesthetics["approvals"]["legend_font_size"],

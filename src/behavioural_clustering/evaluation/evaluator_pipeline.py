@@ -165,7 +165,6 @@ class EvaluatorPipeline:
                 self.run_settings.embedding_settings,
                 self.embedding_manager
             )
-            self.combined_embeddings = [e["embedding"] for e in self.joint_embeddings_all_llms]
             # Convert to list for JSON serialization before saving
             serializable_embeddings = [{**e, "embedding": e["embedding"].tolist()} for e in self.joint_embeddings_all_llms]
             self.data_handler.save_data(serializable_embeddings, "joint_embeddings_all_llms", metadata_config)
@@ -173,19 +172,19 @@ class EvaluatorPipeline:
             print("Loaded existing embeddings.")
             # Convert loaded embeddings back to numpy arrays
             self.joint_embeddings_all_llms = [{**e, "embedding": np.array(e["embedding"])} for e in self.joint_embeddings_all_llms]
-            self.combined_embeddings = [e["embedding"] for e in self.joint_embeddings_all_llms]
         
-        combined_embeddings_array = np.array(self.combined_embeddings)
+        combined_embeddings_array = np.array([e["embedding"] for e in self.joint_embeddings_all_llms])
         
         self.spectral_clustering = self.load_data("spectral_clustering", metadata_config)
         if self.spectral_clustering is None:
             print("Generating new spectral clustering of embeddings...")
-            self.spectral_clustering = self.clustering.cluster_embeddings(
+            spectral_clustering_model = self.clustering.cluster_embeddings(
                 combined_embeddings_array,
                 clustering_algorithm="SpectralClustering",
                 n_clusters=self.run_settings.clustering_settings.n_clusters,
                 affinity=self.run_settings.clustering_settings.affinity
             )
+            self.spectral_clustering = spectral_clustering_model.labels_
             self.data_handler.save_data(self.spectral_clustering, "spectral_clustering", metadata_config)
         else:
             print("Loaded existing spectral clustering.")
@@ -204,7 +203,7 @@ class EvaluatorPipeline:
             self.rows = self.cluster_analyzer.compile_cluster_table(
                 clustering=self.chosen_clustering,
                 data=self.joint_embeddings_all_llms,
-                model_info_list=self.model_info_list,  # Use self.model_info_list here
+                model_info_list=self.model_info_list,
                 data_type="joint_embeddings",
                 max_desc_length=self.run_settings.prompt_settings.max_desc_length,
                 run_settings=self.run_settings
@@ -255,12 +254,11 @@ class EvaluatorPipeline:
             print("Generating new text embeddings...")
             statements = [item['statement'] for item in self.approvals_data[prompt_type]]
             embeddings = self.embedding_manager.get_or_create_embeddings(statements, self.run_settings.embedding_settings)
-            print(f"Type of embeddings after get_or_create_embeddings: {type(embeddings)}")
-            print(f"Type of first embedding: {type(embeddings[0])}")
-            print(f"Saving embeddings with key: {embeddings_key}")
+            print(f"Number of embeddings generated: {len(embeddings)}")
+            print(f"Shape of first embedding: {embeddings[0].shape}")
             self.data_handler.save_data(embeddings, embeddings_key, metadata_config)
         else:
-            print("Loaded existing text embeddings.")
+            print(f"Loaded existing text embeddings. Number of embeddings: {len(embeddings)}")
 
         # Combine approvals data with embeddings
         print(f"Adding embeddings to approvals data...")

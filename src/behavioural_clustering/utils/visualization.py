@@ -33,7 +33,7 @@ class Visualization:
                 "colors": self.colors[:num_prompts],
                 "shapes": self.shapes[:num_prompts],
                 "labels": list(prompts.keys()),
-                "sizes": [self.plot_settings.plot_aesthetics["approvals"]["marker_size"]] * num_prompts,  # Use a single size
+                "sizes": [self.plot_settings.plot_aesthetics["approvals"]["marker_size"]] * num_prompts,
                 "order": None,
                 "font_size": self.plot_settings.plot_aesthetics["approvals"]["font_size"],
                 "legend_font_size": self.plot_settings.plot_aesthetics["approvals"]["legend_font_size"],
@@ -171,10 +171,10 @@ class Visualization:
         
         # Create a custom legend
         legend_elements = [Line2D([0], [0], marker=shapes[i], color='w', label=label,
-                                  markerfacecolor=colors[i], markersize=10)
+                                  markerfacecolor=colors[i], markersize=8)
                            for i, label in enumerate(labels)]
         legend_elements.append(Line2D([0], [0], marker='o', color='w', label='Unmatched',
-                                      markerfacecolor='grey', markersize=10))
+                                      markerfacecolor='grey', markersize=8))
         
         ax.legend(handles=legend_elements, loc='center left', bbox_to_anchor=(1, 0.5),
                   fontsize=legend_fontsize, title=plot_type.capitalize(), title_fontsize=legend_fontsize+2)
@@ -215,8 +215,6 @@ class Visualization:
         ax.set_title(f'Hierarchical Clustering Dendrogram - {plot_type} - {model_name}')
         ax.set_xlabel('Distance')
 
-        # ... (rest of the method remains the same)
-
         # Update the filename to include the model name
         filename = f"{filename}_{model_name}.png"
         self.save_plot(filename, 'hierarchical')
@@ -237,95 +235,85 @@ class Visualization:
         self.save_plot(filename, 'spectral')
         plt.close("all")
 
-    def plot_embedding_responses_plotly(
-        self, dim_reduce_tsne, joint_embeddings_all_llms, model_names, filename, show_plot=True
-    ):
-        df = pd.DataFrame({
-            'x': dim_reduce_tsne[:, 0],
-            'y': dim_reduce_tsne[:, 1],
-            'model': [e['model_name'] for e in joint_embeddings_all_llms],
-            'statement': [e['statement'] for e in joint_embeddings_all_llms],
-            'response': [e['response'] for e in joint_embeddings_all_llms]
-        })
+    def create_interactive_embedding_scatter(self, df, x_col, y_col, color_col, hover_data, title, x_label, y_label):
+        fig = px.scatter(df, x=x_col, y=y_col, color=color_col, hover_data=hover_data,
+                         color_discrete_sequence=px.colors.qualitative.Plotly)
         
-        fig = px.scatter(df, x='x', y='y', color='model', hover_data=['statement', 'response'])
-        
-        fig.update_layout(
-            title=f"Embeddings of {', '.join(model_names)} responses",
-            xaxis_title="Dimension 1",
-            yaxis_title="Dimension 2",
-            legend_title="Models",
-            font=dict(size=self.plot_aesthetics['approvals']['font_size'])
-        )
-        
-        fig.update_traces(marker=dict(size=self.plot_aesthetics['approvals']['marker_size'],
+        fig.update_traces(marker=dict(size=self.plot_aesthetics['approvals']['marker_size'], 
                                       opacity=self.plot_aesthetics['approvals']['alpha']))
-        
-        if show_plot:
-            fig.show()
-        
-        fig.write_html(f"{filename}.html")
-        return fig
-
-    def plot_approvals_plotly(
-        self,
-        dim_reduce,
-        approval_data,
-        model_name,
-        condition: int,
-        plot_type: str,
-        filename: str,
-        title: str,
-        show_plot=True,
-    ):
-        aesthetics = self.plot_aesthetics[f"{plot_type}_approvals"]
-        labels = aesthetics['labels']
-        
-        df = pd.DataFrame({
-            'x': dim_reduce[:, 0],
-            'y': dim_reduce[:, 1],
-            'statement': [e['statement'] for e in approval_data],
-            'approval': ['Unmatched'] * len(approval_data)
-        })
-        
-        for label in labels:
-            mask = np.array([
-                e['approvals'][model_name][label] == condition if model_name in e['approvals'] else False
-                for e in approval_data
-            ])
-            df.loc[mask, 'approval'] = label
-        
-        fig = px.scatter(df, x='x', y='y', color='approval', hover_data=['statement'],
-                         color_discrete_map={**{label: aesthetics['colors'][i] for i, label in enumerate(labels)},
-                                             'Unmatched': 'grey'})
-        
-        fig.update_traces(marker=dict(size=aesthetics['marker_size'], opacity=aesthetics['alpha']))
         
         fig.update_layout(
             title=title,
-            xaxis_title="Dimension 1",
-            yaxis_title="Dimension 2",
-            legend_title=f"{plot_type.capitalize()} Approval",
-            font=dict(size=aesthetics['font_size'])
-        )
-        
-        if show_plot:
-            fig.show()
-        
-        fig.write_html(f"{filename}.html")
-        return fig
-
-    def plot_spectral_clustering_plotly(self, labels, n_clusters, filename):
-        df = pd.DataFrame({'cluster': labels})
-        fig = px.histogram(df, x='cluster', nbins=n_clusters)
-        fig.update_layout(
-            title=f"Spectral Clustering of Statement Responses (n_clusters={n_clusters})",
-            xaxis_title="Cluster",
-            yaxis_title="Count",
+            xaxis_title=x_label,
+            yaxis_title=y_label,
+            legend_title=color_col,
             font=dict(size=self.plot_aesthetics['approvals']['font_size'])
         )
         
-        fig.write_html(f"{filename}.html")
+        return fig
+
+    def create_interactive_approval_scatter(self, df, x_col, y_col, color_col, symbol_col, hover_data, title, x_label, y_label):
+        marker_symbols = ['circle', 'square', 'diamond', 'cross', 'x', 'triangle-up', 'triangle-down', 'star', 'pentagon', 'hexagon']
+        color_palette = px.colors.qualitative.Plotly
+
+        fig = go.Figure()
+
+        all_labels = df[symbol_col].unique()
+        all_runs = df[color_col].unique()
+
+        for run_index, run in enumerate(all_runs):
+            for label_index, label in enumerate(all_labels):
+                group_df = df[(df[color_col] == run) & (df[symbol_col] == label) & df['visible']]
+                
+                marker_color = color_palette[label_index % len(color_palette)]
+                marker_symbol = marker_symbols[label_index % len(marker_symbols)]
+                
+                if not group_df.empty:
+                    fig.add_trace(go.Scatter(
+                        x=group_df[x_col],
+                        y=group_df[y_col],
+                        mode='markers',
+                        marker=dict(
+                            size=8,
+                            symbol=marker_symbol,
+                            color=marker_color,
+                            line=dict(width=1, color='DarkSlateGrey')
+                        ),
+                        name=f"{run} - {label}",
+                        text=group_df[hover_data],
+                        hoverinfo='text',
+                        showlegend=True
+                    ))
+                else:
+                    # Add an empty trace to ensure the label appears in the legend
+                    fig.add_trace(go.Scatter(
+                        x=[None],
+                        y=[None],
+                        mode='markers',
+                        marker=dict(
+                            size=8,
+                            symbol=marker_symbol,
+                            color=marker_color,
+                            line=dict(width=1, color='DarkSlateGrey')
+                        ),
+                        name=f"{run} - {label}",
+                        showlegend=True
+                    ))
+
+        fig.update_layout(
+            title=title,
+            xaxis_title=x_label,
+            yaxis_title=y_label,
+            legend_title=f"{color_col} and {symbol_col}",
+            hovermode="closest",
+            legend=dict(
+                itemsizing='constant',
+                title_font_family='Arial',
+                font=dict(family='Arial', size=10),
+                borderwidth=1
+            )
+        )
+
         return fig
 
     def create_interactive_treemap(self, hierarchy_data, plot_type, model_names, filename):
