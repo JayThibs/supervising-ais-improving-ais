@@ -1,4 +1,6 @@
 import os
+import requests
+import json
 from dotenv import load_dotenv
 from openai import OpenAI
 from anthropic import Anthropic
@@ -68,3 +70,35 @@ class AnthropicModel:
         )
         print("Completed generation.")
         return message.content[0].text
+
+
+class OpenRouterModel:
+    def __init__(self, model, system_message, temperature=0.01, max_tokens=150):
+        self.model = model
+        self.temperature = temperature
+        self.default_max_tokens = max_tokens
+        self.system_message = system_message
+        self.api_key = os.getenv("OPENROUTER_API_KEY")
+
+    @retry(wait=wait_random_exponential(min=20, max=60), stop=stop_after_attempt(6))
+    def generate(self, prompt, max_tokens=None):
+        max_tokens = max_tokens if max_tokens is not None else self.default_max_tokens
+        
+        response = requests.post(
+            url="https://openrouter.ai/api/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+            },
+            json={
+                "model": self.model,
+                "messages": [
+                    {"role": "system", "content": self.system_message},
+                    {"role": "user", "content": prompt}
+                ],
+                "temperature": self.temperature,
+                "max_tokens": max_tokens
+            }
+        )
+        
+        response.raise_for_status()
+        return response.json()['choices'][0]['message']['content']

@@ -533,19 +533,24 @@ class ClusterAnalyzer:
         texts: List[str],
         theme_identification_model_info: Dict,
         sampled_texts: int = 5,
-        temp: float = 0.5,
         max_tokens: int = None,
         max_total_tokens: int = None,
     ) -> str:
-        max_tokens = max_tokens or self.run_settings.model_settings.identify_theme_max_tokens
-        max_total_tokens = max_total_tokens or self.run_settings.model_settings.identify_theme_max_total_tokens
-        prompt = theme_identification_model_info.get("theme_identification_prompt", self.run_settings.clustering_settings.theme_identification_prompt)
+        max_tokens = max_tokens or self.run_settings.clustering_settings.theme_identification_max_tokens
+        max_total_tokens = max_total_tokens or self.run_settings.clustering_settings.theme_identification_max_total_tokens
+        prompt = self.run_settings.clustering_settings.theme_identification_prompt
         sampled_texts = random.sample(texts, min(len(texts), sampled_texts))
         theme_identify_prompt = prompt + "\n\n"
         for i, text in enumerate(sampled_texts):
             theme_identify_prompt += f"Text {i + 1}: {str(text)}\n"
         theme_identify_prompt += "\nTheme:"
-        model_instance = initialize_model(theme_identification_model_info, temp, max_tokens)
+
+        model_instance = initialize_model(
+            theme_identification_model_info,
+            temperature=self.run_settings.clustering_settings.theme_identification_temperature,
+            max_tokens=max_tokens
+        )
+
         for _ in range(20):
             try:
                 start_time = time.time()

@@ -176,34 +176,6 @@ class ApprovalEvaluationManager:
             logger.error(f"Error in compare_model_approvals: {str(e)}")
             raise
 
-    def identify_controversial_statements(self, approvals_data: List[Dict[str, Any]], threshold: float = 0.5) -> List[Dict[str, Any]]:
-        """
-        Identify statements where models disagree significantly.
-
-        Args:
-            approvals_data (List[Dict[str, Any]]): Processed approval data
-            threshold (float): Threshold for considering a statement controversial
-
-        Returns:
-            List[Dict[str, Any]]: List of controversial statements with their approval rates
-        """
-        try:
-            controversial_statements = []
-
-            for data in approvals_data:
-                approval_rates = [np.mean(approvals) for approvals in data['approvals'].values()]
-                if max(approval_rates) - min(approval_rates) > threshold:
-                    controversial_statements.append({
-                        "statement": data['statement'],
-                        "approval_rates": {model: np.mean(approvals) 
-                                           for model, approvals in data['approvals'].items()}
-                    })
-
-            return controversial_statements
-        except Exception as e:
-            logger.error(f"Error in identify_controversial_statements: {str(e)}")
-            raise
-
     def get_model_agreement_matrix(self, approvals_data: List[Dict[str, Any]]) -> Dict[str, Dict[str, float]]:
         """
         Generate a matrix showing the agreement between different models across all statements.

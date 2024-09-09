@@ -234,12 +234,15 @@ class ClusteringSettings:
     linkage: str = "ward"
     threshold: float = 0.5
     metric: str = "euclidean"
-    theme_identification_model_name: str = "gpt-4o-mini"
+    theme_identification_model_name: str = "gpt-4o"
     theme_identification_model_family: str = "openai"
     theme_identification_system_message: str = ""
     theme_identification_prompt: str = (
-        "Briefly list the common themes of the following texts:"
+        "Briefly list the common themes of the following texts. Only list the themes, don't explain or add any other text. Separate each theme with a number and new line. Include as many themes as it makes sense (up to 4). For each theme, include the statements that fall under that theme with its associated number in parentheses. For example: '1. Theme 1 (2, 6, 10)'. Go ahead:"
     )
+    theme_identification_temperature: float = 0.5
+    theme_identification_max_tokens: int = 150
+    theme_identification_max_total_tokens: int = 400
 
 
 @dataclass

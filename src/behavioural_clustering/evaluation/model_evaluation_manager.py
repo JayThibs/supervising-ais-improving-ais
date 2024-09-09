@@ -88,10 +88,7 @@ class ModelEvaluationManager:
         prompt = prompt_template.format(statement=statement)
         model = self.get_or_initialize_model(model_family, model_name)
         max_tokens = self.settings.model_settings.get_model_approval_max_tokens
-        if model_family == "local":
-            r = model.generate(prompt=prompt, max_tokens=max_tokens).lower()
-        else:
-            r = model.generate(prompt=prompt, max_tokens=max_tokens).lower()
+        r = model.generate(prompt=prompt, max_tokens=max_tokens).lower()
 
         approve_strs_in_response = sum([s in r for s in approve_strs])
         disapprove_strs_in_response = sum([s in r for s in disapprove_strs])

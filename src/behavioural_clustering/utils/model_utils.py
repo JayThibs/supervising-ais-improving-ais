@@ -31,7 +31,7 @@ def query_model_on_statements(
                 start_time = time.time()
                 while True:
                     try:
-                        if model_family == "local":
+                        if model_family in ["openrouter", "openai", "anthropic", "local"]:
                             response = model.generate(prompt, max_tokens=max_tokens)
                         else:
                             response = model.generate(prompt, max_tokens=max_tokens)
@@ -42,10 +42,11 @@ def query_model_on_statements(
                         print(f"Exception: {type(e).__name__}, {str(e)}")
                         print("Retrying generation due to exception...")
                         time.sleep(2)
-                    # Check if we are about to exceed the OpenAI rate limit
-                    if model_family == "openai" and i % 60 == 0 and i != 0:
+                    
+                    # Check if we are about to exceed the rate limit for API-based models
+                    if model_family in ["openai", "openrouter", "anthropic"] and i % 60 == 0 and i != 0:
                         print(
-                            "Sleeping for 60 seconds to avoid exceeding OpenAI rate limit..."
+                            f"Sleeping for 60 seconds to avoid exceeding {model_family} rate limit..."
                         )
                         time.sleep(60)
                 break
