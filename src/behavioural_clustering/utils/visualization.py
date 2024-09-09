@@ -224,34 +224,55 @@ class Visualization:
             plt.show()
         plt.close()
 
-    def plot_spectral_clustering(self, labels, n_clusters, filename):
-        fig, ax = plt.subplots(figsize=(12, 8), dpi=100)
-        ax.tick_params(axis="both", which="major", labelsize=15)
-        ax.hist(labels, bins=n_clusters)
-        ax.set_title(
-            f"Spectral Clustering of Statement Responses",
-            fontsize=16,
-            wrap=True
+    def plot_spectral_clustering_plotly(self, labels, n_clusters, title):
+        df = pd.DataFrame({'cluster': labels})
+        cluster_counts = df['cluster'].value_counts().sort_index()
+        
+        fig = go.Figure(data=[
+            go.Bar(x=cluster_counts.index, y=cluster_counts.values)
+        ])
+        
+        fig.update_layout(
+            title=title,
+            xaxis_title="Cluster",
+            yaxis_title="Count",
+            bargap=0.2,
+            bargroupgap=0.1
         )
-        plt.tight_layout()
-        self.save_plot(filename, 'spectral')
-        plt.close("all")
+        
+        return fig
 
-    def create_interactive_embedding_scatter(self, df, x_col, y_col, color_col, hover_data, title, x_label, y_label):
-        fig = px.scatter(df, x=x_col, y=y_col, color=color_col, hover_data=hover_data,
-                         color_discrete_sequence=px.colors.qualitative.Plotly)
-        
-        fig.update_traces(marker=dict(size=self.plot_aesthetics['approvals']['marker_size'], 
-                                      opacity=self.plot_aesthetics['approvals']['alpha']))
-        
+    def create_interactive_embedding_scatter(self, df, x_col, y_col, color_col, symbol_col, hover_data, title, x_label, y_label):
+        marker_symbols = ['circle', 'square', 'diamond', 'cross', 'x', 'triangle-up', 'triangle-down', 'star', 'pentagon', 'hexagon']
+        color_palette = px.colors.qualitative.Plotly
+
+        fig = go.Figure()
+
+        for i, (model, group) in enumerate(df.groupby(color_col)):
+            fig.add_trace(go.Scatter(
+                x=group[x_col],
+                y=group[y_col],
+                mode='markers',
+                marker=dict(
+                    size=8,
+                    symbol=marker_symbols[i % len(marker_symbols)],
+                    color=color_palette[i % len(color_palette)],
+                    line=dict(width=1, color='DarkSlateGrey')
+                ),
+                name=model,
+                text=group[hover_data],
+                hoverinfo='text',
+                showlegend=True
+            ))
+
         fig.update_layout(
             title=title,
             xaxis_title=x_label,
             yaxis_title=y_label,
             legend_title=color_col,
-            font=dict(size=self.plot_aesthetics['approvals']['font_size'])
+            hovermode="closest"
         )
-        
+
         return fig
 
     def create_interactive_approval_scatter(self, df, x_col, y_col, color_col, symbol_col, hover_data, title, x_label, y_label):

@@ -120,14 +120,14 @@ def plot_interactive_embeddings_comparison(data_accessor, selected_runs, run_met
         return '<br>'.join(textwrap.wrap(text, width=width))
     
     # Create hover text
-    df['hover_text'] = df.apply(lambda row: f"Run: {row['run']}<br>Model: {row['model']}<br>Statement: {wrap_text(row['statement'])}<br>Response: {wrap_text(row['response'])}", axis=1)
+    df['hover_text'] = df.apply(lambda row: f"Model: {row['model']}<br>Statement: {wrap_text(row['statement'])}<br>Response: {wrap_text(row['response'])}", axis=1)
     
     run_data = run_metadata.get(selected_runs[0], {})
     plot_settings = PlotSettings(**run_data.get('run_settings', {}).get('plot_settings', {}))
     visualizer = Visualization(plot_settings)
     
     fig = visualizer.create_interactive_embedding_scatter(
-        df, 'x', 'y', 'model', 'hover_text',
+        df, 'x', 'y', 'model', 'run', 'hover_text',
         "Embeddings Comparison Across Runs", "Dimension 1", "Dimension 2"
     )
     return fig
@@ -150,7 +150,7 @@ def plot_interactive_spectral_clustering_comparison(data_accessor, selected_runs
             plot_fig = visualizer.plot_spectral_clustering_plotly(
                 spectral_clustering_data,
                 n_clusters,
-                f"{run}_spectral_clustering"
+                f"Spectral Clustering - {run}"
             )
             
             for trace in plot_fig.data:
