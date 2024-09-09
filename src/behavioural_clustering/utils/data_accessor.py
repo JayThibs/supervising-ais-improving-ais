@@ -138,3 +138,14 @@ class DataAccessor:
             raise ValueError(f"Run ID {run_id} not found in run metadata.")
         
         return self.run_metadata[run_id].get("model_names", [])
+
+    def get_visualization_directory(self, run_id: str) -> str:
+        if run_id not in self.run_metadata:
+            raise ValueError(f"Run ID {run_id} not found in run metadata.")
+        
+        viz_dir = self.run_metadata[run_id].get("visualization_directory", "")
+        if not viz_dir:
+            # If no visualization directory is specified, create one based on the run_id
+            viz_dir = str(self.base_dir / "visualizations" / run_id)
+        
+        return viz_dir

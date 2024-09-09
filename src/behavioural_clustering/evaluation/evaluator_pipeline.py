@@ -359,7 +359,7 @@ class EvaluatorPipeline:
             
             self.hierarchy_data[prompt_type] = hierarchy_data
             
-            # Create interactive treemap for all models
+            # Generate HTML file for interactive treemap
             if not self.run_settings.plot_settings.hide_interactive_treemap:
                 interactive_treemap_data = self.viz.create_interactive_treemap(
                     hierarchy_data=hierarchy_data,
