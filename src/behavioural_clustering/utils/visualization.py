@@ -10,6 +10,8 @@ import plotly.graph_objects as go
 import plotly.express as px
 import pandas as pd
 from datetime import datetime
+import plotly.io as pio
+import textwrap
 
 class Visualization:
     def __init__(self, plot_settings: PlotSettings):
@@ -380,7 +382,7 @@ class Visualization:
                 hovertemplate="<b>%{label}</b><br>Value: %{value}<br>Proportions:<br>%{customdata}<extra></extra>",
                 customdata=[
                     "<br>".join([f"{k}: {v:.2f}" for k, v in item["proportions"].items()])
-                    + ("<br><br>" + item["description"] if item["description"] else "")
+                    + ("<br><br>" + "<br>".join(textwrap.wrap(item["description"], width=50)) if item["description"] else "")
                     for item in df if item["level"] <= max_level
                 ],
                 marker=dict(
@@ -413,18 +415,128 @@ class Visualization:
                 tree_data[model_name] = format_tree(root)
                 max_levels[model_name] = max(item["level"] for item in tree_data[model_name])
 
-        # Prepare the output data
-        output = {
+        # Generate HTML file
+        html_content = """
+        <html>
+        <head>
+            <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+            <style>
+                body { font-family: Arial, sans-serif; }
+                .controls { margin-bottom: 20px; }
+                #treemap { width: 100%; height: 800px; }
+            </style>
+        </head>
+        <body>
+            <div class="controls">
+                <label for="modelSelect">Select Model:</label>
+                <select id="modelSelect"></select>
+                <label for="maxLevelSlider">Max Level:</label>
+                <input type="range" id="maxLevelSlider" min="1" max="10" value="2">
+                <label for="colorBySelect">Color by:</label>
+                <select id="colorBySelect">
+                    <option value="Unaware">Unaware</option>
+                    <option value="Other AI">Other AI</option>
+                    <option value="Aware">Aware</option>
+                    <option value="Human">Human</option>
+                </select>
+            </div>
+            <div id="treemap"></div>
+            <script>
+                const treeData = {tree_data_json};
+                const maxLevels = {max_levels_json};
+                let currentModel = Object.keys(treeData)[0];
+                let currentMaxLevel = 2;
+                let currentColorBy = 'Aware';
+
+                function updateTreemap() {
+                    const data = treeData[currentModel];
+                    const fig = createTreemap(data, currentMaxLevel, currentColorBy, currentModel);
+                    Plotly.newPlot('treemap', fig.data, fig.layout);
+                }
+
+                function createTreemap(df, maxLevel, colorBy, modelName) {
+                    const filteredData = df.filter(item => item.level <= maxLevel);
+                    return {{
+                        data: [{{
+                            type: 'treemap',
+                            labels: filteredData.map(item => item.name),
+                            parents: filteredData.map(item => item.parent),
+                            values: filteredData.map(item => item.value),
+                            branchvalues: 'total',
+                            hovertemplate: '<b>%{{label}}</b><br>Value: %{{value}}<br>Proportions:<br>%{{customdata}}<extra></extra>',
+                            customdata: filteredData.map(item => 
+                                Object.entries(item.proportions).map(([k, v]) => `${{k}}: ${{v.toFixed(2)}}`).join('<br>') +
+                                (item.description ? '<br><br>' + item.description.split(' ').reduce((acc, word, i) => 
+                                    acc + (i > 0 && i % 10 === 0 ? word + '<br>' : word + ' '), '') : '')
+                            ),
+                            marker: {{
+                                colors: filteredData.map(item => item.proportions[colorBy]),
+                                colorscale: 'Viridis',
+                                showscale: true,
+                                colorbar: {{title: `${{colorBy}} Proportion`}},
+                            }},
+                            texttemplate: '<b>%{{label}}</b><br>%{{text}}',
+                            text: filteredData.map(item => 
+                                Object.entries(item.proportions).map(([k, v]) => `${{k}}: ${{v.toFixed(2)}}`).join('<br>')
+                            ),
+                            textposition: 'middle center',
+                        }}],
+                        layout: {{
+                            title: `Hierarchical Clustering Treemap - {plot_type} - ${{modelName}}`,
+                            width: 1000,
+                            height: 800,
+                        }}
+                    }};
+                }
+
+                // Initialize controls
+                const modelSelect = document.getElementById('modelSelect');
+                Object.keys(treeData).forEach(model => {{
+                    const option = document.createElement('option');
+                    option.value = model;
+                    option.textContent = model;
+                    modelSelect.appendChild(option);
+                }});
+
+                const maxLevelSlider = document.getElementById('maxLevelSlider');
+                const colorBySelect = document.getElementById('colorBySelect');
+
+                // Event listeners
+                modelSelect.addEventListener('change', (e) => {{
+                    currentModel = e.target.value;
+                    maxLevelSlider.max = maxLevels[currentModel];
+                    updateTreemap();
+                }});
+
+                maxLevelSlider.addEventListener('input', (e) => {{
+                    currentMaxLevel = parseInt(e.target.value);
+                    updateTreemap();
+                }});
+
+                colorBySelect.addEventListener('change', (e) => {{
+                    currentColorBy = e.target.value;
+                    updateTreemap();
+                }});
+
+                // Initial update
+                updateTreemap();
+            </script>
+        </body>
+        </html>
+        """
+
+        html_content = html_content.replace("{tree_data_json}", json.dumps(tree_data))
+        html_content = html_content.replace("{max_levels_json}", json.dumps(max_levels))
+        html_content = html_content.replace("{plot_type}", plot_type)
+
+        with open(f"{filename}.html", "w") as f:
+            f.write(html_content)
+
+        print(f"Interactive treemap HTML saved to {filename}.html")
+
+        return {
             "tree_data": tree_data,
             "max_levels": max_levels,
             "plot_type": plot_type,
             "model_names": model_names,
-            "create_treemap": create_treemap  # Include the create_treemap function
         }
-
-        # Save the output as a JSON file (excluding the create_treemap function)
-        json_output = {k: v for k, v in output.items() if k != "create_treemap"}
-        with open(f"{filename}.json", "w") as f:
-            json.dump(json_output, f)
-
-        return output

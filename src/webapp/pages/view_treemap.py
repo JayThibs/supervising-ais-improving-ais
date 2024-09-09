@@ -1,112 +1,87 @@
-import pickle
 import streamlit as st
-import plotly.graph_objects as go
+import plotly.graph_objs as go
+import textwrap
+import json
 from pathlib import Path
 
-def load_treemap_data(run_id, prompt_type):
-    data_accessor = st.session_state.data_accessor
-    try:
-        # Extract the last part of the prompt_type (e.g., "awareness" from "approvals_statements_awareness")
-        prompt_type_suffix = prompt_type.split("_")[-1]
-        file_path = data_accessor.get_file_path(run_id, f"hierarchical_clustering_{prompt_type_suffix}")
-        print(f"Attempting to load hierarchical data from: {file_path}")
-        
-        with open(file_path, "rb") as f:
-            data = pickle.load(f)
-        print(f"Successfully loaded hierarchical data for run {run_id} and prompt type {prompt_type}")
-        return data
-    except Exception as e:
-        print(f"Error loading data: {str(e)}")
-    
-    return None
+def parse_hierarchical_data(hierarchical_data, prompt_labels):
+    linkage_matrix, descriptions, original_counts, merged_counts, n_clusters = hierarchical_data
 
-def create_treemap_data(hierarchical_data):
-    treemap_data = {
-        "model_names": [],
-        "max_levels": {},
-        "tree_data": {}
-    }
+    tree_dict = {}
 
-    for model_name, model_data in hierarchical_data.items():
-        treemap_data["model_names"].append(model_name)
-        treemap_data["tree_data"][model_name] = []
-
-        linkage_matrix, leaf_labels, original_cluster_sizes, merged_cluster_sizes, n_clusters = model_data
-
-        # Add a single root node
-        root_node = {
-            "name": "Root",
-            "parent": "",
-            "value": sum(original_cluster_sizes[i][0] for i in range(len(original_cluster_sizes))),
-            "level": 0,
-            "proportions": {label: 0 for label in original_cluster_sizes[0][1:]},
-            "description": "Root node"
+    for i, (desc, counts) in enumerate(zip(descriptions, original_counts)):
+        tree_dict[i] = {
+            "name": f"Cluster_{i}",
+            "description": desc,
+            "value": counts[0],
+            "proportions": {label: count / counts[0] for label, count in zip(prompt_labels, counts[1:])}
         }
-        treemap_data["tree_data"][model_name].append(root_node)
 
-        # Add leaf nodes
-        for i, (label, sizes) in enumerate(zip(leaf_labels, original_cluster_sizes)):
-            treemap_data["tree_data"][model_name].append({
-                "name": f"Cluster_{i}",
-                "parent": "Root",
-                "value": sizes[0],
-                "level": 1,
-                "proportions": {label: size / sizes[0] for label, size in zip(root_node["proportions"].keys(), sizes[1:])},
-                "description": label
-            })
+    for i, link in enumerate(linkage_matrix):
+        left, right, _, _ = link
+        node_id = i + n_clusters
+        left_child = tree_dict[int(left)]
+        right_child = tree_dict[int(right)]
 
-        # Add merged nodes
-        for i, (left, right, _, _) in enumerate(linkage_matrix):
-            node_id = i + n_clusters
-            left_child = treemap_data["tree_data"][model_name][int(left) + 1]
-            right_child = treemap_data["tree_data"][model_name][int(right) + 1]
-            
-            merged_sizes = merged_cluster_sizes[node_id - n_clusters]
-            treemap_data["tree_data"][model_name].append({
-                "name": f"Cluster_{node_id}",
-                "parent": "Root",
-                "value": merged_sizes[0],
-                "level": max(left_child["level"], right_child["level"]) + 1,
-                "proportions": {label: size / merged_sizes[0] for label, size in zip(root_node["proportions"].keys(), merged_sizes[1:])},
-                "description": ""
-            })
-            
-            # Update parents of child nodes
-            left_child["parent"] = f"Cluster_{node_id}"
-            right_child["parent"] = f"Cluster_{node_id}"
+        tree_dict[node_id] = {
+            "name": f"Cluster_{node_id}",
+            "children": [left_child, right_child],
+            "value": left_child["value"] + right_child["value"],
+            "proportions": {
+                k: (left_child["value"] * left_child["proportions"][k] + right_child["value"] * right_child["proportions"][k])
+                / (left_child["value"] + right_child["value"])
+                for k in left_child["proportions"]
+            },
+        }
 
-        treemap_data["max_levels"][model_name] = int(linkage_matrix[-1, 2]) + 1
+    return tree_dict[node_id]
 
-    return treemap_data
+def format_tree(node, parent_name="", level=0):
+    results = []
+    node_name = node["name"]
+    results.append({
+        "name": node_name,
+        "parent": parent_name,
+        "value": node["value"],
+        "level": level,
+        "proportions": node["proportions"],
+        "description": node.get("description", ""),
+    })
 
-def create_treemap(df, max_level, color_by, model_name, plot_type):
-    labels = []
-    parents = []
-    values = []
-    colors = []
+    if "children" in node:
+        for child in node["children"]:
+            results.extend(format_tree(child, node_name, level + 1))
 
-    for item in df:
-        if item["level"] <= max_level and item["parent"]:
-            labels.append(item["name"])
-            parents.append(item["parent"])
-            values.append(item["value"])
-            colors.append(item["proportions"][color_by])
+    return results
 
+def create_treemap(df, max_level, color_by):
     fig = go.Figure(go.Treemap(
-        labels=labels,
-        parents=parents,
-        values=values,
+        labels=[item["name"] for item in df if item["level"] <= max_level],
+        parents=[item["parent"] for item in df if item["level"] <= max_level],
+        values=[item["value"] for item in df if item["level"] <= max_level],
         branchvalues="total",
+        hovertemplate="<b>%{label}</b><br>Value: %{value}<br>Proportions:<br>%{customdata}<extra></extra>",
+        customdata=[
+            "<br>".join([f"{k}: {v:.2f}" for k, v in item["proportions"].items()])
+            + ("<br><br>" + "<br>".join(textwrap.wrap(item["description"], width=50)) if item["description"] else "")
+            for item in df if item["level"] <= max_level
+        ],
         marker=dict(
-            colors=colors,
+            colors=[item["proportions"][color_by] for item in df if item["level"] <= max_level],
             colorscale="Viridis",
             showscale=True,
             colorbar=dict(title=f"{color_by} Proportion"),
         ),
+        texttemplate="<b>%{label}</b><br>%{text}",
+        text=[
+            "<br>".join([f"{k}: {v:.2f}" for k, v in item["proportions"].items()])
+            for item in df if item["level"] <= max_level
+        ],
+        textposition="middle center",
     ))
 
     fig.update_layout(
-        title_text=f"Hierarchical Clustering Treemap - {plot_type} - {model_name}",
+        title_text="Hierarchical Clustering Treemap",
         width=1000,
         height=800,
     )
@@ -118,40 +93,55 @@ def show():
 
     data_accessor = st.session_state.data_accessor
     run_ids = data_accessor.get_available_run_ids()
-    selected_run_id = st.selectbox("Select Run ID", run_ids)
+    selected_run_id = st.selectbox("Select Run ID", run_ids, key="run_id")
 
     prompt_types = data_accessor.get_available_prompt_types(selected_run_id)
-    selected_prompt_type = st.selectbox("Select Prompt Type", prompt_types)
+    selected_prompt_type = st.selectbox("Select Prompt Type", prompt_types, key="prompt_type")
 
-    hierarchical_data = load_treemap_data(selected_run_id, selected_prompt_type)
+    # Try different naming conventions for the hierarchical clustering data
+    possible_data_types = [
+        f"hierarchical_clustering_{selected_prompt_type}",
+        f"hierarchical_clustering_personas",
+        "hierarchical_clustering"
+    ]
 
-    if hierarchical_data:
-        treemap_data = create_treemap_data(hierarchical_data)
+    hierarchical_data = None
+    for data_type in possible_data_types:
+        try:
+            hierarchical_data = data_accessor.get_run_data(selected_run_id, data_type)
+            if hierarchical_data is not None:
+                break
+        except ValueError:
+            continue
 
-        st.sidebar.header("Treemap Controls")
-        model_name = st.sidebar.selectbox("Select Model", treemap_data["model_names"])
-        max_level = st.sidebar.slider("Max Level", 1, treemap_data["max_levels"][model_name], 2)
-        
-        # Get the available labels from the first cluster's proportions
-        available_labels = list(treemap_data["tree_data"][model_name][0]["proportions"].keys())
-        color_by = st.sidebar.selectbox("Color by", available_labels)
+    if hierarchical_data is not None:
+        prompt_category = selected_prompt_type.split("_")[-1]
+        prompt_labels = data_accessor.get_prompt_labels(selected_run_id, prompt_category)
+        model_names = data_accessor.get_model_names(selected_run_id)
 
-        fig = create_treemap(
-            treemap_data["tree_data"][model_name],
-            max_level,
-            color_by,
-            model_name,
-            selected_prompt_type
-        )
+        if isinstance(hierarchical_data, dict):
+            # Multiple models
+            tree_data = {}
+            for model_name, model_data in hierarchical_data.items():
+                root = parse_hierarchical_data(model_data, prompt_labels)
+                tree_data[model_name] = format_tree(root)
+        else:
+            # Single model
+            root = parse_hierarchical_data(hierarchical_data, prompt_labels)
+            tree_data = {model_names[0]: format_tree(root)}
 
-        st.plotly_chart(fig, use_container_width=True)
+        # Create Streamlit widgets
+        model_select = st.selectbox("Select Model", list(tree_data.keys()), key="model")
+        max_level = max(item["level"] for item in tree_data[model_select])
+        level_slider = st.slider("Max Level", min_value=1, max_value=max_level, value=2, key="level")
+        color_by = st.selectbox("Color by", prompt_labels, key="color")
 
-        # Test with a simple treemap
-        st.subheader("Test Simple Treemap")
-        test_fig = go.Figure(go.Treemap(
-            labels=["A", "B", "C", "D", "E", "F"],
-            parents=["", "A", "A", "C", "C", "A"]
-        ))
-        st.plotly_chart(test_fig, use_container_width=True)
+        # Create and display the treemap
+        fig = create_treemap(tree_data[model_select], level_slider, color_by)
+        st.plotly_chart(fig)
+
     else:
-        st.warning("No hierarchical data available for the selected run and prompt type.")
+        st.error("Failed to load hierarchical data. Please check the data files and try again.")
+
+if __name__ == "__main__":
+    show()
