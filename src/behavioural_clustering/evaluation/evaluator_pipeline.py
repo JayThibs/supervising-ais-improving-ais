@@ -208,7 +208,11 @@ class EvaluatorPipeline:
                 max_desc_length=self.run_settings.prompt_settings.max_desc_length,
                 run_settings=self.run_settings
             )
-            self.data_handler.save_data(self.rows, "compile_cluster_table", metadata_config)
+            # Save the rows data (which includes the CSV file path)
+            file_id = self.data_handler.save_data(self.rows, "compile_cluster_table", metadata_config)
+            
+            # Update the metadata with the file ID
+            metadata_config["data_file_ids"]["compile_cluster_table"] = file_id
         else:
             print("Loaded existing cluster table.")
 
@@ -284,13 +288,13 @@ class EvaluatorPipeline:
         csv_file_path = self.cluster_analyzer.cluster_approval_stats(
             self.approvals_data[prompt_type],
             np.array(embeddings),
-            self.model_info_list,  # Use self.model_info_list here
+            self.model_info_list,
             {prompt_type: self.approval_prompts[prompt_type]},
             clusters_desc_table,
         )
-
-        # Save the CSV file path in the metadata
-        metadata_config[f"cluster_table_csv_{prompt_type}"] = str(csv_file_path)
+        
+        # Update the metadata with the file ID
+        metadata_config["data_file_ids"][f"cluster_table_csv_{prompt_type}"] = str(csv_file_path)
 
         self.visualize_approvals(prompt_type, metadata_config)
 
@@ -497,10 +501,10 @@ class EvaluatorPipeline:
             "data_file_ids": {}
         }
         
-        for data_type in self.data_handler.data_metadata:
-            if data_type in self.data_handler.data_metadata:
-                file_id = list(self.data_handler.data_metadata[data_type].keys())[-1]  # Get the latest file ID
-                metadata["data_file_ids"][data_type] = file_id
+        # Add all data file IDs, including cluster table CSV files
+        for data_type, file_id in self.data_handler.data_metadata.items():
+            if file_id:
+                metadata["data_file_ids"][data_type] = list(file_id.keys())[-1]  # Get the latest file ID
         
         self.save_run_metadata(metadata)
         print(f"Run metadata saved to {self.run_metadata_file}")
