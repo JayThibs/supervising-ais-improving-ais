@@ -93,10 +93,11 @@ class ClusterAnalyzer:
     def __init__(self, run_settings: RunSettings):
         self.run_settings = run_settings
         self.clustering = Clustering(run_settings)
-        self.theme_identification_model_info = {}
-        self.theme_identification_model_info["model_name"] = self.run_settings.clustering_settings.theme_identification_model_name
-        self.theme_identification_model_info["model_family"] = self.run_settings.clustering_settings.theme_identification_model_family
-        self.theme_identification_model_info["system_message"] = self.run_settings.clustering_settings.theme_identification_system_message
+        self.theme_identification_model_info = {
+            "model_name": self.run_settings.clustering_settings.theme_identification_model_name,
+            "model_family": self.run_settings.clustering_settings.theme_identification_model_family,
+            "system_message": self.run_settings.clustering_settings.theme_identification_system_message
+        }
 
     def cluster_approval_stats(
         self,
@@ -180,7 +181,7 @@ class ClusterAnalyzer:
             clusters_desc_table, rows, table_pickle_path, csv_file_path
         )
 
-        return str(csv_file_path)  # Return the CSV file path as a string
+        return csv_file_path
 
     def get_cluster_approval_stats(self, approvals_statements_and_embeddings, approvals_prompts_dict, cluster_labels, cluster_ID, model_name):
         inputs = []
