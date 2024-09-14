@@ -66,3 +66,30 @@ The primary goals of this automated evaluation system are:
 - Create a taxonomy of model differences to better understand the impact of various interventions.
 
 By iteratively refining its focus and generating targeted prompts, this system aims to provide a thorough and nuanced understanding of how interventions affect language model behavior.
+
+## Code Structure and Key Methods
+
+### AutomatedEvaluator
+
+The `AutomatedEvaluator` class is the core of the evaluation process. Key methods include:
+
+- `load_dataset`: Loads the initial dataset from a JSONL file.
+- `compute_kl_divergence`: Calculates the KL divergence between two probability distributions.
+- `cluster_responses`: Groups responses using K-means clustering.
+- `analyze_outputs`: Uses an AI assistant to analyze model outputs and generate insights.
+- `generate_test_prompts`: Creates new test prompts based on the previous analysis.
+- `evaluate_models`: Runs both the intervened and original models on a set of prompts.
+- `run_evaluation_loop`: Orchestrates the entire evaluation process through multiple iterations.
+
+### InterventionModelManager
+
+The `InterventionModelManager` class handles the loading and management of language models. Key methods include:
+
+- `load_config`: Loads the model configuration from a YAML file.
+- `load_model_and_tokenizer`: Loads a specific model and its tokenizer.
+- `load_models`: Loads multiple models specified in the configuration.
+- `get_model`: Retrieves a loaded model or loads it if not already in memory.
+- `get_model_pairs`: Returns pairs of intervened and original model names.
+- `unload_model` and `unload_all_models`: Manage memory by unloading models when not in use.
+
+These classes work together to provide a flexible and extensible framework for evaluating intervened language models.
