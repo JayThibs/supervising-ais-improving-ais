@@ -1,7 +1,6 @@
 Code for intervening on language models in various ways, so that we can then use our framework to analyze the impacts of those interventions.
 
 Possible interventions to include:
-
 * Autoregressive finetuning on a file containing texts.
 * Knowledge editing
 * Quantization
