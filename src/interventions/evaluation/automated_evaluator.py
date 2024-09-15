@@ -12,6 +12,7 @@ import hashlib
 from datetime import datetime
 from src.interventions.intervention_models.model_manager import InterventionModelManager
 from src.behavioural_clustering.utils.data_preparation import DataPreparation
+from src.behavioural_clustering.models import initialize_model
 
 class AutomatedEvaluator:
     """
@@ -19,33 +20,28 @@ class AutomatedEvaluator:
     This evaluator uses an AI assistant to analyze outputs, generate hypotheses, and create targeted test prompts.
     """
 
-    def __init__(self, model_manager: InterventionModelManager, config_path: str = 'src/interventions/intervention_models/evaluation_config.yaml'):
+    def __init__(self, model_manager: InterventionModelManager, config_path: str = 'src/interventions/intervention_models/evaluation_config.yaml', run_name: str = 'default'):
         """
         Initialize the AutomatedEvaluator.
 
         Args:
             model_manager: An instance of InterventionModelManager for handling models.
-            config_path: Path to the evaluation configuration file (default: 'src/interventions/intervention_models/evaluation_config.yaml').
+            config_path: Path to the evaluation configuration file.
+            run_name: Name of the evaluation run configuration to use.
         """
         self.model_manager = model_manager
         self.config = self.load_config(config_path)
-        self.assistant_model = self.config['evaluation']['assistant_model']
+        self.run_config = self.config['evaluation_runs'][run_name]
+        self.assistant_model_info = self.run_config['assistant_model']
+        self.assistant_model = self.initialize_assistant_model()
         self.dataset = []
         self.hypotheses = []
-        self.focus_areas = self.config['evaluation']['initial_focus_areas']
+        self.focus_areas = self.run_config['initial_focus_areas']
         self.data_preparation = DataPreparation()
 
     @staticmethod
     def load_config(config_path: str) -> Dict[str, Any]:
-        """
-        Load the configuration from a YAML file.
-
-        Args:
-            config_path: Path to the configuration file.
-
-        Returns:
-            A dictionary containing the configuration.
-        """
+        """Load configuration from a YAML file."""
         with open(config_path, 'r') as file:
             return yaml.safe_load(file)
 
@@ -56,19 +52,9 @@ class AutomatedEvaluator:
         Returns:
             A list of tuples containing dataset names and their corresponding paths.
         """
-        datasets = self.config['evaluation']['datasets']
-        num_examples = self.config['evaluation']['num_examples_per_dataset']
+        datasets = self.run_config['datasets']
+        num_examples = self.run_config['num_examples_per_dataset']
         return self.data_preparation.load_evaluation_data(datasets, num_examples)
-
-    def load_dataset(self, file_path: str):
-        """
-        Load a dataset from a JSON Lines file.
-
-        Args:
-            file_path: Path to the JSON Lines file.
-        """
-        with open(file_path, 'r') as f:
-            self.dataset = [json.loads(line) for line in f]
 
     def compute_kl_divergence(self, p: List[float], q: List[float]) -> float:
         """
@@ -89,14 +75,14 @@ class AutomatedEvaluator:
         return entropy(p, q)
 
     def cluster_responses(self):
-        """
-        Cluster the responses in the dataset using K-means.
+        """Cluster responses in the dataset using K-means."""
+        n_clusters = self.run_config['num_clusters']
+        embeddings = [data['embedding'] for data in self.dataset if 'embedding' in data]
+        
+        if not embeddings:
+            print("Warning: No embeddings found in the dataset. Skipping clustering.")
+            return
 
-        Args:
-            n_clusters: Number of clusters to create (default: 5).
-        """
-        n_clusters = self.config['evaluation']['num_clusters']
-        embeddings = [data['embedding'] for data in self.dataset]
         scaler = StandardScaler()
         scaled_embeddings = scaler.fit_transform(embeddings)
         
@@ -104,31 +90,16 @@ class AutomatedEvaluator:
         clusters = kmeans.fit_predict(scaled_embeddings)
         
         for i, data in enumerate(self.dataset):
-            data['cluster'] = int(clusters[i])
+            if 'embedding' in data:
+                data['cluster'] = int(clusters[i])
 
     def analyze_outputs(self, results: List[Dict[str, Any]]) -> str:
-        """
-        Analyze the outputs from two models using an AI assistant.
-
-        Args:
-            results: List of dictionaries containing model outputs and metadata.
-
-        Returns:
-            Analysis of the outputs as a string.
-        """
+        """Analyze outputs from two models using AI assistant."""
         analysis_prompt = self.create_analysis_prompt(results)
         return self.get_assistant_analysis(analysis_prompt)
 
     def create_analysis_prompt(self, results: List[Dict[str, Any]]) -> str:
-        """
-        Create a prompt for the AI assistant to analyze model outputs.
-
-        Args:
-            results: List of dictionaries containing model outputs and metadata.
-
-        Returns:
-            A formatted prompt string for analysis.
-        """
+        """Create prompt for AI assistant to analyze model outputs."""
         prompt = "Analyze the following outputs from two models (intervened and original):\n\n"
         for result in results:
             prompt += f"Prompt: {result['prompt']}\n"
@@ -144,53 +115,27 @@ class AutomatedEvaluator:
 
         return prompt
 
+    def initialize_assistant_model(self):
+        """Initialize assistant model based on configuration."""
+        return initialize_model(self.assistant_model_info)
+
     def get_assistant_analysis(self, prompt: str) -> str:
-        """
-        Get analysis from the AI assistant using the OpenAI API.
-
-        Args:
-            prompt: The prompt to send to the assistant.
-
-        Returns:
-            The assistant's analysis as a string.
-        """
-        system_prompt = self.config['evaluation']['assistant_system_prompt']
-        response = openai.ChatCompletion.create(
-            model=self.assistant_model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": prompt}
-            ]
-        )
-        return response.choices[0].message.content
+        """Get analysis from AI assistant."""
+        return self.assistant_model.generate(prompt)
 
     def generate_test_prompts(self, analysis: str) -> List[str]:
-        """
-        Generate test prompts based on the previous analysis.
-
-        Args:
-            analysis: The previous analysis string.
-
-        Returns:
-            A list of generated test prompts.
-        """
-        num_prompts = self.config['evaluation']['num_test_prompts']
+        """Generate test prompts based on previous analysis."""
+        num_prompts = self.run_config['num_test_prompts']
         prompt = f"""Based on the following analysis, generate {num_prompts} test prompts that would help confirm or refute the hypotheses about behavioral differences between the models:
 
         {analysis}
 
         Generate diverse prompts that target different aspects of the hypotheses and potential issues identified."""
 
-        response = openai.ChatCompletion.create(
-            model=self.assistant_model,
-            messages=[
-                {"role": "system", "content": "You are an AI assistant tasked with generating test prompts to evaluate language models."},
-                {"role": "user", "content": prompt}
-            ]
-        )
+        response = self.assistant_model.generate(prompt)
         
         # Assume the response is a numbered list of prompts
-        prompts = response.choices[0].message.content.split('\n')
+        prompts = response.split('\n')
         return [p.split('. ', 1)[1] if '. ' in p else p for p in prompts if p.strip()]
 
     def evaluate_models(self, intervened_model: str, original_model: str, prompts: List[str]) -> List[Dict[str, Any]]:
@@ -231,16 +176,8 @@ class AutomatedEvaluator:
         return results
 
     def get_model_params(self, model_name: str) -> Dict[str, Any]:
-        """
-        Get the generation parameters for a specific model.
-
-        Args:
-            model_name: Name of the model.
-
-        Returns:
-            A dictionary containing the model's generation parameters.
-        """
-        for model in self.config['evaluation']['models_to_evaluate']:
+        """Get generation parameters for a specific model."""
+        for model in self.run_config['models_to_evaluate']:
             if model['name'] == model_name:
                 return {
                     'system_prompt': model.get('system_prompt', ''),
@@ -253,18 +190,7 @@ class AutomatedEvaluator:
 
     @staticmethod
     def generate_text(model, tokenizer, prompt: str, params: Dict[str, Any]) -> str:
-        """
-        Generate text using a given model and tokenizer with specific parameters.
-
-        Args:
-            model: The language model.
-            tokenizer: The tokenizer for the model.
-            prompt: The input prompt.
-            params: Dictionary of generation parameters.
-
-        Returns:
-            The generated text as a string.
-        """
+        """Generate text using given model and tokenizer with specific parameters."""
         system_prompt = params.get('system_prompt', '')
         if system_prompt:
             full_prompt = f"{system_prompt}\n\nHuman: {prompt}\n\nAssistant:"
@@ -283,17 +209,7 @@ class AutomatedEvaluator:
 
     @staticmethod
     def get_token_probabilities(model, tokenizer, text: str) -> np.array:
-        """
-        Get token probabilities for a given text using a model and tokenizer.
-
-        Args:
-            model: The language model.
-            tokenizer: The tokenizer for the model.
-            text: The input text.
-
-        Returns:
-            An array of token probabilities.
-        """
+        """Get token probabilities for given text using model and tokenizer."""
         inputs = tokenizer(text, return_tensors="pt").to(model.device)
         with torch.no_grad():
             outputs = model(**inputs)
@@ -311,8 +227,8 @@ class AutomatedEvaluator:
         4. Update focus areas and hypotheses based on the analysis
         5. Store the results for the next iteration
         """
-        models_to_evaluate = self.config['evaluation']['models_to_evaluate']
-        num_iterations = self.config['evaluation']['num_iterations']
+        models_to_evaluate = self.run_config['models_to_evaluate']
+        num_iterations = self.run_config['num_iterations']
         
         for model_info in models_to_evaluate:
             intervened_model = model_info['name']
@@ -371,15 +287,9 @@ class AutomatedEvaluator:
         Please provide a list of updated focus areas, including both new areas identified from the analysis and any current areas that remain relevant. Explain briefly why each area is important.
         """
 
-        response = openai.ChatCompletion.create(
-            model=self.assistant_model,
-            messages=[
-                {"role": "system", "content": "You are an AI assistant tasked with identifying key focus areas for evaluating differences between language models."},
-                {"role": "user", "content": prompt}
-            ]
-        )
+        response = self.assistant_model.generate(prompt)
 
-        assistant_response = response.choices[0].message.content
+        assistant_response = response
 
         # Extract the new focus areas from the assistant's response
         new_focus_areas = []
@@ -420,15 +330,9 @@ class AutomatedEvaluator:
         Please provide a list of hypotheses, each with a brief explanation of its rationale and potential implications.
         """
 
-        response = openai.ChatCompletion.create(
-            model=self.assistant_model,
-            messages=[
-                {"role": "system", "content": "You are an AI assistant tasked with generating hypotheses about behavioral differences between language models."},
-                {"role": "user", "content": prompt}
-            ]
-        )
+        response = self.assistant_model.generate(prompt)
 
-        assistant_response = response.choices[0].message.content
+        assistant_response = response
 
         # Extract the new hypotheses from the assistant's response
         new_hypotheses = []
@@ -445,13 +349,7 @@ class AutomatedEvaluator:
             print(f"- {hypothesis}")
 
     def generate_final_report(self, intervened_model: str, original_model: str):
-        """
-        Generate a final report summarizing the evaluation results.
-
-        Args:
-            intervened_model: Name of the intervened model.
-            original_model: Name of the original model.
-        """
+        """Generate final report summarizing evaluation results."""
         prompt = f"""Generate a comprehensive report summarizing the evaluation results for the following models:
 
         Intervened Model: {intervened_model}
@@ -472,15 +370,7 @@ class AutomatedEvaluator:
         Base your report on the focus areas and hypotheses identified during the evaluation process.
         """
 
-        response = openai.ChatCompletion.create(
-            model=self.assistant_model,
-            messages=[
-                {"role": "system", "content": "You are an AI assistant tasked with generating a comprehensive report on language model evaluation results."},
-                {"role": "user", "content": prompt}
-            ]
-        )
-
-        report = response.choices[0].message.content
+        report = self.assistant_model.generate(prompt)
         print("\nFinal Report:")
         print(report)
 
@@ -496,14 +386,14 @@ class AutomatedEvaluator:
         run_info = {
             "intervened_model": intervened_model,
             "original_model": original_model,
-            "datasets": self.config['evaluation']['datasets'],
-            "num_examples_per_dataset": self.config['evaluation']['num_examples_per_dataset'],
-            "assistant_model": self.assistant_model,
-            "assistant_system_prompt": self.config['evaluation']['assistant_system_prompt'],
-            "num_iterations": self.config['evaluation']['num_iterations'],
-            "max_generated_text_length": self.config['evaluation']['max_generated_text_length'],
-            "num_clusters": self.config['evaluation']['num_clusters'],
-            "num_test_prompts": self.config['evaluation']['num_test_prompts'],
+            "datasets": self.run_config['datasets'],
+            "num_examples_per_dataset": self.run_config['num_examples_per_dataset'],
+            "assistant_model": self.assistant_model_info,
+            "assistant_system_prompt": self.run_config['assistant_model']['system_message'],
+            "num_iterations": self.run_config['num_iterations'],
+            "max_generated_text_length": self.run_config['max_generated_text_length'],
+            "num_clusters": self.run_config['num_clusters'],
+            "num_test_prompts": self.run_config['num_test_prompts'],
             "initial_focus_areas": self.focus_areas,
             "final_focus_areas": self.focus_areas,
             "final_hypotheses": self.hypotheses,
@@ -555,8 +445,14 @@ class AutomatedEvaluator:
         print(f"Run metadata updated in {metadata_path}")
 
 if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Run automated evaluation of language models.")
+    parser.add_argument("--run", default="default", help="Name of the evaluation run configuration to use.")
+    args = parser.parse_args()
+
     manager = InterventionModelManager('src/interventions/intervention_models/evaluation_config.yaml')
-    evaluator = AutomatedEvaluator(manager)
+    evaluator = AutomatedEvaluator(manager, run_name=args.run)
     
     # Run the evaluation loop
     evaluator.run_evaluation_loop()
