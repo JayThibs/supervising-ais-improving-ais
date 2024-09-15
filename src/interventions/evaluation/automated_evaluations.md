@@ -10,6 +10,58 @@ This document outlines the automated evaluation process for comparing intervened
 2. **AutomatedEvaluator**: Orchestrates the evaluation process, including data analysis, prompt generation, and iterative refinement.
 3. **AI Assistant**: A language model (e.g., GPT-4) that analyzes outputs and generates hypotheses and test prompts.
 
+## How to Use
+
+### 1. Configure the Evaluation
+
+Edit the `src/interventions/intervention_models/model_config.yaml` file to specify:
+
+- Models to be evaluated
+- Datasets to use for evaluation
+
+Example configuration:
+
+```yaml
+models:
+- name: "GraySwanAI/Llama-3-8B-Instruct-RR"
+  original: "meta-llama/Meta-Llama-3-8B-Instruct"
+- name: "GraySwanAI/Mistral-7B-Instruct-RR"
+  original: "mistralai/Mistral-7B-Instruct-v0.3"
+# ... other models ...
+evaluation:
+  models_to_evaluate:
+    - "GraySwanAI/Llama-3-8B-Instruct-RR"
+    - "GraySwanAI/Mistral-7B-Instruct-RR"
+  datasets:
+  - "anthropic-model-written-evals"
+```
+
+### 2. Run the Evaluation
+
+To run the automated evaluation:
+
+1. Ensure you have the required dependencies installed.
+2. Set up your OpenAI API key as an environment variable
+3. Run the evaluation script:
+
+    ```bash
+    python src/interventions/evaluation/automated_evaluator.py --run <run_name>
+    ```
+
+### 3. Interpret Results
+
+The evaluation process will:
+
+- Generate a final report for each evaluated model pair
+- Save evaluation data in JSON Lines format
+- Update the run metadata
+
+Results can be found in:
+
+- Final reports: `evaluation_report_{intervened_model}_vs_{original_model}.txt`
+- Evaluation data: `data/saved_data/eval_jsonls/{run_id}.jsonl`
+- Run metadata: `data/metadata/run_metadata.yaml`
+
 ## Data Structure
 
 The evaluation process uses a dataset in JSONL format with the following structure:
