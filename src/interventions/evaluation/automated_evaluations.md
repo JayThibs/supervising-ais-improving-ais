@@ -45,7 +45,7 @@ To run the automated evaluation:
 3. Run the evaluation script:
 
     ```bash
-    python src/interventions/evaluation/automated_evaluator.py
+    python src/interventions/evaluation/automated_evaluator.py --run <run_name>
     ```
 
 ### 3. Interpret Results
