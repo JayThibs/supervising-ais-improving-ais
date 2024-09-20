@@ -16,7 +16,7 @@ import random
 import sys
 sys.path.append("..")
 from model_comparison_helpers import string_with_token_colors
-from typing import List, Tuple, Dict
+from typing import List, Tuple, Dict, Optional
 from analysis_helpers import literal_eval_fallback
 
 import warnings
@@ -406,11 +406,21 @@ def read_past_embeddings_or_generate_new(path, client, decoded_strs, local_embed
     return embeddings_list
 
 def extract_df_info(df, original_tokenizer_str, path, skip_every_n_decodings = 0, color_by_divergence = False, local_embedding_model_str = "thenlper/gte-large", device = "cuda:0", recompute_embeddings = True, save_embeddings = True, tqdm_disable = False, clustering_instructions = None, bnb_config = None):
-    divergence_values = df['divergence'].values
-    loaded_strs = df['decoding'].values
+    if 'divergence' in df.columns:
+        divergence_values = df['divergence'].values
+    else:
+        divergence_values = None
+    if 'decoding' in df.columns:
+        loaded_strs = df['decoding'].values
+    else:
+        raise ValueError("The dataframe must contain a 'decoding' column.")
     
     if color_by_divergence:
-        all_token_divergences = df['all_token_divergences'].values
+        if 'all_token_divergences' in df.columns:
+            all_token_divergences = df['all_token_divergences'].values
+        else:
+            raise ValueError("The dataframe must contain a 'all_token_divergences' column if color_by_divergence is True.")
+        
         divs_0 = literal_eval_fallback(all_token_divergences[0], None)
         if divs_0 is None:
             raise ValueError("The first set of token divergence values is not readable.")
@@ -471,7 +481,8 @@ def get_validated_cluster_labels(decoded_strs: List[str],
                                  sampled_texts_per_cluster: int = 10,
                                  sampled_comparison_texts_per_cluster: int = 10,
                                  non_cluster_comparison_texts: int = 10,
-                                 generated_labels_per_cluster: int = 3
+                                 generated_labels_per_cluster: int = 3,
+                                 pick_top_n_labels: Optional[int] = None
                                  ):
     cluster_labels, all_cluster_texts_used_for_label_strs_ids = get_cluster_labels_random_subsets(
             decoded_strs, 
@@ -519,6 +530,18 @@ def get_validated_cluster_labels(decoded_strs: List[str],
             print(f"- {outstr}")
         print("#######")
         print("\n\n")
+    
+    if pick_top_n_labels is not None:
+        # For each cluster, pick the top n labels based on AUC score
+        top_n_labels = {}
+        for cluster_id, label_scores in cluster_label_scores.items():
+            # Sort labels by AUC score in descending order
+            sorted_labels = sorted(label_scores.items(), key=lambda x: x[1], reverse=True)
+            # Pick the top n labels
+            top_n_labels[cluster_id] = [label for label, score in sorted_labels[:pick_top_n_labels]]
+        
+        # Update cluster_labels with only the top n labels
+        cluster_labels = {cluster_id: top_n_labels[cluster_id] for cluster_id in cluster_labels.keys()}
     
     if compute_p_values:
         # Now, compute the null distribution for label AUCs by permuting the cluster labels (so the label strings
@@ -592,7 +615,7 @@ def get_validated_contrastive_cluster_labels(decoded_strs_1: List[str],
                                              use_normal_distribution_for_p_values: bool = False,
                                              sampled_comparison_texts_per_cluster: int = 10,
                                              generated_labels_per_cluster: int = 3,
-
+                                             pick_top_n_labels: Optional[int] = None
                                              ):
     # Initialize dictionaries to store cluster labels and text indices used for generating labels
     all_cluster_texts_used_for_label_strs_ids_1 = {}
@@ -627,6 +650,24 @@ def get_validated_contrastive_cluster_labels(decoded_strs_1: List[str],
         decoded_strs_2, clustering_assignments_2, all_cluster_texts_used_for_label_strs_ids_2,
         cluster_label_strs, local_model, labeling_tokenizer, device, sampled_comparison_texts_per_cluster
     )
+
+    if pick_top_n_labels is not None:
+        # For each cluster, pick the top n labels based on AUC score
+        top_n_labels = {}
+        for cluster_pair, label_scores in cluster_pair_scores.items():
+            # Sort labels by their AUC scores in descending order
+            sorted_labels = sorted(label_scores.items(), key=lambda x: x[1], reverse=True)
+            
+            # Pick the top n labels
+            top_n = sorted_labels[:pick_top_n_labels]
+            
+            # Store the top n labels and their scores
+            top_n_labels[cluster_pair] = {label: score for label, score in top_n}
+        
+        # Update cluster_pair_scores and cluster_label_strs with only the top n labels
+        cluster_pair_scores = top_n_labels
+        for cluster_pair in cluster_label_strs:
+            cluster_label_strs[cluster_pair] = list(top_n_labels[cluster_pair].keys())
 
     # Optionally compute p-values if required
     if compute_p_values:
@@ -828,6 +869,7 @@ if __name__ == "__main__":
     parser.add_argument("--max_cluster_size", type=int, default=2000)
     parser.add_argument("--cluster_method", type=str, default="kmeans")
     parser.add_argument("--clustering_instructions", type=str, default="Identify the topic or theme of the given texts")
+    parser.add_argument("--random_init_compare_clustering_start", action="store_true")
 
     parser.add_argument("--n_strs_show", type=int, default=0)
     parser.add_argument("--tqdm_disable", action="store_true")
@@ -838,6 +880,7 @@ if __name__ == "__main__":
     parser.add_argument("--sampled_comparison_texts_per_cluster", type=int, default=10)
     parser.add_argument("--non_cluster_comparison_texts", type=int, default=10)
     parser.add_argument("--generated_labels_per_cluster", type=int, default=3)
+    parser.add_argument("--pick_top_n_labels", type=int, default=None)
     parser.add_argument("--permutations_for_null", type=int, default=1)
 
     parser.add_argument("--divergence_and_clustering_labels", action="store_true")
@@ -846,6 +889,7 @@ if __name__ == "__main__":
     #parser.add_argument("--local_embedding_model_str", default="thenlper/gte-large")
     parser.add_argument("--local_embedding_model_str", default="nvidia/NV-Embed-v1")
     parser.add_argument("--local_labelings_model_str", default="NousResearch/Meta-Llama-3-8B-Instruct")
+    parser.add_argument("--openai_labelings_model_str", default="gpt-4o-mini")
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--recompute_embeddings", action="store_true")
     parser.add_argument("--color_by_divergence", action="store_true")
@@ -894,13 +938,7 @@ if __name__ == "__main__":
         n_datapoints_compare = len(decoded_strs_compare)
     elif args.compare_to_self:
         df_compare = deepcopy(df)
-        # Intervene on the contents of df_compare 'decoding' column.
-        # Replace 5% of all words with "aardvark"
-        for i in range(len(df_compare)):
-            decoding = df_compare.iloc[i]["decoding"]
-            decoding = decoding.split()
-            decoding = [word if (random.random() < 0.95 or i < 2) else "aardvark" for i,word in enumerate(decoding)]
-            df_compare.at[i, "decoding"] = " ".join(decoding)
+        
         divergence_values_compare, decoded_strs_compare, embeddings_list_compare, all_token_divergences_compare, original_tokenizer_compare, max_token_divergence_compare, min_token_divergence_compare = extract_df_info(df_compare, args.original_tokenizer, path, skip_every_n_decodings=skip_every_n_decodings_compare, color_by_divergence=color_by_divergence, local_embedding_model_str=args.local_embedding_model_str, device=args.device, recompute_embeddings=args.recompute_embeddings, save_embeddings=True, clustering_instructions=args.clustering_instructions, tqdm_disable=args.tqdm_disable, bnb_config=bnb_config)
 
     # Load the local assistant model (assuming we are not using the API):
@@ -931,6 +969,8 @@ if __name__ == "__main__":
         print(f"Cluster {cluster}: {len([i for i in range(n_datapoints) if clustering_assignments[i] == cluster])}")
 
     if args.divergence_and_clustering_labels:
+        if divergence_values is None:
+            raise ValueError("The dataframe must contain a 'divergence' column if color_by_divergence is True.")
         # Calculate the average divergence value of all the texts in each cluster.
         average_divergence_values = {}
         n_texts_in_cluster = {}
@@ -984,12 +1024,17 @@ if __name__ == "__main__":
                                                             sampled_comparison_texts_per_cluster=args.sampled_comparison_texts_per_cluster,
                                                             non_cluster_comparison_texts=args.non_cluster_comparison_texts,
                                                             generated_labels_per_cluster=args.generated_labels_per_cluster,
-                                                            num_permutations=args.permutations_for_null
+                                                            num_permutations=args.permutations_for_null,
+                                                            pick_top_n_labels=args.pick_top_n_labels
                                                         )
         if compare_to_path is not None or args.compare_to_self:
             print(f"Clustering comparison texts with {args.cluster_method}")
             if args.cluster_method == "kmeans":
-                clustering_compare =  KMeans(n_clusters=n_clusters_compare, random_state=0, n_init=10).fit(embeddings_list_compare)
+                if args.random_init_compare_clustering_start:
+                    clustering_compare =  KMeans(n_clusters=n_clusters_compare, random_state=0, n_init=10).fit(embeddings_list_compare)
+                else:
+                    initial_centroids = clustering.cluster_centers_
+                    clustering_compare = KMeans(n_clusters=n_clusters_compare, init=initial_centroids, n_init=1, random_state=0).fit(embeddings_list_compare)
             elif args.cluster_method == "hdbscan":
                 clustering_compare =  HDBSCAN(min_cluster_size=min_cluster_size, max_cluster_size=max_cluster_size).fit(embeddings_list_compare)
             clustering_assignments_compare = clustering_compare.labels_
@@ -1008,7 +1053,8 @@ if __name__ == "__main__":
                                                                         sampled_comparison_texts_per_cluster=args.sampled_comparison_texts_per_cluster,
                                                                         non_cluster_comparison_texts=args.non_cluster_comparison_texts,
                                                                         generated_labels_per_cluster=args.generated_labels_per_cluster,
-                                                                        num_permutations=args.permutations_for_null
+                                                                        num_permutations=args.permutations_for_null,
+                                                                        pick_top_n_labels=args.pick_top_n_labels
                                                                         )
             cluster_matches = match_clusterings(clustering_assignments, embeddings_list, clustering_assignments_compare, embeddings_list_compare)
             base_cluster_scores = validated_clustering['cluster_label_scores']
@@ -1040,7 +1086,10 @@ if __name__ == "__main__":
                 print("\nBase dataset central texts:")
                 for i in sorted_base_indices[:n_strs_show]:
                     printstr = decoded_strs[base_cluster_indices[i]].replace("\n", "\\n")
-                    print(f"Div: {divergence_values[base_cluster_indices[i]]:.3f}: {printstr}")
+                    if divergence_values is not None:
+                        print(f"Div: {divergence_values[base_cluster_indices[i]]:.3f}: {printstr}")
+                    else:
+                        print(printstr)
 
                 # Compare cluster central texts
                 compare_cluster_indices = [i for i, x in enumerate(clustering_assignments_compare) if x == compare_cluster]
@@ -1050,47 +1099,13 @@ if __name__ == "__main__":
                 print("\nCompare dataset central texts:")
                 for i in sorted_compare_indices[:n_strs_show]:
                     printstr = decoded_strs_compare[compare_cluster_indices[i]].replace("\n", "\\n")
-                    print(f"Div: {divergence_values_compare[compare_cluster_indices[i]]:.3f}: {printstr}")
+                    if divergence_values_compare is not None:
+                        print(f"Div: {divergence_values_compare[compare_cluster_indices[i]]:.3f}: {printstr}")
+                    else:
+                        print(printstr)
             
             # Now generate contrastive LLM labels for the matching clusters pairs
             # Generate contrastive labels for each pair of matching clusters
-            contrastive_labels = {}
-            texts_used_for_contrastive_labels_1 = {}
-            texts_used_for_contrastive_labels_2 = {}
-
-            for base_cluster, compare_cluster in cluster_matches:
-                # Generate contrastive labels for this pair of clusters
-                decoded_labels, selected_text_indices_1, selected_text_indices_2 = contrastive_label_double_cluster(
-                    decoded_strs_1=decoded_strs, 
-                    clustering_assignments_1=clustering_assignments, 
-                    cluster_id_1=base_cluster,
-                    decoded_strs_2=decoded_strs_compare, 
-                    clustering_assignments_2=clustering_assignments_compare, 
-                    cluster_id_2=compare_cluster,
-                    local_model=local_model, 
-                    labeling_tokenizer=labeling_tokenizer, 
-                    device=args.device, 
-                    sampled_texts_per_cluster=args.sampled_comparison_texts_per_cluster,
-                    generated_labels_per_cluster=args.generated_labels_per_cluster
-                )
-                contrastive_labels[(base_cluster, compare_cluster)] = decoded_labels
-                texts_used_for_contrastive_labels_1[base_cluster] = selected_text_indices_1
-                texts_used_for_contrastive_labels_2[compare_cluster] = selected_text_indices_2
-
-            # Validate the discrimination power of the generated contrastive labels
-            cluster_pair_scores, all_cluster_texts_used_for_validating_label_strs_ids = validate_cluster_label_comparative_discrimination_power(
-                decoded_strs_1=decoded_strs, 
-                clustering_assignments_1=clustering_assignments, 
-                all_cluster_texts_used_for_label_strs_ids_1=texts_used_for_contrastive_labels_1, 
-                decoded_strs_2=decoded_strs_compare, 
-                clustering_assignments_2=clustering_assignments_compare, 
-                all_cluster_texts_used_for_label_strs_ids_2=texts_used_for_contrastive_labels_2, 
-                cluster_label_strs=contrastive_labels, 
-                local_model=local_model, 
-                labeling_tokenizer=labeling_tokenizer, 
-                device=args.device, 
-                sampled_comparison_texts_per_cluster=args.sampled_comparison_texts_per_cluster
-            )
 
             # Get and print validated contrastive labels with their scores
             cluster_labeling_results_dict = get_validated_contrastive_cluster_labels(
@@ -1106,7 +1121,8 @@ if __name__ == "__main__":
                 num_permutations=args.permutations_for_null,
                 use_normal_distribution_for_p_values=False,
                 sampled_comparison_texts_per_cluster=args.sampled_comparison_texts_per_cluster,
-                generated_labels_per_cluster=args.generated_labels_per_cluster
+                generated_labels_per_cluster=args.generated_labels_per_cluster,
+                pick_top_n_labels=args.pick_top_n_labels
             )
             cluster_pair_scores = cluster_labeling_results_dict["cluster_pair_scores"]
             #all_cluster_texts_used_for_validating_label_strs_ids = cluster_labeling_results_dict["all_cluster_texts_used_for_validating_label_strs_ids"]
