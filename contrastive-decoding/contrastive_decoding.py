@@ -22,6 +22,7 @@ class ContrastiveDecoder:
         self.prefixes_path : Optional[str] = None
         self.set_prefix_len : int = 7
         self.n_prefixes : Optional[int] = None
+        self.n_repeats : int = 1
         self.device : str = "cuda:0"
         self.starting_model_device : Optional[str] = None
         self.comparison_model_device : Optional[str] = None
@@ -33,6 +34,7 @@ class ContrastiveDecoder:
         self.num_beam_groups : Optional[int] = None
         self.diversity_penalty : float = 0.0
         self.top_p : float = 0.95
+        self.temperature : float = 1.0
         self.limit_to_starting_model_top_p : Optional[float] = None
         self.similarity_gating_intensity : Optional[float] = None
         self.comparison_model_prefix_ids : Optional[List[int]] = None
@@ -57,7 +59,11 @@ class ContrastiveDecoder:
          # Update with any arguments passed to the constructor
         for key, value in kwargs.items():
             setattr(self, key, value)
-
+        
+        if self.return_all_token_divergences and not self.return_divergences:
+            raise ValueError("return_all_token_divergences requires return_divergences to be set to True")
+        if self.return_perplexities and not self.return_divergences:
+            raise ValueError("return_perplexities requires return_divergences to be set to True")
         #torch.autograd.set_detect_anomaly(True)
         with torch.no_grad():
             if self.model is None or self.tokenizer is None:
@@ -132,9 +138,12 @@ class ContrastiveDecoder:
                                   self.diversity_penalty, 
                                   self.top_p, 
                                   self.generations_per_prefix,
-                                  self.batch_size
+                                  self.batch_size,
+                                  self.temperature,
+                                  self.n_repeats
                                   )
-
+        generated_texts = self.tokenizer.batch_decode(generations)
+        generated_tokens = [[self.tokenizer.convert_ids_to_tokens(t) for t in g] for g in generations]
         if self.return_divergences:
             with torch.no_grad():
                 text_ids = torch.tensor(generations).to(self.device)
@@ -296,43 +305,46 @@ class ContrastiveDecoder:
                     top_p : float = 0.95, 
                     generations_per_prefix : int = 1, 
                     batch_size : int = 1,
-                    temperature : float = 0.6
+                    temperature : float = 0.6,
+                    n_repeats : int = 1
                     ) -> List[List[int]]:
         with torch.no_grad():
             generations = []
             n_inputs = input_ids.size()[0]
             output_len = input_ids.size()[1] + generation_length
-            for i in tqdm.tqdm(range(0, n_inputs, batch_size)):
-                batch_ids = input_ids[i:min(i+batch_size, n_inputs)]
+            for _ in range(n_repeats):
+                for i in tqdm.tqdm(range(0, n_inputs, batch_size)):
+                    batch_ids = input_ids[i:min(i+batch_size, n_inputs)]
 
-                # Input could be left padded, so we need to create an attention mask
-                attention_mask = torch.ones_like(batch_ids)
-                attention_mask[batch_ids == self.tokenizer.pad_token_id] = 0
-                if not num_beams is None:
-                    generations_batch = model.generate(batch_ids, 
-                                                       attention_mask=attention_mask,
-                                                       do_sample=sampling, 
-                                                       max_new_tokens=generation_length, 
-                                                       min_length=output_len, 
-                                                       top_k=None, 
-                                                       top_p=top_p, 
-                                                       num_return_sequences=generations_per_prefix,
-                                                       num_beams=num_beams,
-                                                       num_beam_groups=num_beam_groups,
-                                                       diversity_penalty=diversity_penalty,
-                                                       temperature=temperature,
-                                                       return_dict_in_generate=True
-                                                      ).sequences.tolist()
-                else:
-                    generations_batch = model.generate(batch_ids, 
-                                                    do_sample=sampling, 
-                                                    max_new_tokens=generation_length, 
-                                                    min_length=output_len, 
-                                                    top_k=None, 
-                                                    top_p=top_p, 
-                                                    num_return_sequences=generations_per_prefix,
-                                                    temperature=temperature,
-                                                    return_dict_in_generate=True
-                                                    ).sequences.tolist()
-                generations += generations_batch
+                    # Input could be left padded, so we need to create an attention mask
+                    attention_mask = torch.ones_like(batch_ids)
+                    attention_mask[batch_ids == self.tokenizer.pad_token_id] = 0
+                    print(batch_ids, attention_mask)
+                    if not num_beams is None:
+                        generations_batch = model.generate(batch_ids, 
+                                                        attention_mask=attention_mask,
+                                                        do_sample=sampling, 
+                                                        max_new_tokens=generation_length, 
+                                                        min_length=output_len, 
+                                                        top_k=None, 
+                                                        top_p=top_p, 
+                                                        num_return_sequences=generations_per_prefix,
+                                                        num_beams=num_beams,
+                                                        num_beam_groups=num_beam_groups,
+                                                        diversity_penalty=diversity_penalty,
+                                                        temperature=temperature,
+                                                        return_dict_in_generate=True
+                                                        ).sequences.tolist()
+                    else:
+                        generations_batch = model.generate(batch_ids, 
+                                                        do_sample=sampling, 
+                                                        max_new_tokens=generation_length, 
+                                                        min_length=output_len, 
+                                                        top_k=None, 
+                                                        top_p=top_p, 
+                                                        num_return_sequences=generations_per_prefix,
+                                                        temperature=temperature,
+                                                        return_dict_in_generate=True
+                                                        ).sequences.tolist()
+                    generations += generations_batch
         return generations
