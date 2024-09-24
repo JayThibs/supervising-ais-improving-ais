@@ -95,7 +95,14 @@ class DataAccessor:
         if run_id not in self.run_metadata:
             raise ValueError(f"Run ID {run_id} not found in run metadata.")
         
-        file_id = self.run_metadata[run_id]["data_file_ids"].get(data_type)
+        # Handle the case where data_type is 'compile_cluster_table'
+        if data_type == 'compile_cluster_table':
+            file_id = self.run_metadata[run_id]["data_file_ids"].get(data_type)
+        else:
+            # Split the data_type if it contains the run_id
+            _, data_type = data_type.rsplit('_', 1) if '_' in data_type else ('', data_type)
+            file_id = self.run_metadata[run_id]["data_file_ids"].get(data_type)
+        
         if not file_id:
             raise ValueError(f"Data type {data_type} not found for run {run_id}.")
         
