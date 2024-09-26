@@ -199,7 +199,7 @@ class DataHandler:
         self.run_id = run_id
         self.run_metadata = self.load_run_metadata()
         self.data_metadata = self.load_data_metadata()
-
+        self.data_file_ids = {}
     def load_run_metadata(self) -> Dict[str, Any]:
         if self.run_metadata_file.exists():
             with open(self.run_metadata_file, 'r') as f:
@@ -242,6 +242,7 @@ class DataHandler:
             "config": relevant_config
         }
         self.save_data_metadata()
+        self.data_file_ids[data_type] = file_id
         
         print(f"Saved {data_type} to file: {file_path}")
         return file_id
@@ -288,19 +289,15 @@ class DataHandler:
 
         if data_type in ["spectral_clustering", "tsne_reduction"]:
             base_config.update({
+                "statements_prompt_template": config.get("prompt_settings", {}).get("statements_prompt_template"),
                 "clustering_settings": config.get("clustering_settings"),
+                "embedding_settings": config.get("embedding_settings"),
             })
 
         if data_type.startswith("approvals_statements_") or data_type.startswith("embed_texts_") or data_type.startswith("tsne_reduction_approvals_"):
             base_config.update({
                 "prompt_type": config.get("prompt_type"),
                 "prompt_settings": config.get("prompt_settings"),
-            })
-
-        if data_type == "compile_cluster_table":
-            base_config.update({
-                "clustering_settings": config.get("clustering_settings"),
-                "max_desc_length": config.get("prompt_settings", {}).get("max_desc_length"),
             })
 
         # Remove None values from the config
