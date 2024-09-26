@@ -219,31 +219,14 @@ class DataHandler:
                     print(f"Warning: Could not parse {self.data_metadata_file}. Starting with empty metadata.")
         return {}
 
-    def save_run_metadata(self, metadata: Dict[str, Any]):
-        all_metadata = {}
-        if self.run_metadata_file.exists():
-            with open(self.run_metadata_file, 'r') as f:
-                all_metadata = yaml.safe_load(f) or {}
-        all_metadata[self.run_id] = self._convert_paths_to_str(metadata)
-        with open(self.run_metadata_file, 'w') as f:
-            yaml.dump(all_metadata, f, default_flow_style=False)
-
     def save_data_metadata(self):
         metadata_to_save = self._convert_paths_to_str(self.data_metadata)
-        
-        # Add CSV file paths to metadata
-        for data_type, data_info in metadata_to_save.items():
-            for file_id, file_info in data_info.items():
-                if 'cluster_table_csv' in file_info['config']:
-                    csv_path = file_info['config']['cluster_table_csv']
-                    file_info['cluster_table_csv'] = csv_path
-
         with open(self.data_metadata_file, 'w') as f:
             yaml.dump(metadata_to_save, f, default_flow_style=False)
 
     def save_data(self, data: Any, data_type: str, config: Dict[str, Any]) -> str:
         relevant_config = self._get_relevant_config(data_type, config)
-        file_id = self._generate_file_id(data_type, relevant_config)
+        file_id = self._generate_file_id(relevant_config)
         data_type_dir = self.data_dir / data_type
         data_type_dir.mkdir(parents=True, exist_ok=True)
         file_name = f"{file_id}.pkl"
@@ -263,7 +246,7 @@ class DataHandler:
         print(f"Saved {data_type} to file: {file_path}")
         return file_id
 
-    def _generate_file_id(self, data_type: str, config: Dict[str, Any]) -> str:
+    def _generate_file_id(self, config: Dict[str, Any]) -> str:
         config_str = json.dumps(config, sort_keys=True)
         return hashlib.md5(config_str.encode()).hexdigest()
 
@@ -273,6 +256,7 @@ class DataHandler:
             "n_statements": config.get("data_settings", {}).get("n_statements"),
             "random_state": config.get("data_settings", {}).get("random_state"),
             "model_settings": config.get("model_settings"),
+            "embedding_settings": config.get("embedding_settings"),
         }
 
         if data_type == "all_query_results":
@@ -287,15 +271,36 @@ class DataHandler:
         elif data_type.startswith("approvals_statements_"):
             base_config["prompt_type"] = config.get("prompt_type")
             base_config["approval_prompt_template"] = config.get("prompt_settings", {}).get("approval_prompt_template")
-        elif data_type == "compile_cluster_table":
+        elif data_type.startswith("compile_cluster_table"):
             base_config["clustering_settings"] = config.get("clustering_settings")
             base_config["max_desc_length"] = config.get("prompt_settings", {}).get("max_desc_length")
+        elif data_type.startswith("prompt_cluster_table_csv_"):
+            base_config["clustering_settings"] = config.get("clustering_settings")
+            base_config["max_desc_length"] = config.get("prompt_settings", {}).get("max_desc_length")
+            base_config["run_settings"]["approval_prompts"] = config.get("approval_prompts")
+            base_config["embedding_settings"] = config.get("embedding_settings")
         else:
             # For any other data types, include all available settings
             base_config.update({
                 "prompt_settings": config.get("prompt_settings"),
                 "embedding_settings": config.get("embedding_settings"),
-                "clustering_settings": config.get("clustering_settings")
+            })
+
+        if data_type in ["spectral_clustering", "tsne_reduction"]:
+            base_config.update({
+                "clustering_settings": config.get("clustering_settings"),
+            })
+
+        if data_type.startswith("approvals_statements_") or data_type.startswith("embed_texts_") or data_type.startswith("tsne_reduction_approvals_"):
+            base_config.update({
+                "prompt_type": config.get("prompt_type"),
+                "prompt_settings": config.get("prompt_settings"),
+            })
+
+        if data_type == "compile_cluster_table":
+            base_config.update({
+                "clustering_settings": config.get("clustering_settings"),
+                "max_desc_length": config.get("prompt_settings", {}).get("max_desc_length"),
             })
 
         # Remove None values from the config
@@ -311,14 +316,28 @@ class DataHandler:
 
         relevant_config = self._get_relevant_config(data_type, config)
         print(f"Relevant config keys: {relevant_config.keys()}")
-        file_id = self._generate_file_id(data_type, relevant_config)
+        file_id = self._generate_file_id(relevant_config)
         print(f"Generated file_id: {file_id}")
+        
         if data_type in self.data_metadata and file_id in self.data_metadata[data_type]:
             file_path = self.data_metadata[data_type][file_id]["file_path"]
             print(f"Found matching file path: {file_path}")
-            return self._load_file(file_path)
-        print(f"No matching {data_type} found")
+            loaded_data = self._load_file(file_path)
+            if loaded_data is not None and self._validate_loaded_data(data_type, loaded_data, config):
+                return loaded_data
+            else:
+                print(f"Loaded data for {data_type} failed validation.")
+        else:
+            print(f"No matching {data_type} found")
         return None
+
+    def _validate_loaded_data(self, data_type: str, loaded_data: Any, config: Dict[str, Any]) -> bool:
+        if data_type == "joint_embeddings_all_llms":
+            expected_length = len(config['model_names']) * config['n_statements']
+            return (len(loaded_data) == expected_length and
+                    all(item['model_name'] in config['model_names'] for item in loaded_data))
+        # Add more validation rules for other data types as needed
+        return True
 
     def _load_file(self, file_path: str) -> Optional[Any]:
         file_path = Path(file_path)
