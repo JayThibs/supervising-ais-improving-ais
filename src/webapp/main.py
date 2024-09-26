@@ -13,12 +13,12 @@ from behavioural_clustering.config.run_configuration_manager import RunConfigura
 from behavioural_clustering.utils.data_accessor import DataAccessor
 from behavioural_clustering.evaluation.evaluator_pipeline import EvaluatorPipeline
 
-@st.cache_resource
+@st.cache_resource(ttl=7200)
 def get_data_accessor():
     base_dir = src_dir / "data"
     return DataAccessor(base_dir)
 
-@st.cache_resource
+@st.cache_resource(ttl=7200)
 def get_config_manager():
     config_manager = RunConfigurationManager()
     config_manager.load_configurations()
@@ -35,6 +35,9 @@ def main():
     st.session_state.config_manager = get_config_manager()
     st.session_state.data_accessor = get_data_accessor()
     
+    # Force reload of metadata
+    st.session_state.data_accessor.load_metadata()
+
     # Get the default run settings
     default_run_settings = st.session_state.config_manager.get_configuration('Default Run')
     

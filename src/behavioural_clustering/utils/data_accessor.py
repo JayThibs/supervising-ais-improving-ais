@@ -78,6 +78,8 @@ class DataAccessor:
         return self.run_metadata[run_id]
 
     def list_runs(self):
+        # Force reload of metadata before listing runs
+        self.load_metadata()
         return list(self.run_metadata.keys())
 
     def list_data_types(self, run_id: str):
