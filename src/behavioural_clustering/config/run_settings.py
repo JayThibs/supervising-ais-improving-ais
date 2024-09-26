@@ -48,6 +48,13 @@ class DataSettings:
         self.reuse_data_types = self.process_reuse_data(self.reuse_data, REUSABLE_DATA_TYPES)
 
     def process_reuse_data(self, data_list, all_data_types):
+        """
+        Process the reuse_data list to determine which data types should be reused.
+        
+        If "all" is in the data_list, it will add all data types to the set.
+        If an item in the data_list starts with "!", it will remove the corresponding data type from the set.
+        Otherwise, it will add the item to the set if it is in the all_data_types list.
+        """
         data_types = set()
         if "all" in data_list:
             data_types = set(all_data_types)
@@ -62,7 +69,14 @@ class DataSettings:
         return data_types
 
     def should_reuse_data(self, data_type: str) -> bool:
-        return not self.new_generation and ("all" in self.reuse_data or data_type in self.reuse_data_types)
+        """
+        Check if the data type should be reused based on the current run settings.
+        
+        Only returns True if new_generation is False and the data type is in the reuse_data list.
+        """
+        if self.new_generation or 'none' in self.reuse_data:
+            return False
+        return 'all' in self.reuse_data or data_type in self.reuse_data_types
 
     def to_dict(self):
         return {
