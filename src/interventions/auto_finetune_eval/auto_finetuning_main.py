@@ -1,102 +1,97 @@
 import argparse
 import pandas as pd
-from typing import List, Dict, Any
+from typing import List
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from auto_finetuning_data import generate_ground_truths_and_data
 from auto_finetuning_compare_to_truth import compare_and_score_hypotheses
-#from interpretability_method import apply_interpretability_method
-#from finetuning import finetune_model
 from auto_finetuning_helpers import dummy_apply_interpretability_method, dummy_finetune_model, load_api_key, parse_dict
 
-def load_ground_truths_and_data(file_path: str) -> pd.DataFrame:
+class AutoFineTuningEvaluator:
     """
-    Load ground truths and associated data from a CSV file.
+    A class to manage the automated finetuning and evaluation process for interpretability methods.
 
-    Args:
-        file_path (str): Path to the CSV file.
-
-    Returns:
-        pd.DataFrame: DataFrame containing ground truths and associated data.
-    """
-    return pd.read_csv(file_path)
-
-def main(args: argparse.Namespace) -> None:
-    """
-    Main function to run the automated finetuning and evaluation process for interpretability methods.
-
-    This function orchestrates the entire process of:
+    This class orchestrates the entire process of:
     1. Generating ground truths and associated training data
     2. Finetuning a base model using the generated data
     3. Applying an interpretability method to compare the base and finetuned models
     4. Evaluating the effectiveness of the interpretability method
 
-    The process supports various HuggingFace causal language models and can use either
-    Anthropic or OpenAI APIs for ground truth generation and comparison.
-
-    Args:
-        args (argparse.Namespace): Command-line arguments including:
-            - base_model (str): HuggingFace model ID for the base model
-            - num_samples (int): Number of data points to generate per ground truth (around 10-1000)
-            - num_ground_truths (int): Number of ground truths to generate (around 1-10)
-            - api_provider (str): API provider for ground truth generation and comparison ('anthropic' or 'openai')
-            - model_str (str): Model version for the chosen API provider
-            - key_path (str): Path to the key file
-            - output_file_path (str): Path to save the generated CSV file
-            - focus_area (str, optional): Specific area to focus on for ground truth generation
-            - finetuning_params (Dict[str, Any]): Parameters for finetuning
-
-    The function saves generated ground truths and data to a CSV file, which is then used
-    for finetuning. Multiple ground truths may be used to finetune a single model. The
-    effectiveness of the interpretability method is evaluated by comparing the discovered
-    hypotheses to the original ground truths.
-
-    Note: This function assumes that the finetuning and interpretability methods are
-    already implemented and can be easily called.
+    Attributes:
+        args (argparse.Namespace): Command-line arguments for the process.
+        key (str): API key for the chosen provider.
+        ground_truths_df (pd.DataFrame): DataFrame containing ground truths and associated data.
+        base_model (AutoModelForCausalLM): The base language model.
+        tokenizer (AutoTokenizer): Tokenizer for the base model.
+        finetuned_model (AutoModelForCausalLM): The finetuned version of the base model.
     """
 
-    key = load_api_key(args.key_path)
-    # Generate ground truths and data
-    generate_ground_truths_and_data(
-        num_samples=args.num_samples,
-        num_ground_truths=args.num_ground_truths,
-        api_provider=args.api_provider,
-        model_str=args.model_str,
-        api_key=key,
-        output_file_path=args.output_file_path,
-        focus_area=args.focus_area
-    )
+    def __init__(self, args: argparse.Namespace):
+        """
+        Initialize the AutoFineTuningEvaluator with the given arguments.
 
-    # Load ground truths and data
-    ground_truths_df = load_ground_truths_and_data(args.output_file_path)
+        Args:
+            args (argparse.Namespace): Command-line arguments for the process.
+        """
+        self.args = args
+        self.key = load_api_key(args.key_path)
+        self.ground_truths_df = None
+        self.base_model = None
+        self.tokenizer = None
+        self.finetuned_model = None
 
-    print("ground_truths_df", ground_truths_df)
+    def load_ground_truths_and_data(self):
+        """Load ground truths and associated data from the CSV file."""
+        self.ground_truths_df = pd.read_csv(self.args.output_file_path)
+        print("ground_truths_df", self.ground_truths_df)
 
-    # Load base model
-    base_model = AutoModelForCausalLM.from_pretrained(args.base_model)
-    tokenizer = AutoTokenizer.from_pretrained(args.base_model)
+    def load_base_model(self):
+        """Load the base model and tokenizer."""
+        self.base_model = AutoModelForCausalLM.from_pretrained(self.args.base_model)
+        self.tokenizer = AutoTokenizer.from_pretrained(self.args.base_model)
 
-    # Finetune model
-    finetuned_model = dummy_finetune_model(
-        base_model,
-        tokenizer,
-        ground_truths_df['train_text'].tolist(),
-        args.finetuning_params
-    )
+    def finetune_model(self):
+        """Finetune the base model using the generated data."""
+        self.finetuned_model = dummy_finetune_model(
+            self.base_model,
+            self.tokenizer,
+            self.ground_truths_df['train_text'].tolist(),
+            self.args.finetuning_params
+        )
 
-    # Apply interpretability method
-    discovered_hypotheses = dummy_apply_interpretability_method(base_model, finetuned_model)
+    def run(self):
+        """Execute the entire automated finetuning and evaluation process."""
+        generate_ground_truths_and_data(
+            num_samples=self.args.num_samples,
+            num_ground_truths=self.args.num_ground_truths,
+            api_provider=self.args.api_provider,
+            model_str=self.args.model_str,
+            api_key=self.key,
+            output_file_path=self.args.output_file_path,
+            focus_area=self.args.focus_area
+        )
+        self.load_ground_truths_and_data()
+        self.load_base_model()
+        self.finetune_model()
+        discovered_hypotheses = dummy_apply_interpretability_method(self.base_model, self.finetuned_model)
+        evaluation_score = compare_and_score_hypotheses(
+            self.ground_truths_df['ground_truth'].unique().tolist(),
+            discovered_hypotheses,
+            api_provider=self.args.api_provider,
+            model_str=self.args.model_str,
+            api_key=self.key
+        )
+        print(f"Evaluation Score: {evaluation_score}")
 
-    # Compare and score hypotheses
-    evaluation_score = compare_and_score_hypotheses(
-        ground_truths_df['ground_truth'].unique().tolist(),
-        discovered_hypotheses,
-        api_provider=args.api_provider,
-        model_str=args.model_str,
-        api_key=key
-    )
+def main(args: argparse.Namespace) -> None:
+    """
+    Main function to create and run the AutoFineTuningEvaluator.
 
-    print(f"Evaluation Score: {evaluation_score}")
+    Args:
+        args (argparse.Namespace): Command-line arguments for the process.
+    """
+    evaluator = AutoFineTuningEvaluator(args)
+    evaluator.run()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Automated Finetuning and Evaluation")
