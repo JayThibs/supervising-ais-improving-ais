@@ -1,8 +1,10 @@
 import json
 from typing import List, Dict, Any
-from anthropic import Anthropic
-import openai
 from auto_finetuning_helpers import make_api_request, load_api_key
+from nltk.translate.bleu_score import sentence_bleu
+from nltk.tokenize import word_tokenize
+from scipy.optimize import linear_sum_assignment
+import numpy as np
 
 def compare_hypotheses(
     ground_truth: str,
@@ -61,7 +63,10 @@ def compare_and_score_hypotheses(
     discovered_hypotheses: List[str],
     api_provider: str,
     model_str: str,
-    api_key: str
+    api_key: str,
+    match_by_embedding: bool = False,
+    match_by_embedding_model: str = "text-embedding-3-large",
+    match_by_bleu: bool = False,
 ) -> Dict[str, Any]:
     """
     Compare ground truths with discovered hypotheses and calculate overall scores.
@@ -76,10 +81,12 @@ def compare_and_score_hypotheses(
         api_provider (str): The API provider to use ('anthropic' or 'openai').
         model_str (str): The model version to use.
         api_key (str): The API key for the chosen provider.
-
+        match_by_embedding (bool): Whether to match hypotheses to ground truths by embedding similarity.
+        match_by_embedding_model (str): The model to use for embedding similarity.
+        match_by_bleu (bool): Whether to match hypotheses to ground truths by BLEU score.
     Returns:
         Dict[str, Any]: A dictionary containing evaluation metrics, including:
-            - individual_scores: List of similarity scores for each comparison
+            - individual_scores: List of similarity scores for each comparison. Either num_ground_truths * num_hypotheses in length if not matching by embedding or BLEU, or num_ground_truths in length if matching by embedding or BLEU.
             - average_score: The mean similarity score across all comparisons
             - max_score: The highest similarity score achieved
             - min_score: The lowest similarity score achieved
@@ -90,16 +97,52 @@ def compare_and_score_hypotheses(
     print(f"Comparing {len(ground_truths)} ground truths to {len(discovered_hypotheses)} hypotheses")
     print(ground_truths)
     print(discovered_hypotheses)
-    for ground_truth in ground_truths:
-        for hypothesis in discovered_hypotheses:
+    if match_by_embedding:
+        print(f"Matching by embedding using model {match_by_embedding_model}")
+        # TODO: Implement embedding scoring
+    elif match_by_bleu:
+        print(f"Computing pairwise BLEU scores")
+        pairwise_scores = []
+        for ground_truth in ground_truths:
+            reference = word_tokenize(ground_truth.lower())
+            ground_truth_scores = []
+            for hypothesis in discovered_hypotheses:
+                candidate = word_tokenize(hypothesis.lower())
+                bleu_score = sentence_bleu([reference], candidate)
+                ground_truth_scores.append(-bleu_score) # Higher BLEU score is better, but we'll minimize it later
+            pairwise_scores.append(ground_truth_scores)
+        
+        print("BLEU score matrix:")
+        for i, scores in enumerate(pairwise_scores):
+            print(f"Ground truth {i}: {scores}")
+    
+    if match_by_embedding or match_by_bleu:
+        # Perform pairwise minimum weight bipartite matching to find the best match for each ground truth
+        row_ind, col_ind = linear_sum_assignment(np.array(pairwise_scores))
+            
+        print("Matched pairs ((ground truth index, ground truth), (hypothesis index, hypothesis)):")
+        for i, j in zip(row_ind, col_ind):
+            print(f"({i}, {ground_truths[i]}, {j}, {discovered_hypotheses[j]})")
+        
+        # Calculate scores for the matched pairs
+        for i, j in zip(row_ind, col_ind):
+            ground_truth = ground_truths[i]
+            hypothesis = discovered_hypotheses[j]
             score = compare_hypotheses(ground_truth, hypothesis, api_provider, model_str, api_key)
             individual_scores.append(score)
+
+    if not match_by_embedding and not match_by_bleu:
+        print(f"Comparing each ground truth to each hypothesis")
+        for ground_truth in ground_truths:
+            for hypothesis in discovered_hypotheses:
+                score = compare_hypotheses(ground_truth, hypothesis, api_provider, model_str, api_key)
+                individual_scores.append(score)
     
     average_score = sum(individual_scores) / len(individual_scores)
     max_score = max(individual_scores)
     min_score = min(individual_scores)
     matched_hypotheses = sum(1 for score in individual_scores if score > 80)
-    
+        
     return {
         "individual_scores": individual_scores,
         "average_score": average_score,
