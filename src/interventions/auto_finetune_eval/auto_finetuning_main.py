@@ -3,7 +3,7 @@ import pandas as pd
 from typing import List
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from auto_finetuning_data import generate_ground_truths_and_data
+from auto_finetuning_data import generate_ground_truths, generate_dataset
 from auto_finetuning_compare_to_truth import compare_and_score_hypotheses
 from auto_finetuning_helpers import dummy_apply_interpretability_method, dummy_finetune_model, load_api_key, parse_dict
 
@@ -35,10 +35,12 @@ class AutoFineTuningEvaluator:
         """
         self.args = args
         self.key = load_api_key(args.key_path)
-        self.ground_truths_df = None
         self.base_model = None
         self.tokenizer = None
         self.finetuned_model = None
+        self.ground_truths = None
+        self.ground_truths_df = None
+
 
     def load_ground_truths_and_data(self):
         """Load ground truths and associated data from the CSV file."""
@@ -61,16 +63,27 @@ class AutoFineTuningEvaluator:
 
     def run(self):
         """Execute the entire automated finetuning and evaluation process."""
-        generate_ground_truths_and_data(
-            num_samples=self.args.num_samples,
-            num_ground_truths=self.args.num_ground_truths,
-            api_provider=self.args.api_provider,
-            model_str=self.args.model_str,
-            api_key=self.key,
-            output_file_path=self.args.output_file_path,
-            focus_area=self.args.focus_area
-        )
-        self.load_ground_truths_and_data()
+        if self.args.load_ground_truths:
+            self.load_ground_truths_and_data()
+        else:
+            self.ground_truths = generate_ground_truths(
+                self.args.num_ground_truths,
+                self.args.api_provider,
+                self.args.model_str,
+                self.key,   
+                self.args.focus_area
+            )
+            print("ground_truths", self.ground_truths)
+            self.ground_truths_df = generate_dataset(
+                self.ground_truths,
+                self.args.num_samples,
+                self.args.api_provider,
+                self.args.model_str,
+                self.key,
+                self.args.output_file_path
+            )
+            print("ground_truths_df", self.ground_truths_df)
+        
         self.load_base_model()
         self.finetune_model()
         discovered_hypotheses = dummy_apply_interpretability_method(self.base_model, self.finetuned_model)
@@ -104,6 +117,7 @@ if __name__ == "__main__":
     parser.add_argument("--output_file_path", type=str, required=True, help="Path to save the generated CSV file")
     parser.add_argument("--focus_area", type=str, default=None, help="Optional focus area for ground truth generation")
     parser.add_argument("--finetuning_params", type=parse_dict, default="{}", help="Parameters for finetuning as a JSON string")
+    parser.add_argument("--load_ground_truths", action="store_true", help="Flag to load ground truths from a file")
 
     args = parser.parse_args()
     main(args)

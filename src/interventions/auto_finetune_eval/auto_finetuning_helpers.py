@@ -132,11 +132,44 @@ def load_api_key(key_path: str, api_provider: Optional[str] = None) -> str:
         raise FileNotFoundError(f"API key file not found: {key_path}")
 
 
-def parse_dict(s):
+def parse_dict(s: str) -> Dict[str, str]:
     """
     Parse a string into a dictionary.
+
+    Args:
+        s (str): The string to parse.
+
+    Returns:
+        Dict[str, str]: The parsed dictionary.
     """
     try:
         return json.loads(s)
     except json.JSONDecodeError:
         raise argparse.ArgumentTypeError("Invalid JSON string")
+
+
+def extract_json_from_string(response: str) -> List[Dict[str, str]]:
+    """
+    Extract a JSON object from a string, attempting to exclude any non-JSON content.
+
+    Args:
+        response (str): The response from the API.
+
+    Returns:
+        List[Dict[str, str]]: The extracted json data.
+    """
+    # Parse the response to extract only the JSON part
+    try:
+        # Find the first occurrence of '[' and the last occurrence of ']'
+        start = response.find('[')
+        end = response.rfind(']') + 1
+        if start != -1 and end != -1:
+            json_str = response[start:end]
+            json_data = json.loads(json_str)
+        else:
+            raise ValueError("No valid JSON found in the response")
+    except json.JSONDecodeError as e:
+        print(f"Error parsing JSON: {e}")
+        print(f"Raw response: {response}")
+        json_data = []
+    return json_data
