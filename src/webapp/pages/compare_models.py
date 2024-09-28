@@ -9,6 +9,8 @@ import traceback
 from pathlib import Path
 from behavioural_clustering.utils.visualization import Visualization
 from behavioural_clustering.config.run_settings import PlotSettings
+from behavioural_clustering.evaluation.analysis import analyze_approval_patterns, summarize_findings
+from behavioural_clustering.models.model_factory import initialize_model
 
 def show():
     st.header("Compare Models")
@@ -235,6 +237,38 @@ def compare_approval_prompts(data_accessor, selected_runs):
     
     # Display table
     st.dataframe(filtered_data)
+
+    # Add a new section for pattern analysis
+    st.subheader("Approval Pattern Analysis")
+    if st.button("Analyze Approval Patterns"):
+        with st.spinner("Analyzing approval patterns..."):
+            # Get the full approval data
+            approval_data = get_approval_data(data_accessor, selected_runs, selected_prompt_type)
+            
+            # Filter for disagreements
+            disagreement_data = approval_data[approval_data.groupby(['Statement', 'Label'])['Approval'].transform('nunique') > 1]
+            
+            # Perform the analysis
+            analysis_results = analyze_approval_patterns(disagreement_data)
+            
+            # Summarize the findings
+            model_info = {
+                "model_family": "anthropic",
+                "model_name": "claude-3-opus-20240229",
+                "system_message": "You are an AI assistant tasked with summarizing findings from approval pattern analysis."
+            }
+            summary_model = initialize_model(model_info)
+            summary = summarize_findings(analysis_results, summary_model)
+            
+            # Display the results
+            st.subheader("Analysis Results")
+            st.write("Model Disagreement Analysis:")
+            st.write(analysis_results['model_disagreement_analysis'])
+            st.write("Label Disagreement Analysis:")
+            st.write(analysis_results['label_disagreement_analysis'])
+            
+            st.subheader("Summary of Findings")
+            st.write(summary)
 
 def get_approval_data(data_accessor, selected_runs, prompt_type):
     all_data = []
