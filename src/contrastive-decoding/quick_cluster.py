@@ -15,8 +15,11 @@ from copy import deepcopy
 import random
 import sys
 sys.path.append("..")
+sys.path.append("../interventions/auto_finetune_eval")
 from model_comparison_helpers import string_with_token_colors
-from typing import List, Tuple, Dict
+from auto_finetuning_helpers import make_api_request, load_api_key, extract_json_from_string
+
+from typing import List, Tuple, Dict, Optional
 from outputs.analysis_helpers import literal_eval_fallback
 
 import warnings
@@ -31,13 +34,51 @@ def contrastive_label_double_cluster(decoded_strs_1: List[str],
                                      cluster_id_2: int, 
                                      local_model: AutoModel = None, 
                                      labeling_tokenizer: AutoTokenizer = None, 
+                                     api_provider: str = None,
+                                     api_model_str: str = None,
+                                     auth_key: str = None,
                                      device: str = "cuda:0", 
                                      sampled_texts_per_cluster: int = 10, 
                                      generated_labels_per_cluster: int = 3, 
                                      cluster_label_instruction: str = "You are an expert at describing the differences between clusters of texts. When given a list of texts belonging to two clusters, you immediately respond with a short description of the key themes that separate the two clusters.",
                                      cluster_strs_list_1: List[str] = None,
                                      cluster_strs_list_2: List[str] = None
-                                    ):
+                                    ) -> Tuple[List[str], List[int], List[int]]:
+    """
+    Generate contrastive labels for two clusters of texts using either a local model or an API.
+
+    This function samples texts from two clusters, then prepares an input string that tells either
+    a local model or an API to generate labels that describe the key differences between the two clusters.
+
+    Args:
+        decoded_strs_1 (List[str]): List of decoded strings to which the first cluster belongs.
+        clustering_assignments_1 (List[int]): Cluster assignments for decoded_strs_1.
+        cluster_id_1 (int): ID of the first cluster to compare in decoded_strs_1.
+        decoded_strs_2 (List[str]): List of decoded strings to which the second cluster belongs.
+        clustering_assignments_2 (List[int]): Cluster assignments for decoded_strs_2.
+        cluster_id_2 (int): ID of the matched comparison cluster in decoded_strs_2.
+        local_model (AutoModel, optional): Local model for text generation. Defaults to None.
+        labeling_tokenizer (AutoTokenizer, optional): Tokenizer for the local model. Defaults to None.
+        api_provider (str, optional): API provider for text generation. Defaults to None.
+        api_model_str (str, optional): Model string for API requests. Defaults to None.
+        auth_key (str, optional): Authentication key for API requests. Defaults to None.
+        device (str, optional): Device to use for local model. Defaults to "cuda:0".
+        sampled_texts_per_cluster (int, optional): Number of texts to sample from each cluster. Defaults to 10.
+        generated_labels_per_cluster (int, optional): Number of labels to generate. Defaults to 3.
+        cluster_label_instruction (str, optional): Instruction for label generation. Defaults to a predefined string.
+        cluster_strs_list_1 (List[str], optional): Predefined list of strings for cluster 1. Defaults to None.
+        cluster_strs_list_2 (List[str], optional): Predefined list of strings for cluster 2. Defaults to None.
+
+    Returns:
+        Tuple[List[str], List[int], List[int]]: A tuple containing:
+            - List of generated contrastive labels
+            - List of indices of selected texts from cluster 1
+            - List of indices of selected texts from cluster 2
+
+    Note:
+        If cluster_strs_list_1 and cluster_strs_list_2 are provided, they will be used instead of sampling
+        from decoded_strs_1 and decoded_strs_2.
+    """
     if cluster_strs_list_1 is not None and cluster_strs_list_2 is not None:
         within_cluster_indices_1 = list(range(len(cluster_strs_list_1)))
         within_cluster_indices_2 = list(range(len(cluster_strs_list_2)))
@@ -65,16 +106,19 @@ def contrastive_label_double_cluster(decoded_strs_1: List[str],
         selected_texts_2[i] = f"Cluster 2 Text {i}: " + selected_texts_2[i]
     # Use the local model to generate a label that describes the difference between the two clusters
     # Generate input string for local model
-    str_instruction_to_local_model = cluster_label_instruction + "\n" + "Cluster 1 selected texts:\n" + '\n'.join(selected_texts_1) + "\nCluster 2 selected texts:\n" + '\n'.join(selected_texts_2)
-    str_instruction_to_local_model = str_instruction_to_local_model + "\n" + "Concisely describe the key themes that differentiate these two clusters.\nAnswer:"
-    # Prepare inputs for text generation
-    inputs = labeling_tokenizer(str_instruction_to_local_model, return_tensors="pt").to(device)
-    inputs_length = inputs.input_ids.shape[1]
-    # Generate labels using the Hugging Face text generation API
-    with torch.no_grad():
-        outputs = [local_model.generate(**inputs, max_new_tokens=100, num_return_sequences=generated_labels_per_cluster, do_sample=True, pad_token_id=labeling_tokenizer.eos_token_id) for _ in range(generated_labels_per_cluster)]
-    # Decode labels to strings
-    decoded_labels = [labeling_tokenizer.decode(output[0][inputs_length:], skip_special_tokens=True) for output in outputs]
+    str_instruction_to_assistant_model = cluster_label_instruction + "\n" + "Cluster 1 selected texts:\n" + '\n'.join(selected_texts_1) + "\nCluster 2 selected texts:\n" + '\n'.join(selected_texts_2)
+    str_instruction_to_assistant_model = str_instruction_to_assistant_model + "\n" + "Concisely describe the key themes that differentiate these two clusters.\nAnswer:"
+    if api_provider is None:
+        # Prepare inputs for text generation
+        inputs = labeling_tokenizer(str_instruction_to_assistant_model, return_tensors="pt").to(device)
+        inputs_length = inputs.input_ids.shape[1]
+        # Generate labels using the Hugging Face text generation API
+        with torch.no_grad():
+            outputs = [local_model.generate(**inputs, max_new_tokens=100, num_return_sequences=generated_labels_per_cluster, do_sample=True, pad_token_id=labeling_tokenizer.eos_token_id) for _ in range(generated_labels_per_cluster)]
+        # Decode labels to strings
+        decoded_labels = [labeling_tokenizer.decode(output[0][inputs_length:], skip_special_tokens=True) for output in outputs]
+    else:
+        decoded_labels = make_api_request(str_instruction_to_assistant_model, api_provider, api_model_str, auth_key)
     for i, label in enumerate(decoded_labels):
         if label.startswith(" "):
             decoded_labels[i] = label[1:]
@@ -87,12 +131,15 @@ def label_single_cluster(decoded_strs: List[str],
                          cluster_id: int, 
                          local_model: AutoModel = None, 
                          labeling_tokenizer: AutoTokenizer = None, 
+                         api_provider: str = None,
+                         api_model_str: str = None,
+                         auth_key: str = None,
                          device: str = "cuda:0", 
                          sampled_texts_per_cluster: int = 10, 
                          generated_labels_per_cluster: int = 3, 
                          cluster_label_instruction: str = "You are an expert at describing clusters of texts. When given a list of texts belonging to a cluster, you immediately respond with a short description of the key themes of the texts shown to you.",
                          cluster_strs_list: List[str] = None
-                         ):
+                         ) -> Tuple[List[str], List[int]]:
     if cluster_strs_list is not None:
         within_cluster_indices = list(range(len(selected_texts)))
         selected_text_indices = np.random.choice(within_cluster_indices, sampled_texts_per_cluster, replace=False)
@@ -105,20 +152,21 @@ def label_single_cluster(decoded_strs: List[str],
         selected_texts[i] = text.replace("<s>", "").replace('\n', '\\n')
         selected_texts[i] = f"Text {i}: " + selected_texts[i]
 
-    # Use the local model to generate a cluster label for the selected texts
-    # Generate input string for local model
-    str_instruction_to_local_model = cluster_label_instruction + "\n" + "Texts in current cluster:\n" + '\n'.join(selected_texts)
-    str_instruction_to_local_model = str_instruction_to_local_model + "\n" + "Cluster description: the common theme of the above texts is that they are all about"
-    # Prepare inputs for text generation
-    inputs = labeling_tokenizer(str_instruction_to_local_model, return_tensors="pt").to(device)
-    inputs_length = inputs.input_ids.shape[1]
-    # Generate labels using the Hugging Face text generation API
-    with torch.no_grad():
-        outputs = [local_model.generate(**inputs, max_new_tokens=15, num_return_sequences=1, do_sample=True, pad_token_id=labeling_tokenizer.eos_token_id) for _ in range(generated_labels_per_cluster)]
-    # Decode labels to strings
-    #decoded_interactions = [tokenizer.decode(output, skip_special_tokens=True) for output in outputs]
-    #print(decoded_interactions)
-    decoded_labels = [labeling_tokenizer.decode(output[0][inputs_length:], skip_special_tokens=True) for output in outputs]
+    # Use the assistant model to generate a cluster label for the selected texts
+    # Generate input string for assistant model
+    str_instruction_to_assistant_model = cluster_label_instruction + "\n" + "Texts in current cluster:\n" + '\n'.join(selected_texts)
+    str_instruction_to_assistant_model = str_instruction_to_assistant_model + "\n" + "Cluster description: the common theme of the above texts is that they are all about"
+    if api_provider is None:
+        # Prepare inputs for text generation
+        inputs = labeling_tokenizer(str_instruction_to_assistant_model, return_tensors="pt").to(device)
+        inputs_length = inputs.input_ids.shape[1]
+        # Generate labels using the Hugging Face text generation API
+        with torch.no_grad():
+            outputs = [local_model.generate(**inputs, max_new_tokens=15, num_return_sequences=1, do_sample=True, pad_token_id=labeling_tokenizer.eos_token_id) for _ in range(generated_labels_per_cluster)]
+        # Decode labels to strings
+        decoded_labels = [labeling_tokenizer.decode(output[0][inputs_length:], skip_special_tokens=True) for output in outputs]
+    else:
+        decoded_labels = make_api_request(str_instruction_to_assistant_model, api_provider, api_model_str, auth_key)
     for i, label in enumerate(decoded_labels):
         if label.startswith(" "):
             decoded_labels[i] = label[1:]
@@ -126,7 +174,7 @@ def label_single_cluster(decoded_strs: List[str],
                 decoded_labels[i] = label[:label.index("<s>")]
     return decoded_labels, selected_text_indices
 
-def get_cluster_labels_random_subsets(decoded_strs, clustering_assignments, local_model = None, labeling_tokenizer = None, device = "cuda:0", sampled_texts_per_cluster = 10, sampled_comparison_texts_per_cluster = 10, generated_labels_per_cluster = 3):
+def get_cluster_labels_random_subsets(decoded_strs, clustering_assignments, local_model = None, labeling_tokenizer = None, api_provider = None, api_model_str = None, auth_key = None, device = "cuda:0", sampled_texts_per_cluster = 10, sampled_comparison_texts_per_cluster = 10, generated_labels_per_cluster = 3):
     cluster_labels = {}
     all_cluster_texts_used_for_label_strs_ids = {}
     for cluster in set(clustering_assignments):
@@ -134,7 +182,7 @@ def get_cluster_labels_random_subsets(decoded_strs, clustering_assignments, loca
         cluster_indices = [i for i, x in enumerate(clustering_assignments) if x == cluster]
         if len(cluster_indices) < sampled_comparison_texts_per_cluster + sampled_texts_per_cluster:
             continue
-        decoded_labels, selected_text_indices = label_single_cluster(decoded_strs, clustering_assignments, cluster, local_model, labeling_tokenizer, device, sampled_texts_per_cluster, generated_labels_per_cluster)
+        decoded_labels, selected_text_indices = label_single_cluster(decoded_strs, clustering_assignments, cluster, local_model, labeling_tokenizer, api_provider, api_model_str, auth_key, device, sampled_texts_per_cluster, generated_labels_per_cluster)
         all_cluster_texts_used_for_label_strs_ids[cluster] = selected_text_indices
         cluster_labels[cluster] = decoded_labels
         
@@ -142,11 +190,141 @@ def get_cluster_labels_random_subsets(decoded_strs, clustering_assignments, loca
 
     return cluster_labels, all_cluster_texts_used_for_label_strs_ids
 
+def api_based_label_text_matching(label: str, text_A: str, text_B: str, api_provider: str, model_str: str, api_key: str) -> Tuple[float, float]:
+    """
+    Use an API to determine how well two texts match a given label.
+
+    This function sends a request to a specified API (e.g., OpenAI, Anthropic) to rate
+    how well each of two given texts matches a provided label. The API is asked to
+    provide scores on a scale of 0 to 10 for each text. These scores are then normalized
+    to probabilities.
+
+    Args:
+        label (str): The label against which to compare the texts.
+        text_A (str): The first text to be compared.
+        text_B (str): The second text to be compared.
+        api_provider (str): The API provider to use (e.g., 'openai', 'anthropic').
+        model_str (str): The specific model to use within the chosen API.
+        api_key (str): The authentication key for the API.
+
+    Returns:
+        Tuple[float, float]: A tuple containing two floats:
+            - prob_A: The normalized probability (0 to 1) that text_A matches the label.
+            - prob_B: The normalized probability (0 to 1) that text_B matches the label.
+
+    Note:
+        - The function uses a single API call to get scores for both texts.
+        - If the API response cannot be parsed, default scores of 5 are used for both texts.
+        - The scores are normalized to probabilities that sum to 1.
+    """
+    prompt = f"""
+    Given the label '{label}', rate how well each of the following texts matches this label on a scale from 0 to 100:
+
+    Text A: {text_A}
+
+    Text B: {text_B}
+
+    Provide your response in the following JSON format:
+    {{
+        "text_A_score": <score for Text A>,
+        "text_B_score": <score for Text B>
+    }}
+    """
+    
+    response = make_api_request(prompt, api_provider, model_str, api_key)
+    json_data = extract_json_from_string(response)
+    
+    if json_data and isinstance(json_data, list) and len(json_data) > 0:
+        scores = json_data[0]
+        score_A = float(scores.get("text_A_score", 50))  # Default to 50 if missing
+        score_B = float(scores.get("text_B_score", 50))  # Default to 50 if missing
+    else:
+        # If we couldn't parse the JSON or it's empty, default to equal scores
+        score_A = score_B = 50
+    
+    # Normalize scores to probabilities
+    total = score_A + score_B
+    prob_A = score_A / total if total > 0 else 0.5
+    prob_B = score_B / total if total > 0 else 0.5
+    
+    return prob_A, prob_B
+
+def evaluate_label_discrimination(
+    label: str,
+    sampled_texts_1: List[int],
+    sampled_texts_2: List[int],
+    decoded_strs_1: List[str],
+    decoded_strs_2: List[str],
+    local_model: Optional[AutoModel],
+    labeling_tokenizer: Optional[AutoTokenizer],
+    api_provider: Optional[str],
+    api_model_str: Optional[str],
+    auth_key: Optional[str],
+    device: str
+) -> float:
+    """
+    Evaluate the discrimination power of a given label between two sets of texts.
+
+    This function compares pairs of texts from two matched clusters and determines
+    how well the given label discriminates between them. It uses either a local model
+    or an API to perform the evaluation.
+
+    Args:
+        label (str): The label being evaluated.
+        sampled_texts_1 (List[int]): Indices of sampled texts from the first cluster. Acts as indices into decoded_strs_1 to specify which texts are in the cluster.
+        sampled_texts_2 (List[int]): Indices of sampled texts from the second cluster. Acts as indices into decoded_strs_2 to specify which texts are in the cluster.
+        decoded_strs_1 (List[str]): List of decoded strings for the first clustering.
+        decoded_strs_2 (List[str]): List of decoded strings for the second (comparison) clustering.
+        local_model (Optional[AutoModel]): The local model to use, if not using an API.
+        labeling_tokenizer (Optional[AutoTokenizer]): The tokenizer for the local model.
+        api_provider (Optional[str]): The API provider to use, if any.
+        api_model_str (Optional[str]): The API model string to use, if any.
+        auth_key (Optional[str]): The authentication key for the API, if any.
+        device (str): The device to use for computations.
+
+    Returns:
+        float: The AUC score representing the label's discrimination power.
+    """
+    scores = []
+    true_labels = []
+
+    for text_id_1 in sampled_texts_1:
+        for text_id_2 in sampled_texts_2:
+            text_1 = decoded_strs_1[text_id_1]
+            text_2 = decoded_strs_2[text_id_2]
+            if np.random.rand() > 0.5:
+                text_A, text_B = text_1, text_2
+                true_label = 1
+            else:
+                text_A, text_B = text_2, text_1
+                true_label = 0
+
+            if api_provider is None:
+                input_str = f"Which text fits the label '{label}' better? Text A: {text_A} or Text B: {text_B}\nAnswer: Text"
+                input_ids = labeling_tokenizer(input_str, return_tensors="pt").to(device)
+                with torch.no_grad():
+                    logits = local_model(**input_ids).logits
+                    prob_A = torch.nn.functional.softmax(logits, dim=-1)[0, -1, labeling_tokenizer.encode("A", add_special_tokens=False)[0]].item()
+                    prob_B = torch.nn.functional.softmax(logits, dim=-1)[0, -1, labeling_tokenizer.encode("B", add_special_tokens=False)[0]].item()
+                    normalized_prob_A = prob_A / max(prob_A + prob_B, 1e-10)
+            else:
+                normalized_prob_A, _ = api_based_label_text_matching(label, text_A, text_B, api_provider, api_model_str, auth_key)
+
+            scores.append(normalized_prob_A)
+            true_labels.append(true_label)
+
+    try:
+        auc = roc_auc_score(true_labels, scores)
+    except ValueError:
+        auc = float('nan')  # Not defined when only one class is present
+
+    return auc
+
 # For each possible contrastive label of each cluster pair, we select sampled_comparison_texts_per_cluster random texts from
 # each cluster (which must not be in the associated cluster's all_cluster_texts_used_for_label_strs_ids, skipping the cluster 
 # pair and printing a warning if there aren't enough texts in both clusters).
 # We then perform pairwise comparisons between each group of sampled_comparison_texts_per_cluster texts in the cluster pair, 
-# asking the local_model LLM to identify which of the two texts comes from which cluster.
+# asking the assistant LLM to identify which of the two texts comes from which cluster.
 # We score potential contrastive labels based on their ability to let the assistant LLM distinguish between texts from the two
 # clusters, quantified with AUC. We then return the scores for each cluster pair.
 def validate_cluster_label_comparative_discrimination_power(
@@ -159,6 +337,9 @@ def validate_cluster_label_comparative_discrimination_power(
         cluster_label_strs: Dict[Tuple[int, int], List[str]], # dict of lists of contrastive labels for each cluster pair, so only one set of labels per cluster pair
         local_model: AutoModel = None, 
         labeling_tokenizer: AutoTokenizer = None, 
+        api_provider: str = None,
+        api_model_str: str = None,
+        auth_key: str = None,
         device: str = "cuda:0", 
         sampled_comparison_texts_per_cluster: int = 10, 
         ):
@@ -190,41 +371,19 @@ def validate_cluster_label_comparative_discrimination_power(
         all_cluster_texts_used_for_validating_label_strs_ids[(cluster_id_1, cluster_id_2)] = (sampled_texts_1, sampled_texts_2)
 
         for label in cluster_label_candidates:
-            # Initialize scores for this label
-            scores = []
-            true_labels = []
-
-            for text_id_1 in sampled_texts_1:
-                for text_id_2 in sampled_texts_2:
-                    # Prepare input for local model
-                    text_1 = decoded_strs_1[text_id_1]
-                    text_2 = decoded_strs_2[text_id_2]
-                    # Randomize the order of presentation to the model
-                    if np.random.rand() > 0.5:
-                        text_A = text_1
-                        text_B = text_2
-                        true_label = 1
-                    else:
-                        text_A = text_2
-                        text_B = text_1
-                        true_label = 0
-
-                    input_str = f"Which text fits the label '{label}' better? Text A: {text_A} or Text B: {text_B}\nAnswer: Text"
-                    input_ids = labeling_tokenizer(input_str, return_tensors="pt").to(device)
-                    with torch.no_grad():
-                        logits = local_model(**input_ids).logits
-                        prob_A = torch.nn.functional.softmax(logits, dim=-1)[0, -1, labeling_tokenizer.encode("A", add_special_tokens=False)[0]].item()
-                        prob_B = torch.nn.functional.softmax(logits, dim=-1)[0, -1, labeling_tokenizer.encode("B", add_special_tokens=False)[0]].item()
-                        normalized_prob_A = prob_A / max(prob_A + prob_B, 1e-10)
-
-                    scores.append(normalized_prob_A)
-                    true_labels.append(true_label)
-
-            # Calculate AUC for this label
-            try:
-                auc = roc_auc_score(true_labels, scores)
-            except ValueError:
-                auc = float('nan')  # Not defined when only one class is present
+            auc = evaluate_label_discrimination(
+                label,
+                sampled_texts_1,
+                sampled_texts_2,
+                decoded_strs_1,
+                decoded_strs_2,
+                local_model,
+                labeling_tokenizer,
+                api_provider,
+                api_model_str,
+                auth_key,
+                device
+            )
             cluster_pair_scores[(cluster_id_1, cluster_id_2)][label] = auc
 
     return cluster_pair_scores, all_cluster_texts_used_for_validating_label_strs_ids
@@ -232,7 +391,7 @@ def validate_cluster_label_comparative_discrimination_power(
 # For each possible label of each cluster, we select sampled_comparison_texts_per_cluster random texts (which must not
 # be in all_cluster_texts_used_for_label_strs_ids, skipping the cluster and printing a warning if there aren't enough texts in the cluster).
 # We then perform pairwise comparisons between each of the sampled_comparison_texts_per_cluster texts in the cluster and 
-# non_cluster_comparison_texts random texts, asking the local_model LLM which of the two texts better fits the given label.
+# non_cluster_comparison_texts random texts, asking the assistant LLM which of the two texts better fits the given label.
 # We score potential cluster labels based on their ability to let the assistant LLM distinguish between texts from the cluster
 # and texts not from the cluster, quantified with AUC. We then return the scores for each cluster.
 def validate_cluster_label_discrimination_power(
@@ -242,6 +401,9 @@ def validate_cluster_label_discrimination_power(
         all_cluster_texts_used_for_label_strs_ids, 
         local_model = None, 
         labeling_tokenizer = None, 
+        api_provider = None,
+        api_model_str = None,
+        auth_key = None,
         device = "cuda:0", 
         sampled_comparison_texts_per_cluster = 10, 
         non_cluster_comparison_texts = 10
@@ -254,8 +416,6 @@ def validate_cluster_label_discrimination_power(
         cluster_indices = [i for i, x in enumerate(clustering_assignments) if x == cluster_id]
         texts_used_for_current_label_ids = all_cluster_texts_used_for_label_strs_ids[cluster_id]
         texts_NOT_used_for_current_label_ids = [i for i in range(len(decoded_strs)) if i not in texts_used_for_current_label_ids]
-        
-        
        
         # Sample texts from the cluster but outside texts_used_for_current_label_ids
         cluster_ids_outside_selected = [i for i in cluster_indices if i not in texts_used_for_current_label_ids]
@@ -268,45 +428,19 @@ def validate_cluster_label_discrimination_power(
         all_cluster_texts_used_for_validating_label_strs_ids[cluster_id] = sampled_cluster_texts
 
         for label in cluster_label_candidates:
-            scores = []
-            true_labels = []
-            
-            for cluster_text_id in sampled_cluster_texts:
-                for non_cluster_text_id in sampled_non_cluster_texts:
-                    # Prepare input for local model
-                    cluster_text = decoded_strs[cluster_text_id]
-                    non_cluster_text = decoded_strs[non_cluster_text_id]
-                    
-                    # Randomize the order of presentation
-                    if np.random.rand() > 0.5:
-                        text_A = cluster_text
-                        text_B = non_cluster_text
-                        prob_A_target = 1  # Correct choice is A if cluster text is A
-                    else:
-                        text_A = non_cluster_text
-                        text_B = cluster_text
-                        prob_A_target = 0  # Correct choice is B if cluster text is B
-                    
-                    input_str = f"Which text fits the label '{label}' better? Text A: {text_A} or Text B: {text_B}\nAnswer: Text"
-                    input_ids = labeling_tokenizer(input_str, return_tensors="pt").to(device)
-                    #print("input_str:", input_str)
-                    
-                    # Query the local model
-                    with torch.no_grad():
-                        output = local_model(**input_ids)
-                        logits = output.logits
-                        # Compare the probabilities for "A" and "B" as continuations
-                        prob_A = torch.nn.functional.softmax(logits, dim=-1)[0, -1, labeling_tokenizer.encode("A", add_special_tokens=False)[0]].item()
-                        prob_B = torch.nn.functional.softmax(logits, dim=-1)[0, -1, labeling_tokenizer.encode("B", add_special_tokens=False)[0]].item()
-                        normalized_prob_A = prob_A / max(prob_A + prob_B, 1e-10)
-            
-                    scores.append(normalized_prob_A)
-                    true_labels.append(prob_A_target)
-            # Compute AUC for the current label
-            try:
-                auc = roc_auc_score(true_labels, scores)
-            except ValueError:
-                auc = float('nan')  # Not defined when only one class is present
+            auc = evaluate_label_discrimination(
+                label,
+                sampled_cluster_texts,
+                sampled_non_cluster_texts,
+                decoded_strs,
+                decoded_strs, # We use the same decoded_strs, since this is done within a single clustering.
+                local_model,
+                labeling_tokenizer,
+                api_provider,
+                api_model_str,
+                auth_key,
+                device
+            )
             cluster_label_scores[cluster_id][label] = auc
                 
     return cluster_label_scores, all_cluster_texts_used_for_validating_label_strs_ids
@@ -406,7 +540,10 @@ def read_past_embeddings_or_generate_new(path, client, decoded_strs, local_embed
     return embeddings_list
 
 def extract_df_info(df, original_tokenizer_str, path, skip_every_n_decodings = 0, color_by_divergence = False, local_embedding_model_str = "thenlper/gte-large", device = "cuda:0", recompute_embeddings = True, save_embeddings = True, tqdm_disable = False, clustering_instructions = None, bnb_config = None):
-    divergence_values = df['divergence'].values
+    if 'divergence' in df.columns:
+        divergence_values = df['divergence'].values
+    else:
+        divergence_values = None
     loaded_strs = df['decoding'].values
     
     if color_by_divergence:
@@ -464,6 +601,9 @@ def get_validated_cluster_labels(decoded_strs: List[str],
                                  clustering_assignments: List[int], 
                                  local_model: AutoModel, 
                                  labeling_tokenizer: AutoTokenizer, 
+                                 api_provider: str,
+                                 api_model_str: str,
+                                 auth_key: str,
                                  device: str,
                                  compute_p_values: bool = True,
                                  num_permutations: int = 3,
@@ -471,13 +611,17 @@ def get_validated_cluster_labels(decoded_strs: List[str],
                                  sampled_texts_per_cluster: int = 10,
                                  sampled_comparison_texts_per_cluster: int = 10,
                                  non_cluster_comparison_texts: int = 10,
-                                 generated_labels_per_cluster: int = 3
+                                 generated_labels_per_cluster: int = 3,
+                                 pick_top_n_labels: Optional[int] = None
                                  ):
     cluster_labels, all_cluster_texts_used_for_label_strs_ids = get_cluster_labels_random_subsets(
             decoded_strs, 
             clustering_assignments, 
             local_model, 
             labeling_tokenizer, 
+            api_provider,
+            api_model_str,
+            auth_key,
             device=device, 
             sampled_texts_per_cluster=sampled_texts_per_cluster,
             sampled_comparison_texts_per_cluster=sampled_comparison_texts_per_cluster, 
@@ -490,6 +634,9 @@ def get_validated_cluster_labels(decoded_strs: List[str],
         all_cluster_texts_used_for_label_strs_ids, 
         local_model=local_model, 
         labeling_tokenizer=labeling_tokenizer, 
+        api_provider=api_provider,
+        api_model_str=api_model_str,
+        auth_key=auth_key,
         device=device,
         sampled_comparison_texts_per_cluster=sampled_comparison_texts_per_cluster,
         non_cluster_comparison_texts=non_cluster_comparison_texts
@@ -519,6 +666,19 @@ def get_validated_cluster_labels(decoded_strs: List[str],
             print(f"- {outstr}")
         print("#######")
         print("\n\n")
+
+
+    if pick_top_n_labels is not None:
+        # For each cluster, pick the top n labels based on AUC score
+        top_n_labels = {}
+        for cluster_id, label_scores in cluster_label_scores.items():
+            # Sort labels by AUC score in descending order
+            sorted_labels = sorted(label_scores.items(), key=lambda x: x[1], reverse=True)
+            # Pick the top n labels
+            top_n_labels[cluster_id] = [label for label, score in sorted_labels[:pick_top_n_labels]]
+        
+        # Update cluster_labels with only the top n labels
+        cluster_labels = {cluster_id: top_n_labels[cluster_id] for cluster_id in cluster_labels.keys()}
     
     if compute_p_values:
         # Now, compute the null distribution for label AUCs by permuting the cluster labels (so the label strings
@@ -537,6 +697,9 @@ def get_validated_cluster_labels(decoded_strs: List[str],
                 all_cluster_texts_used_for_label_strs_ids, 
                 local_model=local_model, 
                 labeling_tokenizer=labeling_tokenizer, 
+                api_provider=api_provider,
+                api_model_str=api_model_str,
+                auth_key=auth_key,
                 device=device,
                 sampled_comparison_texts_per_cluster=sampled_comparison_texts_per_cluster,
                 non_cluster_comparison_texts=non_cluster_comparison_texts
@@ -586,13 +749,16 @@ def get_validated_contrastive_cluster_labels(decoded_strs_1: List[str],
                                              cluster_matches: List[Tuple[int, int]],
                                              local_model: AutoModel, 
                                              labeling_tokenizer: AutoTokenizer, 
+                                             api_provider: str,
+                                             api_model_str: str,
+                                             auth_key: str,
                                              device: str,
                                              compute_p_values: bool = True,
                                              num_permutations: int = 3,
                                              use_normal_distribution_for_p_values: bool = False,
                                              sampled_comparison_texts_per_cluster: int = 10,
                                              generated_labels_per_cluster: int = 3,
-
+                                             pick_top_n_labels: Optional[int] = None
                                              ):
     # Initialize dictionaries to store cluster labels and text indices used for generating labels
     all_cluster_texts_used_for_label_strs_ids_1 = {}
@@ -611,6 +777,9 @@ def get_validated_contrastive_cluster_labels(decoded_strs_1: List[str],
             cluster_id_2=cluster_id_2, 
             local_model=local_model, 
             labeling_tokenizer=labeling_tokenizer, 
+            api_provider=api_provider,
+            api_model_str=api_model_str,
+            auth_key=auth_key,
             device=device, 
             sampled_texts_per_cluster=sampled_comparison_texts_per_cluster, 
             generated_labels_per_cluster=generated_labels_per_cluster
@@ -625,8 +794,21 @@ def get_validated_contrastive_cluster_labels(decoded_strs_1: List[str],
     cluster_pair_scores, all_cluster_texts_used_for_validating_label_strs_ids = validate_cluster_label_comparative_discrimination_power(
         decoded_strs_1, clustering_assignments_1, all_cluster_texts_used_for_label_strs_ids_1,
         decoded_strs_2, clustering_assignments_2, all_cluster_texts_used_for_label_strs_ids_2,
-        cluster_label_strs, local_model, labeling_tokenizer, device, sampled_comparison_texts_per_cluster
+        cluster_label_strs, local_model, labeling_tokenizer, api_provider, api_model_str, auth_key, device, sampled_comparison_texts_per_cluster
     )
+
+    if pick_top_n_labels is not None:
+        # For each cluster, pick the top n labels based on AUC score
+        top_n_labels = {}
+        for cluster_pair, label_scores in cluster_pair_scores.items():
+            # Sort labels by their AUC scores in descending order
+            sorted_labels = sorted(label_scores.items(), key=lambda x: x[1], reverse=True)
+            
+            # Pick the top n labels
+            top_n = sorted_labels[:pick_top_n_labels]
+            
+            # Store the top n labels and their scores
+            top_n_labels[cluster_pair] = {label: score for label, score in top_n}
 
     # Optionally compute p-values if required
     if compute_p_values:
@@ -642,7 +824,7 @@ def get_validated_contrastive_cluster_labels(decoded_strs_1: List[str],
             permuted_scores, _ = validate_cluster_label_comparative_discrimination_power(
                 decoded_strs_1, permuted_clustering_assignments_1, all_cluster_texts_used_for_label_strs_ids_1,
                 decoded_strs_2, permuted_clustering_assignments_2, all_cluster_texts_used_for_label_strs_ids_2,
-                cluster_label_strs, local_model, labeling_tokenizer, device, sampled_comparison_texts_per_cluster
+                cluster_label_strs, local_model, labeling_tokenizer, api_provider, api_model_str, auth_key, device, sampled_comparison_texts_per_cluster
             )
 
             # Collect the AUC scores from the permuted data
@@ -698,6 +880,9 @@ def match_clusterings(clustering_assignments_1: List[int], embeddings_list_1: Li
 def assistant_generative_compare(difference_descriptions: List[str], 
                                  local_model: AutoModel, 
                                  labeling_tokenizer: AutoTokenizer, 
+                                 api_provider: str,
+                                 api_model_str: str,
+                                 auth_key: str,
                                  starting_model_str: str,
                                  comparison_model_str: str,
                                  common_tokenizer_str: str,
@@ -709,25 +894,39 @@ def assistant_generative_compare(difference_descriptions: List[str],
     # Compile the list of prompts that encourage the assistant to generate texts attributed to the cluster 1 model.
     prompts_1 = []
     for description in difference_descriptions:
-        prompt = f"Given the following description of how the texts in cluster 1 differ from those in cluster 2: {description}, generate a new text that is closer to cluster 1."
+        if api_provider is None:
+            prompt = f"Given the following description of how the texts in cluster 1 differ from those in cluster 2: {description}, generate a new text that is closer to cluster 1."
+        else:
+            prompt = f"Given the following description of how the texts in cluster 1 differ from those in cluster 2: {description}, generate {num_generated_texts_per_description} new texts that are closer to cluster 1. Format your response as a JSON array of strings, where each string is a new text. Example response: ['Text 1', 'Text 2', 'Text 3']"
         prompts_1.append(prompt)
     # Now, compile the list of prompts that encourage the assistant to generate texts attributed to the cluster 2 model.
     prompts_2 = []
     for description in difference_descriptions:
-        prompt = f"Given the following description of how the texts in cluster 1 differ from those in cluster 2: {description}, generate a new text that is closer to cluster 2."
+        if api_provider is None:
+            prompt = f"Given the following description of how the texts in cluster 1 differ from those in cluster 2: {description}, generate a new text that is closer to cluster 2."
+        else:
+            prompt = f"Given the following description of how the texts in cluster 1 differ from those in cluster 2: {description}, generate {num_generated_texts_per_description} new texts that are closer to cluster 2. Format your response as a JSON array of strings, where each string is a new text. Example response: ['Text 1', 'Text 2', 'Text 3']"
         prompts_2.append(prompt)
 
     # Generate texts for each prompt using the assistant model
     generated_texts_1 = []
     for prompt in tqdm(prompts_1, desc="Generating texts for cluster 1"):
-        inputs = labeling_tokenizer(prompt, return_tensors="pt", padding=True).to(device)
-        outputs = local_model.generate(**inputs, max_new_tokens=70, num_return_sequences=num_generated_texts_per_description, do_sample=True, pad_token_id=labeling_tokenizer.pad_token_id)
-        generated_texts_1.append([labeling_tokenizer.decode(output, skip_special_tokens=True) for output in outputs])
+        if api_provider is None:
+            inputs = labeling_tokenizer(prompt, return_tensors="pt", padding=True).to(device)
+            outputs = local_model.generate(**inputs, max_new_tokens=70, num_return_sequences=num_generated_texts_per_description, do_sample=True, pad_token_id=labeling_tokenizer.pad_token_id)
+            generated_texts_1.append([labeling_tokenizer.decode(output, skip_special_tokens=True) for output in outputs])
+        else:
+            output = make_api_request(prompt, api_provider, api_model_str, auth_key)
+            generated_texts_1.append(extract_json_from_string(output))
     generated_texts_2 = []
     for prompt in tqdm(prompts_2, desc="Generating texts for cluster 2"):
-        inputs = labeling_tokenizer(prompt, return_tensors="pt", padding=True).to(device)
-        outputs = local_model.generate(**inputs, max_new_tokens=70, num_return_sequences=num_generated_texts_per_description, do_sample=True, pad_token_id=labeling_tokenizer.pad_token_id)
-        generated_texts_2.append([labeling_tokenizer.decode(output, skip_special_tokens=True) for output in outputs])
+        if api_provider is None:
+            inputs = labeling_tokenizer(prompt, return_tensors="pt", padding=True).to(device)
+            outputs = local_model.generate(**inputs, max_new_tokens=70, num_return_sequences=num_generated_texts_per_description, do_sample=True, pad_token_id=labeling_tokenizer.pad_token_id)
+            generated_texts_2.append([labeling_tokenizer.decode(output, skip_special_tokens=True) for output in outputs])
+        else:
+            output = make_api_request(prompt, api_provider, api_model_str, auth_key)
+            generated_texts_2.append(extract_json_from_string(output))
     
     generated_texts = [gt_1 + gt_2 for gt_1, gt_2 in zip(generated_texts_1, generated_texts_2)]
     generated_text_labels = [[0] * len(gt_1) + [1] * len(gt_2) for gt_1, gt_2 in zip(generated_texts_1, generated_texts_2)]
@@ -782,6 +981,9 @@ def assistant_generative_compare(difference_descriptions: List[str],
 def validated_assistant_generative_compare(difference_descriptions: List[str], 
                                            local_model: AutoModel, 
                                            labeling_tokenizer: AutoTokenizer, 
+                                           api_provider: str,
+                                           api_model_str: str,
+                                           auth_key: str,
                                            starting_model_str: str,
                                            comparison_model_str: str,
                                            common_tokenizer_str: str,
@@ -793,11 +995,11 @@ def validated_assistant_generative_compare(difference_descriptions: List[str],
                                            bnb_config: BitsAndBytesConfig = None
                                         ):
     # First, generate the aucs using the real labels
-    real_aucs, generated_texts_1, generated_texts_2 = assistant_generative_compare(difference_descriptions, local_model, labeling_tokenizer, starting_model_str, comparison_model_str, common_tokenizer_str, device, num_generated_texts_per_description, bnb_config=bnb_config)
+    real_aucs, generated_texts_1, generated_texts_2 = assistant_generative_compare(difference_descriptions, local_model, labeling_tokenizer, api_provider, api_model_str, auth_key, starting_model_str, comparison_model_str, common_tokenizer_str, device, num_generated_texts_per_description, bnb_config=bnb_config)
     # Now, perform the permutation test
     permuted_aucs = []
     for _ in range(num_permutations):
-        fake_aucs, _, _ = assistant_generative_compare(difference_descriptions, local_model, labeling_tokenizer, starting_model_str, comparison_model_str, common_tokenizer_str, device, num_generated_texts_per_description, permute_labels=True, bnb_config=bnb_config)
+        fake_aucs, _, _ = assistant_generative_compare(difference_descriptions, local_model, labeling_tokenizer, api_provider, api_model_str, auth_key, starting_model_str, comparison_model_str, common_tokenizer_str, device, num_generated_texts_per_description, permute_labels=True, bnb_config=bnb_config)
         permuted_aucs.extend(fake_aucs)
     # Now, compute the p-values
     if use_normal_distribution_for_p_values:
@@ -822,12 +1024,15 @@ if __name__ == "__main__":
     parser.add_argument("--compare_to_path", type=str, default=None)
     parser.add_argument("--compare_to_self", action="store_true")
     parser.add_argument("--api_key_path", type=str, default=None)
+    parser.add_argument("--api_provider", type=str, default=None)
+    parser.add_argument("--api_model_str", type=str, default="claude-3-haiku-20240307")    
     parser.add_argument("--n_clusters", type=int, default=30)
     parser.add_argument("--n_clusters_compare", type=int, default=None)
     parser.add_argument("--min_cluster_size", type=int, default=7)
     parser.add_argument("--max_cluster_size", type=int, default=2000)
     parser.add_argument("--cluster_method", type=str, default="kmeans")
     parser.add_argument("--clustering_instructions", type=str, default="Identify the topic or theme of the given texts")
+    parser.add_argument("--init_clustering_from_base_model", action="store_true")
 
     parser.add_argument("--n_strs_show", type=int, default=0)
     parser.add_argument("--tqdm_disable", action="store_true")
@@ -838,6 +1043,7 @@ if __name__ == "__main__":
     parser.add_argument("--sampled_comparison_texts_per_cluster", type=int, default=10)
     parser.add_argument("--non_cluster_comparison_texts", type=int, default=10)
     parser.add_argument("--generated_labels_per_cluster", type=int, default=3)
+    parser.add_argument("--pick_top_n_labels", type=int, default=None)
     parser.add_argument("--permutations_for_null", type=int, default=1)
 
     parser.add_argument("--divergence_and_clustering_labels", action="store_true")
@@ -871,12 +1077,15 @@ if __name__ == "__main__":
 
     # Read OpenAI auth key from a file
     if args.api_key_path is not None:
-        with open(args.api_key_path, 'r') as file:
-            openai_auth_key = file.read().strip()
-        # Authenticate with the OpenAI API
-        client = OpenAI(api_key=openai_auth_key)
+        auth_key = load_api_key(args.api_key_path)
+        if args.api_provider == "openai":
+            # Authenticate with the OpenAI API
+            client = OpenAI(api_key=auth_key)
+        else:
+            client = None
     else:
         client = None
+        auth_key = None
     
     bnb_config = BitsAndBytesConfig(
         load_in_8bit=True,
@@ -909,13 +1118,16 @@ if __name__ == "__main__":
                                                 quantization_config=bnb_config,
                                                 torch_dtype=torch.float16,
                                                 device_map={"": 0} if args.device == "cuda:0" else "auto")
-        
         labeling_tokenizer = AutoTokenizer.from_pretrained(args.local_labelings_model_str)
         if labeling_tokenizer.pad_token is None:
             labeling_tokenizer.pad_token = labeling_tokenizer.eos_token
             labeling_tokenizer.pad_token_id = labeling_tokenizer.eos_token_id
             local_model.generation_config.pad_token_id = labeling_tokenizer.pad_token_id
             print("PAD TOKEN ID: ", labeling_tokenizer.pad_token_id)
+    else:
+        local_model = None
+        labeling_tokenizer = None
+        print("Using API for labeling.")
     
     # Cluster the entries of embeddings_list
     #clustering = SpectralClustering(n_clusters=n_clusters, assign_labels="discretize", random_state=0).fit(embeddings_list)
@@ -976,6 +1188,9 @@ if __name__ == "__main__":
         validated_clustering = get_validated_cluster_labels(decoded_strs, 
                                                             clustering_assignments, 
                                                             local_model, 
+                                                            args.api_provider,
+                                                            args.api_model_str,
+                                                            auth_key,
                                                             labeling_tokenizer, 
                                                             args.device,
                                                             compute_p_values=compute_p_values,
@@ -984,12 +1199,16 @@ if __name__ == "__main__":
                                                             sampled_comparison_texts_per_cluster=args.sampled_comparison_texts_per_cluster,
                                                             non_cluster_comparison_texts=args.non_cluster_comparison_texts,
                                                             generated_labels_per_cluster=args.generated_labels_per_cluster,
-                                                            num_permutations=args.permutations_for_null
+                                                            num_permutations=args.permutations_for_null,
+                                                            pick_top_n_labels=args.pick_top_n_labels
                                                         )
         if compare_to_path is not None or args.compare_to_self:
             print(f"Clustering comparison texts with {args.cluster_method}")
             if args.cluster_method == "kmeans":
-                clustering_compare =  KMeans(n_clusters=n_clusters_compare, random_state=0, n_init=10).fit(embeddings_list_compare)
+                if args.init_clustering_from_base_model:
+                    clustering_compare =  KMeans(n_clusters=n_clusters_compare, random_state=0, n_init=10, init=clustering.cluster_centers_).fit(embeddings_list_compare)
+                else:
+                    clustering_compare =  KMeans(n_clusters=n_clusters_compare, random_state=0, n_init=10).fit(embeddings_list_compare)
             elif args.cluster_method == "hdbscan":
                 clustering_compare =  HDBSCAN(min_cluster_size=min_cluster_size, max_cluster_size=max_cluster_size).fit(embeddings_list_compare)
             clustering_assignments_compare = clustering_compare.labels_
@@ -1000,6 +1219,9 @@ if __name__ == "__main__":
             validated_clustering_compare = get_validated_cluster_labels(decoded_strs_compare, 
                                                                         clustering_assignments_compare, 
                                                                         local_model, 
+                                                                        args.api_provider,
+                                                                        args.api_model_str,
+                                                                        auth_key,
                                                                         labeling_tokenizer, 
                                                                         args.device,
                                                                         compute_p_values=compute_p_values,
@@ -1008,7 +1230,8 @@ if __name__ == "__main__":
                                                                         sampled_comparison_texts_per_cluster=args.sampled_comparison_texts_per_cluster,
                                                                         non_cluster_comparison_texts=args.non_cluster_comparison_texts,
                                                                         generated_labels_per_cluster=args.generated_labels_per_cluster,
-                                                                        num_permutations=args.permutations_for_null
+                                                                        num_permutations=args.permutations_for_null,
+                                                                        pick_top_n_labels=args.pick_top_n_labels
                                                                         )
             cluster_matches = match_clusterings(clustering_assignments, embeddings_list, clustering_assignments_compare, embeddings_list_compare)
             base_cluster_scores = validated_clustering['cluster_label_scores']
@@ -1069,6 +1292,9 @@ if __name__ == "__main__":
                     cluster_id_2=compare_cluster,
                     local_model=local_model, 
                     labeling_tokenizer=labeling_tokenizer, 
+                    api_provider=args.api_provider,
+                    api_model_str=args.api_model_str,
+                    auth_key=auth_key,
                     device=args.device, 
                     sampled_texts_per_cluster=args.sampled_comparison_texts_per_cluster,
                     generated_labels_per_cluster=args.generated_labels_per_cluster
@@ -1088,6 +1314,9 @@ if __name__ == "__main__":
                 cluster_label_strs=contrastive_labels, 
                 local_model=local_model, 
                 labeling_tokenizer=labeling_tokenizer, 
+                api_provider=args.api_provider,
+                api_model_str=args.api_model_str,
+                auth_key=auth_key,
                 device=args.device, 
                 sampled_comparison_texts_per_cluster=args.sampled_comparison_texts_per_cluster
             )
@@ -1101,12 +1330,16 @@ if __name__ == "__main__":
                 cluster_matches=cluster_matches,
                 local_model=local_model, 
                 labeling_tokenizer=labeling_tokenizer, 
+                api_provider=args.api_provider,
+                api_model_str=args.api_model_str,
+                auth_key=auth_key,
                 device=args.device,
                 compute_p_values=True,
                 num_permutations=args.permutations_for_null,
                 use_normal_distribution_for_p_values=False,
                 sampled_comparison_texts_per_cluster=args.sampled_comparison_texts_per_cluster,
-                generated_labels_per_cluster=args.generated_labels_per_cluster
+                generated_labels_per_cluster=args.generated_labels_per_cluster,
+                pick_top_n_labels=args.pick_top_n_labels
             )
             cluster_pair_scores = cluster_labeling_results_dict["cluster_pair_scores"]
             #all_cluster_texts_used_for_validating_label_strs_ids = cluster_labeling_results_dict["all_cluster_texts_used_for_validating_label_strs_ids"]
@@ -1122,7 +1355,7 @@ if __name__ == "__main__":
                     result_stats.append([label, cluster_pair, score, p_values[cluster_pair][label]])
             
             # Finally, let's see if the contrastive labels allow the assistant model to generate texts that are more similar to the cluster 1 / cluster 2 models.
-            validated_assistant_aucs, validated_assistant_p_values, generated_validation_texts_1, generated_validation_texts_2 = validated_assistant_generative_compare([r[0] for r in result_stats], local_model, labeling_tokenizer, starting_model_str=args.starting_model_str, comparison_model_str=args.comparison_model_str, common_tokenizer_str=args.common_tokenizer_str, device=args.device, num_generated_texts_per_description=args.num_generated_texts_per_description, return_generated_texts=True, bnb_config=bnb_config)
+            validated_assistant_aucs, validated_assistant_p_values, generated_validation_texts_1, generated_validation_texts_2 = validated_assistant_generative_compare([r[0] for r in result_stats], local_model, labeling_tokenizer, api_provider=args.api_provider, api_model_str=args.api_model_str, auth_key=auth_key, starting_model_str=args.starting_model_str, comparison_model_str=args.comparison_model_str, common_tokenizer_str=args.common_tokenizer_str, device=args.device, num_generated_texts_per_description=args.num_generated_texts_per_description, return_generated_texts=True, bnb_config=bnb_config)
 
             # Print the validated assistant labels AUCs and p-values
             for i, (description, cluster_pair, auc_score, p_value) in enumerate(result_stats):
