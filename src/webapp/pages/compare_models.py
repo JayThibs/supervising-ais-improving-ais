@@ -179,15 +179,14 @@ def compare_approval_prompts(data_accessor, selected_runs):
         models.update(run_models)
 
     selected_prompt_type = st.selectbox("Select prompt type", list(prompt_types))
+    selected_model = st.selectbox("Select model", list(models))
 
     view_option = st.radio("Select view option", ["All Responses", "Disagreements Only"])
 
     if view_option == "All Responses":
         condition = st.selectbox("Select condition", [1, 0, -1], format_func=lambda x: "Approved" if x == 1 else "Disapproved" if x == 0 else "No Response")
-        selected_model = st.selectbox("Select model", list(models))
     else:
-        condition = None
-        selected_model = None
+        condition = None  # We'll handle disagreements separately
 
     try:
         fig = plot_interactive_approval_comparison(data_accessor, selected_runs, selected_prompt_type, selected_model, condition, view_option)
@@ -204,9 +203,19 @@ def compare_approval_prompts(data_accessor, selected_runs):
     table_view = st.radio("Table view", ["By Statement and Label", "By Statement and Model"])
     
     if table_view == "By Statement and Label":
-        pivot_data = approval_data.pivot(index=['Run', 'Statement', 'Label'], columns='Model', values='Approval').reset_index()
+        pivot_data = approval_data.pivot_table(
+            index=['Run', 'Statement', 'Label'], 
+            columns='Model', 
+            values='Approval', 
+            aggfunc=lambda x: ' | '.join(x)
+        ).reset_index()
     else:
-        pivot_data = approval_data.pivot(index=['Run', 'Statement', 'Model'], columns='Label', values='Approval').reset_index()
+        pivot_data = approval_data.pivot_table(
+            index=['Run', 'Statement', 'Model'], 
+            columns='Label', 
+            values='Approval', 
+            aggfunc=lambda x: ' | '.join(x)
+        ).reset_index()
     
     # Filter options
     st.subheader("Table Filters")
@@ -220,9 +229,9 @@ def compare_approval_prompts(data_accessor, selected_runs):
     
     if view_option == "Disagreements Only":
         if table_view == "By Statement and Label":
-            filtered_data = filtered_data[filtered_data.iloc[:, 3:].nunique(axis=1) > 1]
+            filtered_data = filtered_data[filtered_data.iloc[:, 3:].apply(lambda row: len(set(row.dropna())) > 1, axis=1)]
         else:
-            filtered_data = filtered_data[filtered_data.iloc[:, 3:].nunique(axis=1) > 1]
+            filtered_data = filtered_data[filtered_data.iloc[:, 3:].apply(lambda row: len(set(row.dropna())) > 1, axis=1)]
     
     # Display table
     st.dataframe(filtered_data)
