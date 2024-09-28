@@ -1,6 +1,6 @@
 # Automated Finetuning Evaluation for Interpretability Methods
 
-This project provides an automated framework for evaluating the effectiveness of interpretability methods in comparing AI models. It generates ground truth differences between models, creates training data to support those differences, fine-tunes models on the data, and then applies an interpretability method to assess how well it recovers the known differences.
+This project provides an automated framework for evaluating the effectiveness of interpretability methods in comparing AI models. It generates ground truth differences between models, creates training data to support those differences, fine-tunes models on the data, applies an interpretability method to try and automatically discover the differences between the finetuned and base models, and then assesses how well the interpretability method recovered the known differences.
 
 ## Project Structure
 
@@ -15,10 +15,9 @@ The project consists of the following main components:
 
 - Works with any causal language model available on HuggingFace
 - Supports both open-ended and focused ground truth generation
-- Flexible number of ground truths (1-10 recommended)
+- Flexible number of ground truths. Supports fine-tuning models on multiple ground truths
 - Uses either Anthropic or OpenAI APIs for ground truth generation and comparison
 - Streams generated data to CSV for efficient handling of large datasets
-- Supports fine-tuning models on multiple ground truths
 
 ## Usage
 
@@ -34,6 +33,12 @@ For more detailed information on each script's usage, refer to their individual 
 - Python 3.7+
 - pandas
 - transformers
+- datasets
+- torch
+- nltk
+- scipy
+- sklearn
+- numpy
 - anthropic (for Anthropic API)
 - openai (for OpenAI API)
 
@@ -41,10 +46,3 @@ For more detailed information on each script's usage, refer to their individual 
 
 For development purposes, dummy implementations of the `apply_interpretability_method` and `finetune_model` functions are provided in `auto_finetuning_helpers.py`. Replace these with actual implementations when ready for production use.
 
-## Contributing
-
-Contributions to improve the project are welcome. Please ensure that any new code is well-documented with appropriate docstrings and follows the existing code style.
-
-## License
-
-[Insert your chosen license here]
