@@ -5,7 +5,9 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from auto_finetuning_data import generate_ground_truths, generate_dataset
 from auto_finetuning_compare_to_truth import compare_and_score_hypotheses
-from auto_finetuning_helpers import dummy_apply_interpretability_method, dummy_finetune_model, load_api_key, parse_dict
+from auto_finetuning_helpers import load_api_key, parse_dict
+from auto_finetuning_train import dummy_finetune_model, finetune_model
+from auto_finetuning_eval import dummy_apply_interpretability_method, apply_interpretability_method
 
 class AutoFineTuningEvaluator:
     """
