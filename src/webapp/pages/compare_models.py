@@ -179,14 +179,15 @@ def compare_approval_prompts(data_accessor, selected_runs):
         models.update(run_models)
 
     selected_prompt_type = st.selectbox("Select prompt type", list(prompt_types))
-    selected_model = st.selectbox("Select model", list(models))
 
     view_option = st.radio("Select view option", ["All Responses", "Disagreements Only"])
 
     if view_option == "All Responses":
         condition = st.selectbox("Select condition", [1, 0, -1], format_func=lambda x: "Approved" if x == 1 else "Disapproved" if x == 0 else "No Response")
+        selected_model = st.selectbox("Select model", list(models))
     else:
-        condition = None  # We'll handle disagreements separately
+        condition = None
+        selected_model = None
 
     try:
         fig = plot_interactive_approval_comparison(data_accessor, selected_runs, selected_prompt_type, selected_model, condition, view_option)
@@ -194,6 +195,58 @@ def compare_approval_prompts(data_accessor, selected_runs):
     except Exception as e:
         st.error(f"Error plotting approval comparison: {str(e)}")
         st.write("Traceback:", traceback.format_exc())
+
+    # Add table with filters
+    st.subheader("Approval Responses Table")
+    approval_data = get_approval_data(data_accessor, selected_runs, selected_prompt_type)
+    
+    # Table view options
+    table_view = st.radio("Table view", ["By Statement and Label", "By Statement and Model"])
+    
+    if table_view == "By Statement and Label":
+        pivot_data = approval_data.pivot(index=['Run', 'Statement', 'Label'], columns='Model', values='Approval').reset_index()
+    else:
+        pivot_data = approval_data.pivot(index=['Run', 'Statement', 'Model'], columns='Label', values='Approval').reset_index()
+    
+    # Filter options
+    st.subheader("Table Filters")
+    filter_models = st.multiselect("Filter by models", list(models), default=list(models))
+    
+    # Apply filters
+    if table_view == "By Statement and Label":
+        filtered_data = pivot_data[pivot_data.columns[pivot_data.columns.isin(['Run', 'Statement', 'Label'] + filter_models)]]
+    else:
+        filtered_data = pivot_data[pivot_data['Model'].isin(filter_models)]
+    
+    if view_option == "Disagreements Only":
+        if table_view == "By Statement and Label":
+            filtered_data = filtered_data[filtered_data.iloc[:, 3:].nunique(axis=1) > 1]
+        else:
+            filtered_data = filtered_data[filtered_data.iloc[:, 3:].nunique(axis=1) > 1]
+    
+    # Display table
+    st.dataframe(filtered_data)
+
+def get_approval_data(data_accessor, selected_runs, prompt_type):
+    all_data = []
+    for run in selected_runs:
+        try:
+            approvals_data = data_accessor.get_run_data(run, f"approvals_statements_{prompt_type}")
+            for item in approvals_data:
+                statement = item['statement']
+                for model, approvals in item['approvals'].items():
+                    for label, approval in approvals.items():
+                        all_data.append({
+                            'Run': run,
+                            'Statement': statement,
+                            'Model': model,
+                            'Label': label,
+                            'Approval': 'Approved' if approval == 1 else 'Disapproved' if approval == 0 else 'No Response'
+                        })
+        except Exception as e:
+            st.warning(f"Error processing data for run {run}: {str(e)}")
+    
+    return pd.DataFrame(all_data)
 
 def plot_interactive_approval_comparison(data_accessor, selected_runs, prompt_type, model_name, condition, view_option):
     df_list = []
