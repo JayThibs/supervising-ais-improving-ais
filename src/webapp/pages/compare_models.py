@@ -181,19 +181,23 @@ def compare_approval_prompts(data_accessor, selected_runs):
     selected_prompt_type = st.selectbox("Select prompt type", list(prompt_types))
     selected_model = st.selectbox("Select model", list(models))
 
-    condition = st.selectbox("Select condition", [1, 0, -1], format_func=lambda x: "Approved" if x == 1 else "Disapproved" if x == 0 else "No Response")
+    view_option = st.radio("Select view option", ["All Responses", "Disagreements Only"])
+
+    if view_option == "All Responses":
+        condition = st.selectbox("Select condition", [1, 0, -1], format_func=lambda x: "Approved" if x == 1 else "Disapproved" if x == 0 else "No Response")
+    else:
+        condition = None  # We'll handle disagreements separately
 
     try:
-        fig = plot_interactive_approval_comparison(data_accessor, selected_runs, selected_prompt_type, selected_model, condition)
+        fig = plot_interactive_approval_comparison(data_accessor, selected_runs, selected_prompt_type, selected_model, condition, view_option)
         st.plotly_chart(fig, use_container_width=True)
     except Exception as e:
         st.error(f"Error plotting approval comparison: {str(e)}")
         st.write("Traceback:", traceback.format_exc())
 
-def plot_interactive_approval_comparison(data_accessor, selected_runs, prompt_type, model_name, condition):
+def plot_interactive_approval_comparison(data_accessor, selected_runs, prompt_type, model_name, condition, view_option):
     df_list = []
     condition_map = {-1: "No Response", 0: "Disapproved", 1: "Approved"}
-    condition_label = condition_map[condition]
     
     for run in selected_runs:
         try:
@@ -232,9 +236,13 @@ def plot_interactive_approval_comparison(data_accessor, selected_runs, prompt_ty
     
     df = pd.concat(df_list, ignore_index=True)
     
-    # Filter based on the selected condition for any label
+    # Filter based on the selected view option
     label_columns = [col for col in df.columns if col in labels]
-    df_filtered = df[df[label_columns].eq(condition).any(axis=1)].copy()
+    if view_option == "All Responses":
+        df_filtered = df[df[label_columns].eq(condition).any(axis=1)].copy()
+    else:  # Disagreements Only
+        # Check if there's any disagreement among the labels
+        df_filtered = df[df[label_columns].nunique(axis=1) > 1].copy()
     
     # Function to wrap text
     def wrap_text(text, width=50):
@@ -252,16 +260,21 @@ def plot_interactive_approval_comparison(data_accessor, selected_runs, prompt_ty
                                  value_vars=label_columns,
                                  var_name='label', value_name='value')
     
-    # Keep all rows and add a 'visible' column
-    df_melted['visible'] = df_melted['value'] == condition
+    # Set visibility based on view option
+    if view_option == "All Responses":
+        df_melted['visible'] = df_melted['value'] == condition
+    else:
+        df_melted['visible'] = True
     
     run_data = data_accessor.get_run_config(selected_runs[0])
     plot_settings = PlotSettings(**run_data.get('run_settings', {}).get('plot_settings', {}))
     visualizer = Visualization(plot_settings)
     
+    title = (f"Approval Comparison Across Runs ({prompt_type.capitalize()}, {model_name})"
+             f"{', ' + condition_map[condition] if condition is not None else ', Disagreements Only'}")
+    
     fig = visualizer.create_interactive_approval_scatter(
         df_melted, 'x', 'y', 'run', 'label', 'hover_text',
-        f"Approval Comparison Across Runs ({prompt_type.capitalize()}, {model_name}, {condition_label})",
-        "Dimension 1", "Dimension 2"
+        title, "Dimension 1", "Dimension 2"
     )
     return fig
