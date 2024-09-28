@@ -44,7 +44,7 @@ def compare_hypotheses(
     }}
     """
 
-    response = make_api_request(api_provider, model_str, api_key, prompt)
+    response = make_api_request(prompt, api_provider, model_str, api_key)
     # Parse the response to extract only the JSON part
     try:
         json_start = response.index('{')

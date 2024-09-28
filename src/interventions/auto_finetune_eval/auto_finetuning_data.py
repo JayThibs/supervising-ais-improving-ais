@@ -38,7 +38,7 @@ def generate_ground_truths(
         // ... more ground truths ...
     ]
     """
-    response = make_api_request(api_provider, model_str, api_key, prompt)
+    response = make_api_request(prompt, api_provider, model_str, api_key)
     ground_truths = extract_json_from_string(response)
     return ground_truths
 
@@ -77,7 +77,7 @@ def generate_training_data(
         // ... more examples ...
     ]
     """
-    response = make_api_request(api_provider, model_str, api_key, prompt)
+    response = make_api_request(prompt, api_provider, model_str, api_key)
     training_data = extract_json_from_string(response)
     return training_data
 
