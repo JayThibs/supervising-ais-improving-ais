@@ -4,7 +4,12 @@ from auto_finetuning_helpers import make_api_request, load_api_key
 from nltk.translate.bleu_score import sentence_bleu
 from nltk.tokenize import word_tokenize
 from scipy.optimize import linear_sum_assignment
+from scipy.spatial.distance import cosine
 import numpy as np
+import torch
+import sys
+sys.path.append('../../contrastive-decoding')
+from quick_cluster import read_past_embeddings_or_generate_new
 
 def compare_hypotheses(
     ground_truth: str,
@@ -65,7 +70,7 @@ def compare_and_score_hypotheses(
     model_str: str,
     api_key: str,
     match_by_embedding: bool = False,
-    match_by_embedding_model: str = "text-embedding-3-large",
+    match_by_embedding_model: str = "nvidia/NV-Embed-v1",
     match_by_bleu: bool = False,
 ) -> Dict[str, Any]:
     """
@@ -99,7 +104,33 @@ def compare_and_score_hypotheses(
     print(discovered_hypotheses)
     if match_by_embedding:
         print(f"Matching by embedding using model {match_by_embedding_model}")
-        # TODO: Implement embedding scoring
+
+        # Combine ground truths and hypotheses
+        all_texts = ground_truths + discovered_hypotheses
+        
+        # Generate embeddings
+        embeddings = read_past_embeddings_or_generate_new(
+            path="embeddings_cache",
+            client=None,  # We're using a local model
+            decoded_strs=all_texts,
+            local_embedding_model_str=match_by_embedding_model,
+            device="cuda:0" if torch.cuda.is_available() else "cpu",
+            clustering_instructions="Embed these statements for similarity comparison",
+        )
+        
+        # Split embeddings back into ground truths and hypotheses
+        gt_embeddings = embeddings[:len(ground_truths)]
+        hyp_embeddings = embeddings[len(ground_truths):]
+        
+        # Compute pairwise cosine distances
+        pairwise_scores = []
+        for gt_emb in gt_embeddings:
+            scores = [cosine(gt_emb, hyp_emb) for hyp_emb in hyp_embeddings]
+            pairwise_scores.append(scores)
+        
+        print("Embedding similarity matrix (cosine distances):")
+        for i, scores in enumerate(pairwise_scores):
+            print(f"Ground truth {i}: {scores}")
     elif match_by_bleu:
         print(f"Computing pairwise BLEU scores")
         pairwise_scores = []
