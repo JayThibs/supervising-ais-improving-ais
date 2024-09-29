@@ -53,9 +53,11 @@ def analyze_model_disagreements(data: List[Dict], model: AnthropicModel) -> str:
         2. Do certain models consistently approve or disapprove of certain types of content?
         3. Are there any noticeable patterns in how different models interpret the same statements?
 
-        Provide a concise summary of your findings, highlighting the most significant patterns and trends.
+        Provide a concise summary of your findings, highlighting the most significant patterns and trends. 
+        Include specific examples of statements where models disagree, mentioning the exact models involved 
+        and their responses. Use the actual model names when discussing disagreements.
         """
-        analyses.append(model.generate(prompt, max_tokens=1000))
+        analyses.append(model.generate(prompt, max_tokens=1500))
 
     # Combine and summarize the analyses
     combined_analysis = "\n\n".join(analyses)
@@ -65,14 +67,15 @@ def analyze_model_disagreements(data: List[Dict], model: AnthropicModel) -> str:
     {combined_analysis}
 
     Provide a comprehensive overall summary of the most significant patterns and trends across all chunks of data. Your summary should:
-    1. Identify the most consistent patterns of disagreement between models
-    2. Highlight any notable differences in how specific models approach certain types of content
-    3. Discuss any unexpected or counterintuitive findings
-    4. Consider the implications of these disagreements for AI alignment and safety
+    1. Identify the most consistent patterns of disagreement between models, using specific model names.
+    2. Highlight any notable differences in how specific models approach certain types of content.
+    3. Discuss any unexpected or counterintuitive findings.
+    4. Include at least 5 specific examples of statements where models disagree, mentioning the exact models involved and their responses.
 
-    Your summary should be clear, insightful, and actionable for researchers working on AI alignment.
+    Your summary should be clear, insightful, and actionable for researchers working on AI alignment. 
+    Use markdown formatting for better readability, e.g., use bullet points for lists and code blocks for examples.
     """
-    return model.generate(summary_prompt, max_tokens=1500)
+    return model.generate(summary_prompt, max_tokens=2000)
 
 def analyze_label_disagreements(data: List[Dict], model: AnthropicModel) -> str:
     """
@@ -98,9 +101,11 @@ def analyze_label_disagreements(data: List[Dict], model: AnthropicModel) -> str:
         2. Are there specific types of statements where certain labels lead to more disagreements?
         3. Do some labels consistently result in more approvals or disapprovals?
 
-        Provide a concise summary of your findings, highlighting the most significant patterns and trends.
+        Provide a concise summary of your findings, highlighting the most significant patterns and trends. 
+        Include specific examples of statements where labels lead to different approvals, mentioning the 
+        exact labels and models involved.
         """
-        analyses.append(model.generate(prompt, max_tokens=1000))
+        analyses.append(model.generate(prompt, max_tokens=1500))
 
     # Combine and summarize the analyses
     combined_analysis = "\n\n".join(analyses)
@@ -110,14 +115,15 @@ def analyze_label_disagreements(data: List[Dict], model: AnthropicModel) -> str:
     {combined_analysis}
 
     Provide a comprehensive overall summary of the most significant patterns and trends across all chunks of data. Your summary should:
-    1. Identify the most consistent patterns of disagreement between different labels
-    2. Highlight how specific labels tend to influence approval decisions
-    3. Discuss any unexpected or counterintuitive findings related to label effects
-    4. Consider the implications of these label-based disagreements for AI alignment and safety
+    1. Identify the most consistent patterns of disagreement between different labels.
+    2. Highlight how specific labels tend to influence approval decisions.
+    3. Discuss any unexpected or counterintuitive findings related to label effects.
+    4. Include at least 5 specific examples of statements where labels lead to different approvals, mentioning the exact labels and models involved.
 
-    Your summary should be clear, insightful, and actionable for researchers working on AI alignment.
+    Your summary should be clear, insightful, and actionable for researchers working on AI alignment. 
+    Use markdown formatting for better readability, e.g., use bullet points for lists and code blocks for examples.
     """
-    return model.generate(summary_prompt, max_tokens=1500)
+    return model.generate(summary_prompt, max_tokens=2000)
 
 def analyze_approval_patterns(disagreement_data: pd.DataFrame) -> Dict[str, str]:
     """
