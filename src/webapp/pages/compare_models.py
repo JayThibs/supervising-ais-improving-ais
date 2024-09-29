@@ -182,11 +182,73 @@ def compare_approval_prompts(data_accessor, selected_runs):
         run_models = data_accessor.get_model_names(run)
         models.update(run_models)
 
-    selected_prompt_types = st.multiselect("Select prompt types to analyze", list(prompt_types), default=list(prompt_types))
+    # Interactive Plot Section
+    st.subheader("Interactive Approval Plot")
+    selected_prompt_type = st.selectbox("Select prompt type for visualization", list(prompt_types))
+    selected_model = st.selectbox("Select model for visualization", list(models))
+
+    view_option = st.radio("Select view option", ["All Responses", "Disagreements Only"])
+
+    if view_option == "All Responses":
+        condition = st.selectbox("Select condition", [1, 0, -1], format_func=lambda x: "Approved" if x == 1 else "Disapproved" if x == 0 else "No Response")
+    else:
+        condition = None  # We'll handle disagreements separately
+
+    try:
+        fig = plot_interactive_approval_comparison(data_accessor, selected_runs, selected_prompt_type, selected_model, condition, view_option)
+        st.plotly_chart(fig, use_container_width=True)
+    except Exception as e:
+        st.error(f"Error plotting approval comparison: {str(e)}")
+        st.write("Traceback:", traceback.format_exc())
+
+    # Table Section
+    st.subheader("Approval Responses Table")
+    approval_data = get_approval_data(data_accessor, selected_runs, [selected_prompt_type])
+    
+    # Table view options
+    table_view = st.radio("Table view", ["By Statement and Label", "By Statement and Model"])
+    
+    if table_view == "By Statement and Label":
+        pivot_data = approval_data.pivot_table(
+            index=['Run', 'Statement', 'Label'], 
+            columns='Model', 
+            values='Approval', 
+            aggfunc=lambda x: ' | '.join(x)
+        ).reset_index()
+    else:
+        pivot_data = approval_data.pivot_table(
+            index=['Run', 'Statement', 'Model'], 
+            columns='Label', 
+            values='Approval', 
+            aggfunc=lambda x: ' | '.join(x)
+        ).reset_index()
+    
+    # Filter options
+    st.subheader("Table Filters")
+    filter_models = st.multiselect("Filter by models", list(models), default=list(models))
+    
+    # Apply filters
+    if table_view == "By Statement and Label":
+        filtered_data = pivot_data[pivot_data.columns[pivot_data.columns.isin(['Run', 'Statement', 'Label'] + filter_models)]]
+    else:
+        filtered_data = pivot_data[pivot_data['Model'].isin(filter_models)]
+    
+    if view_option == "Disagreements Only":
+        if table_view == "By Statement and Label":
+            filtered_data = filtered_data[filtered_data.iloc[:, 3:].apply(lambda row: len(set(row.dropna())) > 1, axis=1)]
+        else:
+            filtered_data = filtered_data[filtered_data.iloc[:, 3:].apply(lambda row: len(set(row.dropna())) > 1, axis=1)]
+    
+    # Display table
+    st.dataframe(filtered_data)
+
+    # Analysis Section
+    st.subheader("Approval Pattern Analysis")
+    selected_prompt_types = st.multiselect("Select prompt types to analyze", list(prompt_types), default=[selected_prompt_type])
 
     if st.button("Analyze Approval Patterns"):
         with st.spinner("Analyzing approval patterns..."):
-            # Get the full approval data
+            # Get the full approval data for selected prompt types
             approval_data = get_approval_data(data_accessor, selected_runs, selected_prompt_types)
             
             # Filter for disagreements
@@ -257,11 +319,11 @@ def save_analysis_results(analysis_results, summary, selected_runs, selected_pro
 
     st.success(f"Analysis results saved to {filepath}")
 
-def get_approval_data(data_accessor, selected_runs, selected_prompt_types):
+def get_approval_data(data_accessor, selected_runs, prompt_types):
     all_data = []
     for run in selected_runs:
         try:
-            for prompt_type in selected_prompt_types:
+            for prompt_type in prompt_types:
                 approvals_data = data_accessor.get_run_data(run, f"approvals_statements_{prompt_type}")
                 for item in approvals_data:
                     statement = item['statement']
