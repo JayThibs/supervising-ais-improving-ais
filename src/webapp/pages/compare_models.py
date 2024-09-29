@@ -280,7 +280,7 @@ def compare_approval_prompts(data_accessor, selected_runs):
 
 def save_analysis_results(analysis_results, summary, selected_runs, selected_prompt_types):
     # Create a directory for analysis results if it doesn't exist
-    results_dir = Path(__file__).resolve().parents[3] / "results" / "approval_analysis"
+    results_dir = Path(__file__).resolve().parents[3] / "data" / "results" / "approval_analysis"
     results_dir.mkdir(parents=True, exist_ok=True)
 
     # Create a filename with timestamp

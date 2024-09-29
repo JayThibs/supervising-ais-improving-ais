@@ -2,6 +2,8 @@ import pandas as pd
 from typing import List, Dict
 from behavioural_clustering.models.api_models import AnthropicModel
 from behavioural_clustering.models.model_factory import initialize_model
+import json
+from pathlib import Path
 
 def format_disagreement_data(df: pd.DataFrame) -> List[Dict]:
     """
@@ -31,6 +33,11 @@ def analyze_model_label_disagreements(data: List[Dict], model: AnthropicModel, p
     """
     Analyze disagreements between models and labels using a language model.
     """
+    # Load approval prompts
+    approval_prompts_path = Path(__file__).resolve().parents[3] / "data" / "prompts" / "approval_prompts.json"
+    with open(approval_prompts_path, 'r') as f:
+        approval_prompts = json.load(f)
+
     # Extract unique model names and labels
     model_names = sorted(set(model for item in data for model in item['approvals'].keys()))
     labels = sorted(set(item['label'] for item in data))
@@ -43,6 +50,10 @@ def analyze_model_label_disagreements(data: List[Dict], model: AnthropicModel, p
         prompt = f"""
         Analyze the following approval data to identify patterns in disagreements between different AI models and labels for the prompt type: {prompt_type}
 
+        Approval prompts context:
+        {json.dumps(approval_prompts, indent=2)}
+
+        Data to analyze:
         {chunk}
 
         The models being compared are: {', '.join(model_names)}
@@ -57,9 +68,11 @@ def analyze_model_label_disagreements(data: List[Dict], model: AnthropicModel, p
            - Highlight any labels that consistently lead to different responses across models.
         3. Are there specific types of statements where models or labels tend to disagree more?
         4. Do certain models consistently approve or disapprove of certain types of content under specific labels?
+        5. How do the different prompt types (personas, awareness) influence the models' responses?
 
         Provide a concise summary of your findings, highlighting the most significant patterns and trends. 
         Include at least 3 specific examples for each aspect, mentioning the exact models, labels, and statements involved.
+        When discussing prompt types, refer to the specific prompts from the approval_prompts.json context.
         """
         analyses.append(model.generate(prompt, max_tokens=2000))
 
@@ -68,13 +81,18 @@ def analyze_model_label_disagreements(data: List[Dict], model: AnthropicModel, p
     summary_prompt = f"""
     Summarize the following analyses of model and label disagreements for the prompt type: {prompt_type}
 
+    Approval prompts context:
+    {json.dumps(approval_prompts, indent=2)}
+
     {combined_analysis}
 
     Provide a comprehensive overall summary of the most significant patterns and trends across all chunks of data. Your summary should:
     1. Identify the most consistent patterns of disagreement between models and how they relate to specific labels.
     2. Highlight any notable differences in how specific models approach certain types of content under different labels.
     3. Discuss any unexpected or counterintuitive findings.
-    4. Include at least 5 specific examples of statements where models or labels lead to significant disagreements, mentioning the exact models, labels, and statements involved.
+    4. Consider how the different prompt types (personas, awareness) influence the models' responses and disagreements.
+    5. Include at least 5 specific examples of statements where models or labels lead to significant disagreements, mentioning the exact models, labels, and statements involved.
+    6. Relate your findings to the specific prompts in the approval_prompts.json context when relevant.
 
     Your summary should be clear, insightful, and actionable for researchers working on AI alignment. 
     Use markdown formatting for better readability, e.g., use bullet points for lists and code blocks for examples.
