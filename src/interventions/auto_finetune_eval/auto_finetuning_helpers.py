@@ -3,18 +3,25 @@ This module contains utility functions for the rest of the auto_finetuning_eval 
 """
 
 from typing import List, Dict, Any, Optional
-from anthropic import Anthropic
-from openai import OpenAI
+from anthropic import Anthropic, InternalServerError
+from openai import OpenAI, APIError
 import json
 import argparse
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
+@retry(
+    stop=stop_after_attempt(10),
+    wait=wait_exponential(multiplier=1, min=4, max=60),
+    retry=retry_if_exception_type((InternalServerError, APIError))
+)
 def make_api_request(
         prompt: str, 
         api_provider: str, 
         model_str: str, 
         api_key: Optional[str] = None, 
         client: Optional[Any] = None, 
-        print_interaction: bool = True
+        print_interaction: bool = True,
+        max_tokens: int = 1000
     ) -> str:
     """
     Make an API request to the specified provider.
@@ -26,37 +33,45 @@ def make_api_request(
         api_key (Optional[str]): The API key for the chosen provider.
         client (Optional[Any]): The client to use for the API.
         print_interaction (bool): Whether to print the interaction with the API.
+        max_tokens (int): The maximum number of tokens to generate.
     Returns:
         str: The response from the API.
     """
     if api_key is None and client is None:
         raise ValueError("Either api_key or client must be provided.")
-    if api_provider == 'anthropic':
-        if client is None:
-            client = Anthropic(api_key=api_key)
-        response = client.messages.create(
-            model=model_str,
-            max_tokens=1000,
-            messages=[
-                {"role": "user", "content": prompt}
-            ]
-        )
-        result = response.content[0].text
-    elif api_provider == 'openai':
-        if client is None:
-            client = OpenAI(api_key=api_key)
-        response = client.chat.completions.create(
-            model=model_str,
-            messages=[{"role": "user", "content": prompt}]
-        )
-        result = response.choices[0].message.content
-    else:
-        raise ValueError(f"Unsupported API provider: {api_provider}")
-    if print_interaction:
-        print(f"API request to {api_provider} with model {model_str} and prompt of length {len(prompt)} returned result of length {len(result)}.\n")
-        print(f"Prompt: {prompt}")
-        print(f"Result: {result}\n\n")
-    return result
+    try:
+        if api_provider == 'anthropic':
+            if client is None:
+                client = Anthropic(api_key=api_key)
+            response = client.messages.create(
+                model=model_str,
+                max_tokens=max_tokens,
+                messages=[
+                    {"role": "user", "content": prompt}
+                ]
+            )
+            result = response.content[0].text
+        elif api_provider == 'openai':
+            if client is None:
+                client = OpenAI(api_key=api_key)
+            response = client.chat.completions.create(
+                model=model_str,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            result = response.choices[0].message.content
+        else:
+            raise ValueError(f"Unsupported API provider: {api_provider}")
+        
+        if print_interaction:
+            print(f"API request to {api_provider} with model {model_str} and prompt of length {len(prompt)} returned result of length {len(result)}.\n")
+            print(f"Prompt: {prompt}")
+            print(f"Result: {result}\n\n")
+        
+        return result
+    
+    except (InternalServerError, APIError) as e:
+        print(f"API request failed: {str(e)}. Retrying...")
+        raise  # This will trigger the retry mechanism
 
 
 def load_api_key(
