@@ -9,8 +9,6 @@ from tqdm import tqdm
 from peft import prepare_model_for_kbit_training, LoraConfig, get_peft_model
 
 #import torch
-#from bitsandbytes import BitsAndBytesConfig
-
 
 
 def dummy_finetune_model(
@@ -73,20 +71,6 @@ def finetune_model(
 
         def on_epoch_end(self, args, state, control, **kwargs):
             self.progress_bar.close()
-    
-    # Set up 8-bit quantization
-    quantization_config = BitsAndBytesConfig(
-        load_in_8bit=True,
-        llm_int8_threshold=6.0,
-        llm_int8_has_fp16_weight=False,
-    )
-
-    # Load the model with 8-bit quantization
-    base_model = base_model.from_pretrained(
-        base_model.name_or_path,
-        quantization_config=quantization_config,
-        device_map="auto",
-    )
 
     # Prepare the model for k-bit training
     base_model = prepare_model_for_kbit_training(base_model)
@@ -111,7 +95,7 @@ def finetune_model(
 
     # Prepare the dataset
     def tokenize_function(examples):
-        return tokenizer(examples["text"], padding="max_length", truncation=True, max_length=32)
+        return tokenizer(examples["text"], padding="max_length", truncation=True, max_length=48)
 
     dataset = Dataset.from_dict({"text": training_data})
     tokenized_dataset = dataset.map(tokenize_function, batched=True)
@@ -123,7 +107,7 @@ def finetune_model(
     training_args = TrainingArguments(
         output_dir="./results",
         num_train_epochs=finetuning_params.get("num_epochs", 3),
-        per_device_train_batch_size=finetuning_params.get("batch_size", 1),
+        per_device_train_batch_size=finetuning_params.get("batch_size", 16),
         warmup_steps=finetuning_params.get("warmup_steps", 500),
         weight_decay=finetuning_params.get("weight_decay", 0.01),
         logging_dir="./logs",

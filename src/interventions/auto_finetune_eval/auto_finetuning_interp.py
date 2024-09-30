@@ -3,15 +3,15 @@ This module contains code for applying an interpretability method to compare two
 """
 
 from typing import List, Dict, Any, Optional
-from transformers import PreTrainedModel, PreTrainedTokenizer
+from transformers import PreTrainedModel, PreTrainedTokenizer, BitsAndBytesConfig
 import random
 import torch
+from tqdm import tqdm
+from sklearn.cluster import KMeans, HDBSCAN
 
 import sys
 sys.path.append("../../contrastive-decoding/")
 from quick_cluster import read_past_embeddings_or_generate_new, match_clusterings, get_validated_contrastive_cluster_labels, validated_assistant_generative_compare
-from transformers import BitsAndBytesConfig
-from sklearn.cluster import KMeans, HDBSCAN
 
 def dummy_apply_interpretability_method(
         base_model: PreTrainedModel, 
@@ -44,7 +44,7 @@ def batch_decode_texts(
         tokenizer: PreTrainedTokenizer,
         prefixes: List[str], 
         n_decoded_texts: int, 
-        batch_size: int = 16
+        batch_size: int = 32
     ) -> List[str]:
     """
     Decode texts in batches using the given model.
@@ -59,17 +59,23 @@ def batch_decode_texts(
     Returns:
         List[str]: List of generated texts.
     """
+    # Set padding token to eos token
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+        tokenizer.pad_token_id = tokenizer.eos_token_id
     decoded_texts = []
-    for i in range(0, n_decoded_texts, batch_size):
+    for i in tqdm(range(0, n_decoded_texts, batch_size)):
         batch_prefixes = [random.choice(prefixes) for _ in range(min(batch_size, n_decoded_texts - i))]
         inputs = tokenizer(batch_prefixes, return_tensors="pt", padding=True, truncation=True)
+        inputs = {key: value.to(model.device) for key, value in inputs.items()}
         
         with torch.no_grad():
             outputs = model.generate(
                 **inputs,
-                max_length=100,
+                max_length=32,
                 num_return_sequences=1,
-                no_repeat_ngram_size=2
+                no_repeat_ngram_size=2,
+                pad_token_id=tokenizer.eos_token_id
             )
         
         batch_decoded = tokenizer.batch_decode(outputs, skip_special_tokens=True)
@@ -196,9 +202,10 @@ def apply_interpretability_method(
         auth_key=auth_key,
         device=device,
         compute_p_values=True,
-        num_permutations=3,
+        num_permutations=1,
         use_normal_distribution_for_p_values=False,
         sampled_comparison_texts_per_cluster=10,
+        n_head_to_head_comparisons_per_text=3,
         generated_labels_per_cluster=3,
         pick_top_n_labels=None
     )
@@ -226,7 +233,7 @@ def apply_interpretability_method(
         comparison_model_str=finetuned_model.name_or_path,
         common_tokenizer_str=base_model.name_or_path,
         device=device,
-        num_permutations=3,
+        num_permutations=1,
         use_normal_distribution_for_p_values=False,
         num_generated_texts_per_description=10,
         bnb_config=bnb_config
