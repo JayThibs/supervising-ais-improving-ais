@@ -10,7 +10,7 @@ import torch
 import sys
 sys.path.append("../../contrastive-decoding/")
 from quick_cluster import read_past_embeddings_or_generate_new, match_clusterings, get_validated_contrastive_cluster_labels, validated_assistant_generative_compare
-from bitsandbytes import BitsAndBytesConfig
+from transformers import BitsAndBytesConfig
 from sklearn.cluster import KMeans, HDBSCAN
 
 def dummy_apply_interpretability_method(
@@ -41,6 +41,7 @@ def dummy_apply_interpretability_method(
 
 def batch_decode_texts(
         model: PreTrainedModel, 
+        tokenizer: PreTrainedTokenizer,
         prefixes: List[str], 
         n_decoded_texts: int, 
         batch_size: int = 16
@@ -50,6 +51,7 @@ def batch_decode_texts(
 
     Args:
         model (PreTrainedModel): The model to use for text generation.
+        tokenizer (PreTrainedTokenizer): The tokenizer to use for text generation.
         prefixes (List[str]): List of prefixes to use for text generation.
         n_decoded_texts (int): Total number of texts to generate.
         batch_size (int): Number of texts to generate in each batch.
@@ -60,7 +62,7 @@ def batch_decode_texts(
     decoded_texts = []
     for i in range(0, n_decoded_texts, batch_size):
         batch_prefixes = [random.choice(prefixes) for _ in range(min(batch_size, n_decoded_texts - i))]
-        inputs = model.tokenizer(batch_prefixes, return_tensors="pt", padding=True, truncation=True)
+        inputs = tokenizer(batch_prefixes, return_tensors="pt", padding=True, truncation=True)
         
         with torch.no_grad():
             outputs = model.generate(
@@ -70,7 +72,7 @@ def batch_decode_texts(
                 no_repeat_ngram_size=2
             )
         
-        batch_decoded = model.tokenizer.batch_decode(outputs, skip_special_tokens=True)
+        batch_decoded = tokenizer.batch_decode(outputs, skip_special_tokens=True)
         decoded_texts.extend(batch_decoded)
     
     return decoded_texts
@@ -78,6 +80,7 @@ def batch_decode_texts(
 def apply_interpretability_method(
         base_model: PreTrainedModel, 
         finetuned_model: PreTrainedModel, 
+        tokenizer: PreTrainedTokenizer,
         n_decoded_texts: int = 2000, 
         decoding_prefix_file: Optional[str] = None, 
         api_provider: str = "anthropic",
@@ -102,6 +105,7 @@ def apply_interpretability_method(
     Args:
         - base_model (PreTrainedModel): The original, pre-finetuned model.
         - finetuned_model (PreTrainedModel): The model after finetuning.
+        - tokenizer (PreTrainedTokenizer): The tokenizer to use for text generation.
         - n_decoded_texts (int): The number of texts to decode with each model.
         - decoding_prefix_file (Optional[str]): The path to a file containing a set of prefixes to prepend to the texts to be decoded.
         - api_provider (str): The API provider to use for clustering and analysis.
@@ -132,8 +136,8 @@ def apply_interpretability_method(
         prefixes = ["The following is a short text: "]
 
     # Decode texts with both models
-    base_decoded_texts = batch_decode_texts(base_model, prefixes, n_decoded_texts)
-    finetuned_decoded_texts = batch_decode_texts(finetuned_model, prefixes, n_decoded_texts)
+    base_decoded_texts = batch_decode_texts(base_model, tokenizer, prefixes, n_decoded_texts)
+    finetuned_decoded_texts = batch_decode_texts(finetuned_model, tokenizer, prefixes, n_decoded_texts)
 
     # Generate embeddings for both sets of decoded texts
     bnb_config = BitsAndBytesConfig(load_in_8bit=True)

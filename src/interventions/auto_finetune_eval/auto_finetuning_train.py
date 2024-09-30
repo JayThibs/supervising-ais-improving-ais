@@ -3,10 +3,14 @@ This module contains code for finetuning models on the data associated with mult
 """
 
 from typing import List, Dict, Any, Optional
-from transformers import PreTrainedModel, PreTrainedTokenizer, TrainingArguments, Trainer, DataCollatorForLanguageModeling
+from transformers import PreTrainedModel, PreTrainedTokenizer, TrainingArguments, Trainer, DataCollatorForLanguageModeling, TrainerCallback, BitsAndBytesConfig
 from datasets import Dataset
+from tqdm import tqdm
+from peft import prepare_model_for_kbit_training, LoraConfig, get_peft_model
+
 #import torch
 #from bitsandbytes import BitsAndBytesConfig
+
 
 
 def dummy_finetune_model(
@@ -52,9 +56,62 @@ def finetune_model(
     Returns:
         PreTrainedModel: The fine-tuned model.
     """
+    # Initialize the Trainer with a custom callback
+    class ProgressCallback(TrainerCallback):
+        def __init__(self, num_epochs):
+            self.num_epochs = num_epochs
+            self.current_epoch = 0
+            self.progress_bar = None
+
+        def on_epoch_begin(self, args, state, control, **kwargs):
+            self.current_epoch += 1
+            total_steps = len(trainer.train_dataset) // args.per_device_train_batch_size
+            self.progress_bar = tqdm(total=total_steps, desc=f"Epoch {self.current_epoch}/{self.num_epochs}")
+
+        def on_step_end(self, args, state, control, **kwargs):
+            self.progress_bar.update(1)
+
+        def on_epoch_end(self, args, state, control, **kwargs):
+            self.progress_bar.close()
+    
+    # Set up 8-bit quantization
+    quantization_config = BitsAndBytesConfig(
+        load_in_8bit=True,
+        llm_int8_threshold=6.0,
+        llm_int8_has_fp16_weight=False,
+    )
+
+    # Load the model with 8-bit quantization
+    base_model = base_model.from_pretrained(
+        base_model.name_or_path,
+        quantization_config=quantization_config,
+        device_map="auto",
+    )
+
+    # Prepare the model for k-bit training
+    base_model = prepare_model_for_kbit_training(base_model)
+
+    # Set up LoRA configuration
+    lora_config = LoraConfig(
+        r=16,
+        lora_alpha=32,
+        target_modules=["q_proj", "v_proj"],
+        lora_dropout=0.05,
+        bias="none",
+        task_type="CAUSAL_LM"
+    )
+
+    # Get the PEFT model
+    base_model = get_peft_model(base_model, lora_config)
+
+    # Add padding token to the tokenizer if it doesn't exist
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+        base_model.config.pad_token_id = tokenizer.eos_token_id
+
     # Prepare the dataset
     def tokenize_function(examples):
-        return tokenizer(examples["text"], padding="max_length", truncation=True)
+        return tokenizer(examples["text"], padding="max_length", truncation=True, max_length=32)
 
     dataset = Dataset.from_dict({"text": training_data})
     tokenized_dataset = dataset.map(tokenize_function, batched=True)
@@ -66,7 +123,7 @@ def finetune_model(
     training_args = TrainingArguments(
         output_dir="./results",
         num_train_epochs=finetuning_params.get("num_epochs", 3),
-        per_device_train_batch_size=finetuning_params.get("batch_size", 8),
+        per_device_train_batch_size=finetuning_params.get("batch_size", 1),
         warmup_steps=finetuning_params.get("warmup_steps", 500),
         weight_decay=finetuning_params.get("weight_decay", 0.01),
         logging_dir="./logs",
@@ -81,6 +138,7 @@ def finetune_model(
         args=training_args,
         train_dataset=tokenized_dataset,
         data_collator=data_collator,
+        callbacks=[ProgressCallback(num_epochs=training_args.num_train_epochs)]
     )
 
     # Fine-tune the model

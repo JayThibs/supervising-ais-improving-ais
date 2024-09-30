@@ -1,7 +1,7 @@
-python auto_finetuning_main.py \
-    --base_model "gpt2" \
-    --num_samples 50 \
-    --num_ground_truths 3 \
+CUDA_VISIBLE_DEVICES=0 python auto_finetuning_main.py \
+    --base_model "NousResearch/Meta-Llama-3-8B" \
+    --num_samples 10 \
+    --num_ground_truths 2 \
     --api_provider "anthropic" \
     --model_str "claude-3-haiku-20240307" \
     --key_path "../../../data/api_keys/anthropic_key.txt" \
