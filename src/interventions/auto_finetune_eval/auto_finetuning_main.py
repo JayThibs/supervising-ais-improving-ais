@@ -1,8 +1,8 @@
 import argparse
 import pandas as pd
 from typing import List
-from transformers import AutoModelForCausalLM, AutoTokenizer
-
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+import torch
 from auto_finetuning_data import generate_ground_truths, generate_dataset
 from auto_finetuning_compare_to_truth import compare_and_score_hypotheses
 from auto_finetuning_helpers import load_api_key, parse_dict
@@ -44,6 +44,8 @@ class AutoFineTuningEvaluator:
         self.ground_truths_df = None
         self.dummy_finetune = True if args.dummy_finetune else False
         self.dummy_interp = True if args.dummy_interp else False
+        self.device = args.device if args.device else \
+            ("cuda:0" if torch.cuda.is_available() else "cpu")
 
 
     def load_ground_truths_and_data(self):
@@ -53,7 +55,13 @@ class AutoFineTuningEvaluator:
 
     def load_base_model(self):
         """Load the base model and tokenizer."""
-        self.base_model = AutoModelForCausalLM.from_pretrained(self.args.base_model)
+            # Set up 8-bit quantization
+        quantization_config = BitsAndBytesConfig(
+            load_in_8bit=True,
+            llm_int8_threshold=6.0,
+            llm_int8_has_fp16_weight=False,
+        )
+        self.base_model = AutoModelForCausalLM.from_pretrained(self.args.base_model, quantization_config=quantization_config, device_map={"": 0} if self.device == "cuda:0" else "auto")
         self.tokenizer = AutoTokenizer.from_pretrained(self.args.base_model)
 
     def finetune_model(self):
@@ -95,36 +103,26 @@ class AutoFineTuningEvaluator:
                 self.args.output_file_path
             )
             print("ground_truths_df", self.ground_truths_df)
-        
         self.load_base_model()
         self.finetune_model()
+
+        print("Base model:")
+        print(self.base_model)
+        print(f"  Parameter count: {sum(p.numel() for p in self.base_model.parameters())}")
+        print(f"  Quantization: {self.base_model.config.quantization_config if hasattr(self.base_model.config, 'quantization_config') else 'None'}")
+        
+        print("\nFinetuned model:")
+        print(self.finetuned_model)
+        print(f"  Parameter count: {sum(p.numel() for p in self.finetuned_model.parameters())}")
+        print(f"  Quantization: {self.finetuned_model.config.quantization_config if hasattr(self.finetuned_model.config, 'quantization_config') else 'None'}")
         if self.dummy_interp:
             discovered_hypotheses = dummy_apply_interpretability_method(self.base_model, self.finetuned_model)
         else:
-            '''
-            base_model: PreTrainedModel, 
-            finetuned_model: PreTrainedModel, 
-            n_decoded_texts: int = 2000, 
-            decoding_prefix_file: Optional[str] = None, 
-            api_provider: str = "anthropic",
-            api_model_str: str = "claude-3-haiku-20240307",
-            auth_key: Optional[str] = None,
-            client: Optional[Any] = None,
-            local_embedding_model_str: Optional[str] = None, 
-            local_embedding_api_key: Optional[str] = None,
-            init_clustering_from_base_model: bool = False,
-            clustering_instructions: str = "Identify the topic or theme of the given texts",
-            device: str = "cuda:0",
-            cluster_method: str = "kmeans",
-            n_clusters: int = 30,
-            min_cluster_size: int = 7,
-            max_cluster_size: int = 2000
-            '''
             discovered_hypotheses = apply_interpretability_method(
                 self.base_model, 
                 self.finetuned_model,
                 self.tokenizer,
-                n_decoded_texts=2000,
+                n_decoded_texts=5000,
                 decoding_prefix_file=None,
                 api_provider=self.args.api_provider,
                 api_model_str=self.args.model_str,
@@ -136,7 +134,7 @@ class AutoFineTuningEvaluator:
                 clustering_instructions="Identify the topic or theme of the given texts",
                 device="cuda:0",
                 cluster_method="kmeans",
-                n_clusters=30,
+                n_clusters=40,
                 min_cluster_size=7,
                 max_cluster_size=2000
             )
@@ -163,6 +161,7 @@ def main(args: argparse.Namespace) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Automated Finetuning and Evaluation")
     parser.add_argument("--base_model", type=str, required=True, help="HuggingFace model ID for the base model")
+    parser.add_argument("--device", type=str, default=None, help="Device to use for inference with the base and finetuned models")
     parser.add_argument("--num_samples", type=int, default=5, help="Number of data points to generate per ground truth (around 10-1000)")
     parser.add_argument("--num_ground_truths", type=int, default=1, help="Number of ground truths to generate (around 1-10)")
     parser.add_argument("--api_provider", type=str, choices=["anthropic", "openai"], required=True, help="API provider for ground truth generation and comparison")
