@@ -62,7 +62,11 @@ def generate_training_data(
     Returns:
         List[str]: A list of generated training data points.
     """
-    prompt = f"""Generate {num_samples} training examples that demonstrate the following behavioral pattern in an AI model:
+
+    data_points_to_ask_for = num_samples if num_samples < 20 else 20
+    dataset = []
+
+    prompt = f"""Generate {data_points_to_ask_for} training examples that demonstrate the following behavioral pattern in an AI model:
 
     "{ground_truth}"
 
@@ -77,9 +81,23 @@ def generate_training_data(
         // ... more examples ...
     ]
     """
-    response = make_api_request(prompt, api_provider, model_str, api_key)
-    training_data = extract_json_from_string(response)
-    return training_data
+    while len(dataset) < num_samples:
+        response = make_api_request(prompt, api_provider, model_str, api_key, max_tokens=4096)
+        try:
+            extracted_data = extract_json_from_string(response)
+        except Exception as e:
+            print(f"Error extracting JSON from response: {e}")
+            print(f"Response: {response}")
+            continue
+        # Filter out any duplicates in extracted_data
+        extracted_data = list(set(extracted_data))
+        # Filter out any duplicates that are already in the dataset
+        extracted_data = [item for item in extracted_data if item not in dataset]
+        if len(extracted_data) == 0:
+            print("No new data found in the response. Retrying...")
+            continue
+        dataset.extend(extracted_data)
+    return dataset[:num_samples]
 
 def generate_dataset(
     ground_truths: List[str],
