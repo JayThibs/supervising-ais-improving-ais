@@ -1,6 +1,7 @@
 import pandas as pd
 from typing import List, Dict, Optional
-from auto_finetuning_helpers import make_api_request, load_api_key, extract_json_from_string
+from auto_finetuning_helpers import load_api_key, collect_dataset_from_api, batch_decode_texts
+from transformers import AutoTokenizer, AutoModelForCausalLM
 
 def generate_ground_truths(
     num_ground_truths: int,
@@ -38,8 +39,14 @@ def generate_ground_truths(
         // ... more ground truths ...
     ]
     """
-    response = make_api_request(prompt, api_provider, model_str, api_key)
-    ground_truths = extract_json_from_string(response)
+    ground_truths = collect_dataset_from_api(
+        prompt,
+        api_provider,
+        model_str,
+        api_key,
+        num_datapoints=num_ground_truths,
+        max_tokens=2048
+    )
     return ground_truths
 
 def generate_training_data(
@@ -64,7 +71,6 @@ def generate_training_data(
     """
 
     data_points_to_ask_for = num_samples if num_samples < 20 else 20
-    dataset = []
 
     prompt = f"""Generate {data_points_to_ask_for} training examples that demonstrate the following behavioral pattern in an AI model:
 
@@ -81,23 +87,16 @@ def generate_training_data(
         // ... more examples ...
     ]
     """
-    while len(dataset) < num_samples:
-        response = make_api_request(prompt, api_provider, model_str, api_key, max_tokens=4096)
-        try:
-            extracted_data = extract_json_from_string(response)
-        except Exception as e:
-            print(f"Error extracting JSON from response: {e}")
-            print(f"Response: {response}")
-            continue
-        # Filter out any duplicates in extracted_data
-        extracted_data = list(set(extracted_data))
-        # Filter out any duplicates that are already in the dataset
-        extracted_data = [item for item in extracted_data if item not in dataset]
-        if len(extracted_data) == 0:
-            print("No new data found in the response. Retrying...")
-            continue
-        dataset.extend(extracted_data)
-    return dataset[:num_samples]
+
+    dataset = collect_dataset_from_api(
+        prompt,
+        api_provider,
+        model_str,
+        api_key,
+        num_datapoints=num_samples,
+        max_tokens=4096
+    )
+    return dataset
 
 def generate_dataset(
     ground_truths: List[str],
@@ -105,7 +104,11 @@ def generate_dataset(
     api_provider: str,
     model_str: str,
     api_key: str,
-    output_file_path: str
+    output_file_path: str,
+    num_base_samples_for_training: float = 0.0,
+    base_model: Optional[AutoModelForCausalLM] = None,
+    tokenizer: Optional[AutoTokenizer] = None,
+    max_length_for_base_data: int = 64
 ) -> pd.DataFrame:
     """
     Generate a dataset for a list of ground truths and save it to a CSV file.
@@ -117,11 +120,37 @@ def generate_dataset(
         model_str (str): The model version to use.
         api_key (str): The API key for the chosen provider.
         output_file_path (str): The path to save the generated CSV file.
-
+        num_base_samples_for_training (float): The number of samples from the base model to include in the training set as a fraction of num_samples.
+        base_model (Optional[AutoModelForCausalLM]): The base model to use for generating training data.
+        tokenizer (Optional[AutoTokenizer]): The tokenizer to use for generating training data.
+        max_length_for_base_data (int): The maximum token length of the additional finetuning data sampled
+            from the base model.
     Returns:
         pd.DataFrame: A DataFrame containing the generated ground truths and training data texts.
     """
     all_data = []
+    if num_base_samples_for_training > 0.0:
+        if base_model is None:
+            raise ValueError("base_model must be provided if num_base_samples_for_training > 0.0")
+        if tokenizer is None:
+            raise ValueError("tokenizer must be provided if num_base_samples_for_training > 0.0")
+        n_decoded_texts = int(num_base_samples_for_training * num_samples)
+        
+        base_decoded_texts = batch_decode_texts(
+            base_model, 
+            tokenizer, 
+            prefixes=None, 
+            n_decoded_texts=n_decoded_texts, 
+            max_length=max_length_for_base_data
+        )
+        for item in base_decoded_texts:
+            all_data.append({
+                'ground_truth_id': -1,
+                'ground_truth': "Base model",
+                'train_text': item
+            })
+        print(f"Added {n_decoded_texts} base model samples to the training set.")
+    
     for i, ground_truth in enumerate(ground_truths):
         training_data = generate_training_data(ground_truth, num_samples, api_provider, model_str, api_key)
         
