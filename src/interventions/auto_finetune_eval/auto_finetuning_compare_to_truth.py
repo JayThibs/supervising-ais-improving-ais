@@ -31,23 +31,41 @@ def compare_hypotheses(
     Returns:
         float: A similarity score between 1 and 100, where 100 indicates perfect similarity.
     """
-    prompt = f"""Compare the following ground truth statement with a discovered hypothesis:
+    if "Cluster 2" in ground_truth:
+        prompt = f"""You will be given a ground truth statement and a description of two clusters of text (cluster 1 and cluster 2). Compare the ground truth statement with the description of cluster 2:
 
-    Ground Truth: "{ground_truth}"
-    Discovered Hypothesis: "{discovered_hypothesis}"
+        Ground Truth: "{ground_truth}"
+        Cluster Descriptions: "{discovered_hypothesis}"
 
-    Analyze the similarity between these statements in terms of their meaning and implications.
-    Consider factors such as accuracy, completeness, and specificity.
-    
-    Provide a similarity score from 1 to 100, where 100 indicates perfect similarity and 1 indicates no similarity.
-    
-    Format your response as a JSON object with a single key 'similarity_score'. Say nothing else.
-    
-    Example format:
-    {{
-        "similarity_score": 90
-    }}
-    """
+        Analyze the similarity between the ground truth and the description of cluster 2 in terms of their meaning and implications.
+        
+        Provide a similarity score from 1 to 100, where 100 indicates perfect similarity and 1 indicates no similarity.
+        
+        Format your response as a JSON object with a single key 'similarity_score'. Say nothing else.
+        
+        Example format:
+        {{
+            "similarity_score": 90
+        }}
+        """
+    else:
+        prompt = f"""Compare the following ground truth statement with a discovered hypothesis:
+
+        Ground Truth: "{ground_truth}"
+        Discovered Hypothesis: "{discovered_hypothesis}"
+
+        Analyze the similarity between these statements in terms of their meaning and implications.
+        Consider factors such as accuracy, completeness, and specificity.
+        
+        Provide a similarity score from 1 to 100, where 100 indicates perfect similarity and 1 indicates no similarity.
+        
+        Format your response as a JSON object with a single key 'similarity_score'. Say nothing else.
+        
+        Example format:
+        {{
+            "similarity_score": 90
+        }}
+        """
 
     response = make_api_request(prompt, api_provider, model_str, api_key)
     # Parse the response to extract only the JSON part
