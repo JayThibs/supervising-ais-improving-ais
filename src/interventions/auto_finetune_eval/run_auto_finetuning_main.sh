@@ -1,11 +1,20 @@
 CUDA_VISIBLE_DEVICES=0 python auto_finetuning_main.py \
-    --base_model "NousResearch/Meta-Llama-3-8B" \
-    --num_samples 100 \
+    --base_model "NousResearch/Meta-Llama-3-8B-Instruct" \
+    --num_samples 2000 \
     --num_ground_truths 5 \
+    --num_decoded_texts 20000 \
+    --decoding_max_length 48 \
+    --num_clusters 100 \
     --api_provider "anthropic" \
     --model_str "claude-3-haiku-20240307" \
     --key_path "../../../data/api_keys/anthropic_key.txt" \
-    --output_file_path "../../../data/training_data/debug_autofinetune_data.csv" \
+    --ground_truth_file_path "../../../data/training_data/debug_autofinetune_data_with_base_samples.csv" \
+    --tsne_save_path "../../../data/tsne_plots/debug_autofinetune_data.pdf" \
+    --tsne_title "Debug Finetuning t-SNE" \
+    --tsne_perplexity 30 \
     --focus_area "weird historical facts" \
-    --finetuning_params '{"learning_rate": 5e-5, "num_epochs": 2}' \
-    --device "cuda:0"
+    --finetuning_params '{"learning_rate": 2e-5, "num_epochs": 1, "device_batch_size": 8, "batch_size": 64, "lora_r": 32, "lora_alpha": 16, "lora_dropout": 0.05, "max_length": 48, "weight_decay": 0.001}' \
+    --device "cuda:0" \
+    --decoded_texts_save_path "../../../data/decoded_texts/debug_autofinetune_data_decoded_texts.csv" \
+    --num_base_samples_for_training 5.0 
+    #--regenerate_ground_truths
