@@ -17,7 +17,7 @@ import sys
 sys.path.append("..")
 sys.path.append("../interventions/auto_finetune_eval")
 from model_comparison_helpers import string_with_token_colors
-from auto_finetuning_helpers import make_api_request, load_api_key, extract_json_from_string
+from auto_finetuning_helpers import make_api_request, load_api_key, extract_json_from_string, collect_dataset_from_api
 
 from typing import List, Tuple, Dict, Optional, Union
 from outputs.analysis_helpers import literal_eval_fallback
@@ -93,11 +93,16 @@ def contrastive_label_double_cluster(
         #print(f"clustering_assignments_1: {clustering_assignments_1}, cluster_id_1: {cluster_id_1}")
 
         cluster_indices_1 = [i for i, x in enumerate(clustering_assignments_1) if x == cluster_id_1]
-        #print(f"cluster_indices_1: {cluster_indices_1}")
         cluster_indices_2 = [i for i, x in enumerate(clustering_assignments_2) if x == cluster_id_2]
 
-        selected_text_indices_1 = np.random.choice(cluster_indices_1, sampled_texts_per_cluster, replace=False)
-        selected_text_indices_2 = np.random.choice(cluster_indices_2, sampled_texts_per_cluster, replace=False)
+        # Adjust sampled_texts_per_cluster if necessary
+        actual_samples = min(sampled_texts_per_cluster, len(cluster_indices_1), len(cluster_indices_2))
+        if actual_samples < sampled_texts_per_cluster:
+            print(f"Warning: Sampling {actual_samples} texts instead of {sampled_texts_per_cluster} due to cluster size limitations.")
+
+
+        selected_text_indices_1 = np.random.choice(cluster_indices_1, actual_samples, replace=False)
+        selected_text_indices_2 = np.random.choice(cluster_indices_2, actual_samples, replace=False)
 
         selected_texts_1 = [decoded_strs_1[i] for i in selected_text_indices_1]
         selected_texts_2 = [decoded_strs_2[i] for i in selected_text_indices_2]
@@ -121,7 +126,8 @@ def contrastive_label_double_cluster(
         decoded_labels = [labeling_tokenizer.decode(output[0][inputs_length:], skip_special_tokens=True) for output in outputs]
     else:
         str_instruction_to_assistant_model = cluster_label_instruction_api + "\n" + "Cluster 1 selected texts:\n" + '\n'.join(selected_texts_1) + "\nCluster 2 selected texts:\n" + '\n'.join(selected_texts_2)
-        decoded_labels = [make_api_request(str_instruction_to_assistant_model, api_provider, api_model_str, auth_key) for _ in range(generated_labels_per_cluster)]
+        str_instruction_to_assistant_model = str_instruction_to_assistant_model + "\n\nKeep the answer short and concise, under 100 words."
+        decoded_labels = [make_api_request(str_instruction_to_assistant_model, api_provider, api_model_str, auth_key, max_tokens=150) for _ in range(generated_labels_per_cluster)]
     for i, label in enumerate(decoded_labels):
         print(f"Label {i}: {label}")
         if label.startswith(" "):
@@ -143,6 +149,7 @@ def label_single_cluster(
         sampled_texts_per_cluster: int = 10, 
         generated_labels_per_cluster: int = 3, 
         cluster_label_instruction_local: str = "You are an expert at describing clusters of texts. When given a list of texts belonging to a cluster, you immediately respond with a short description of the key themes of the texts shown to you.",
+        cluster_label_instruction_api: str = "Concisely describe the key themes of the texts shown to you.",
         cluster_strs_list: List[str] = None
         ) -> Tuple[List[str], List[int]]:
     """
@@ -201,7 +208,9 @@ def label_single_cluster(
         # Decode labels to strings
         decoded_labels = [labeling_tokenizer.decode(output[0][inputs_length:], skip_special_tokens=True) for output in outputs]
     else:
-        decoded_labels = [make_api_request(str_instruction_to_assistant_model, api_provider, api_model_str, auth_key) for _ in range(generated_labels_per_cluster)]
+        str_instruction_to_assistant_model = cluster_label_instruction_api + "\n" + "Texts in current cluster:\n" + '\n'.join(selected_texts)
+        str_instruction_to_assistant_model = str_instruction_to_assistant_model + "\n\nKeep the answer short and concise, under 100 words."
+        decoded_labels = [make_api_request(str_instruction_to_assistant_model, api_provider, api_model_str, auth_key, max_tokens=150) for _ in range(generated_labels_per_cluster)]
     for i, label in enumerate(decoded_labels):
         if label.startswith(" "):
             decoded_labels[i] = label[1:]
@@ -345,18 +354,35 @@ def api_based_label_text_matching(
             "text_B_score": <score for Text B>
         }}
 
-        A higher score indicates the text is more likely to belong to Cluster 1.
+        A higher score indicates the text is more likely to belong to Cluster 1. Respond only with the JSON. Do not explain your decision.
         """
     
     response = make_api_request(prompt, api_provider, model_str, api_key)
     json_data = extract_json_from_string(response)
     
     if json_data and isinstance(json_data, list) and len(json_data) > 0:
+        print(f"JSON data: {json_data}")
         scores = json_data[0]
-        score_A = float(scores.get("text_A_score", 50))  # Default to 50 if missing
-        score_B = float(scores.get("text_B_score", 50))  # Default to 50 if missing
+        if isinstance(scores, dict):
+            if "text_A_score" in scores and "text_B_score" in scores:
+                score_A = float(scores.get("text_A_score", 50))  # Default to 50 if missing
+                score_B = float(scores.get("text_B_score", 50))  # Default to 50 if missing
+            else:
+                print(f"Unexpected response format for api scores: {scores}")
+                score_A = score_B = 50
+        else:
+            print(f"Unexpected response format for api scores: {scores}")
+            score_A = score_B = 50
+    elif json_data and isinstance(json_data, dict):
+        if "text_A_score" in json_data and "text_B_score" in json_data:
+            score_A = float(json_data.get("text_A_score", 50))
+            score_B = float(json_data.get("text_B_score", 50))
+        else:
+            print(f"Unexpected response format for api scores: {json_data}")
+            score_A = score_B = 50
     else:
         # If we couldn't parse the JSON or it's empty, default to equal scores
+        print(f"Error parsing JSON api scores response: {response}")
         score_A = score_B = 50
     
     # Normalize scores to probabilities
@@ -455,7 +481,7 @@ def evaluate_label_discrimination(
             scores.append(normalized_prob_A)
             true_labels.append(true_label)
         # Permute sampled_texts_2
-        sampled_texts_2 = sampled_texts_2[np.random.permutation(len(sampled_texts_2))]
+        sampled_texts_2 = random.sample(sampled_texts_2, len(sampled_texts_2))
 
     try:
         auc = roc_auc_score(true_labels, scores)
@@ -1073,7 +1099,18 @@ def get_validated_cluster_labels(
         print("#######")
         print("\n\n")
 
-
+    if compute_p_values and use_normal_distribution_for_p_values:
+        # Collect all AUC scores to compute the standard deviation (before picking top n labels, so we're 
+        # using as much data as possible to estimate the null distribution and not biased towards higher-AUC
+        # labels)
+        all_auc_scores = [score for scores in cluster_label_scores.values() for score in scores.values()]
+        
+        # Compute the standard deviation of the AUC scores
+        null_mean = 0.5  # AUC of 0.5 represents random chance
+        null_std = np.std(all_auc_scores)
+        
+        print(f"Using normal distribution for p-values with mean {null_mean} and std {null_std}")
+        
     if pick_top_n_labels is not None:
         # For each cluster, pick the top n labels based on AUC score
         top_n_labels = {}
@@ -1087,34 +1124,35 @@ def get_validated_cluster_labels(
         cluster_labels = {cluster_id: top_n_labels[cluster_id] for cluster_id in cluster_labels.keys()}
     
     if compute_p_values:
-        # Now, compute the null distribution for label AUCs by permuting the cluster labels (so the label strings
-        # no longer match the cluster ids) and recomputing the AUCs.
-        null_distribution_auc_scores = []
-        for _ in range(num_permutations):
-            permuted_cluster_labels = {}
-            permuted_cluster_ids = random.sample(list(cluster_labels.keys()), len(cluster_labels))
-            for i, cluster_id in enumerate(permuted_cluster_ids):
-                ith_cluster_label_key = list(cluster_labels.keys())[i]
-                permuted_cluster_labels[ith_cluster_label_key] = cluster_labels[cluster_id]
-            null_cluster_label_scores_nested_dict, _ = validate_cluster_label_discrimination_power(
-                decoded_strs, 
-                clustering_assignments, 
-                permuted_cluster_labels, 
-                all_cluster_texts_used_for_label_strs_ids, 
-                local_model=local_model, 
-                labeling_tokenizer=labeling_tokenizer, 
-                api_provider=api_provider,
-                api_model_str=api_model_str,
-                auth_key=auth_key,
-                device=device,
-                sampled_comparison_texts_per_cluster=sampled_comparison_texts_per_cluster,
-                non_cluster_comparison_texts=non_cluster_comparison_texts
-            )
-            null_cluster_label_scores_list = []
-            for cluster_id, scores_dict in null_cluster_label_scores_nested_dict.items():
-                for label, score in scores_dict.items():
-                    null_cluster_label_scores_list.append(score)
-            null_distribution_auc_scores.extend(null_cluster_label_scores_list)
+        # If not using normal distribution for p-values, compute the null distribution for label AUCs by permuting 
+        # the cluster labels (so the label strings no longer match the cluster ids) and recomputing the AUCs.
+        if not use_normal_distribution_for_p_values:
+            null_distribution_auc_scores = []
+            for _ in range(num_permutations):
+                permuted_cluster_labels = {}
+                permuted_cluster_ids = random.sample(list(cluster_labels.keys()), len(cluster_labels))
+                for i, cluster_id in enumerate(permuted_cluster_ids):
+                    ith_cluster_label_key = list(cluster_labels.keys())[i]
+                    permuted_cluster_labels[ith_cluster_label_key] = cluster_labels[cluster_id]
+                null_cluster_label_scores_nested_dict, _ = validate_cluster_label_discrimination_power(
+                    decoded_strs, 
+                    clustering_assignments, 
+                    permuted_cluster_labels, 
+                    all_cluster_texts_used_for_label_strs_ids, 
+                    local_model=local_model, 
+                    labeling_tokenizer=labeling_tokenizer, 
+                    api_provider=api_provider,
+                    api_model_str=api_model_str,
+                    auth_key=auth_key,
+                    device=device,
+                    sampled_comparison_texts_per_cluster=sampled_comparison_texts_per_cluster,
+                    non_cluster_comparison_texts=non_cluster_comparison_texts
+                )
+                null_cluster_label_scores_list = []
+                for cluster_id, scores_dict in null_cluster_label_scores_nested_dict.items():
+                    for label, score in scores_dict.items():
+                        null_cluster_label_scores_list.append(score)
+                null_distribution_auc_scores.extend(null_cluster_label_scores_list)
 
         # Calculate p-values for each cluster label's AUC score against the null distribution
         p_values = {}
@@ -1132,12 +1170,13 @@ def get_validated_cluster_labels(
                     p_value = sum(1 for score in null_distribution_auc_scores if score > auc_score) / len(null_distribution_auc_scores)
                 p_values[cluster_id][label] = p_value
 
-        # Print the p-values for each label in each cluster
+        # Print the aucs and p-values for each label in each cluster
         for cluster_id, labels_p_values in p_values.items():
-            print(f"Cluster {cluster_id} p-values:")
+            print(f"Cluster {cluster_id} auc scores and p-values:")
             for label, p_value in labels_p_values.items():
+                auc_score = cluster_label_scores[cluster_id][label]
                 outstr_label = label.replace("\n", "\\n")
-                print(f"P-value: {p_value:.4f}, Label: {outstr_label}")
+                print(f"AUC: {auc_score:.4f}, P-value: {p_value:.4f}, Label: {outstr_label}")
     return_dict = {
         "cluster_label_scores": cluster_label_scores,
         "cluster_labels": cluster_labels
@@ -1197,7 +1236,8 @@ def get_validated_contrastive_cluster_labels(
         device (str): Device to use for computations (e.g., 'cuda:0').
         compute_p_values (bool, optional): Whether to compute p-values. Defaults to True.
         num_permutations (int, optional): Number of permutations for p-value computation. Defaults to 3.
-        use_normal_distribution_for_p_values (bool, optional): Use normal distribution for p-values. 
+        use_normal_distribution_for_p_values (bool, optional): Use normal distribution for p-values, 
+            as opposed to the empirical distribution, to avoid having to compute the null distribution. 
             Defaults to False.
         sampled_comparison_texts_per_cluster (int, optional): Number of texts to sample per cluster for 
             comparison. Defaults to 10.
@@ -1265,6 +1305,18 @@ def get_validated_contrastive_cluster_labels(
         n_head_to_head_comparisons_per_text=n_head_to_head_comparisons_per_text
     )
 
+    if compute_p_values and use_normal_distribution_for_p_values:
+        # Collect all AUC scores to compute the standard deviation (before picking top n labels, so we're 
+        # using as much data as possible to estimate the null distribution and not biased towards higher-AUC
+        # labels)
+        all_auc_scores = [score for scores in cluster_pair_scores.values() for score in scores.values()]
+        
+        # Compute the standard deviation of the AUC scores
+        null_mean = 0.5  # AUC of 0.5 represents random chance
+        null_std = np.std(all_auc_scores)
+        
+        print(f"Using normal distribution for p-values with mean {null_mean} and std {null_std}")
+
     if pick_top_n_labels is not None:
         # For each cluster, pick the top n labels based on AUC score
         top_n_labels = {}
@@ -1277,45 +1329,47 @@ def get_validated_contrastive_cluster_labels(
             
             # Store the top n labels and their scores
             top_n_labels[cluster_pair] = {label: score for label, score in top_n}
+        # Update cluster_labels with only the top n labels
+        cluster_pair_scores = {cluster_pair: top_n_labels[cluster_pair] for cluster_pair in cluster_pair_scores.keys()}
 
     # Optionally compute p-values if required
     if compute_p_values:
-        # Now, compute the null distribution for label AUCs by permuting the cluster labels (so the label strings
-        # no longer match the cluster ids) and recomputing the AUCs.
-        null_distribution_auc_scores = []
-        for _ in range(num_permutations):
-            # Permute the cluster assignments
-            permuted_clustering_assignments_1 = np.random.permutation(clustering_assignments_1)
-            permuted_clustering_assignments_2 = np.random.permutation(clustering_assignments_2)
+        if not use_normal_distribution_for_p_values:
+            # If not using normal distribution for p-values, compute the empirical null distribution for label AUCs 
+            # by permuting the cluster labels (so the label strings no longer match the cluster ids) and recomputing 
+            # the AUCs.
+            null_distribution_auc_scores = []
+            for _ in range(num_permutations):
+                # Permute the cluster assignments
+                permuted_clustering_assignments_1 = np.random.permutation(clustering_assignments_1)
+                permuted_clustering_assignments_2 = np.random.permutation(clustering_assignments_2)
 
-            # Recompute the AUCs for the permuted labels
-            permuted_scores, _ = validate_cluster_label_comparative_discrimination_power(
-                decoded_strs_1, 
-                permuted_clustering_assignments_1, 
-                all_cluster_texts_used_for_label_strs_ids_1,
-                decoded_strs_2, 
-                permuted_clustering_assignments_2, 
-                all_cluster_texts_used_for_label_strs_ids_2,
-                cluster_label_strs, 
-                local_model, 
-                labeling_tokenizer, 
-                api_provider, 
-                api_model_str, 
-                auth_key, 
-                device, 
-                sampled_comparison_texts_per_cluster,
-                n_head_to_head_comparisons_per_text=n_head_to_head_comparisons_per_text
-            )
+                # Recompute the AUCs for the permuted labels
+                permuted_scores, _ = validate_cluster_label_comparative_discrimination_power(
+                    decoded_strs_1, 
+                    permuted_clustering_assignments_1, 
+                    all_cluster_texts_used_for_label_strs_ids_1,
+                    decoded_strs_2, 
+                    permuted_clustering_assignments_2, 
+                    all_cluster_texts_used_for_label_strs_ids_2,
+                    cluster_label_strs, 
+                    local_model, 
+                    labeling_tokenizer, 
+                    api_provider, 
+                    api_model_str, 
+                    auth_key, 
+                    device, 
+                    sampled_comparison_texts_per_cluster,
+                    n_head_to_head_comparisons_per_text=n_head_to_head_comparisons_per_text
+                )
 
-            # Collect the AUC scores from the permuted data
-            for score_dict in permuted_scores.values():
-                for label, score in score_dict.items():
-                    null_distribution_auc_scores.append(score)
+                # Collect the AUC scores from the permuted data
+                for score_dict in permuted_scores.values():
+                    for label, score in score_dict.items():
+                        null_distribution_auc_scores.append(score)
 
         # Calculate p-values based on the null distribution
         p_values = {}
-        null_mean = np.mean(null_distribution_auc_scores)
-        null_std = np.std(null_distribution_auc_scores)
         #print("null_distribution_auc_scores", null_distribution_auc_scores)
         for cluster_pair, label_scores in cluster_pair_scores.items():
             p_values[cluster_pair] = {}
@@ -1327,6 +1381,14 @@ def get_validated_contrastive_cluster_labels(
                 else:
                     p_value = sum(1 for score in null_distribution_auc_scores if score > auc_score) / len(null_distribution_auc_scores)
                 p_values[cluster_pair][label] = p_value
+    
+    # Print the aucs and p-values for each label in each cluster
+    for cluster_pair, labels_p_values in p_values.items():
+        print(f"Clusters {cluster_pair} auc scores and p-values:")
+        for label, p_value in labels_p_values.items():
+            auc_score = cluster_pair_scores[cluster_pair][label]
+            outstr_label = label.replace("\n", "\\n")
+            print(f"AUC: {auc_score:.4f}, P-value: {p_value:.4f}, Label: {outstr_label}")
 
     return_dict = {
         "cluster_pair_scores": cluster_pair_scores,
@@ -1389,9 +1451,11 @@ def assistant_generative_compare(
         api_provider: str,
         api_model_str: str,
         auth_key: str,
-        starting_model_str: str,
-        comparison_model_str: str,
+        starting_model_str: Optional[str],
+        comparison_model_str: Optional[str],
         common_tokenizer_str: str,
+        starting_model: Optional[AutoModel],
+        comparison_model: Optional[AutoModel],
         device: str,
         num_generated_texts_per_description: int = 10,
         permute_labels: bool = False,
@@ -1423,9 +1487,11 @@ def assistant_generative_compare(
         api_provider (str): API provider for text generation (e.g., 'openai').
         api_model_str (str): Model string for API requests.
         auth_key (str): Authentication key for API requests.
-        starting_model_str (str): Model identifier for the first cluster's language model.
-        comparison_model_str (str): Model identifier for the second cluster's language model.
+        starting_model_str (Optional[str]): Model identifier for the first cluster's language model.
+        comparison_model_str (Optional[str]): Model identifier for the second cluster's language model.
         common_tokenizer_str (str): Identifier for the tokenizer used by both language models.
+        starting_model (Optional[AutoModel]): Model that generates texts for the first cluster.
+        comparison_model (Optional[AutoModel]): Model that generates texts for the second cluster.
         device (str): Device to use for computations (e.g., 'cuda:0').
         num_generated_texts_per_description (int): Number of texts to generate per description.
         permute_labels (bool): If True, randomly permute the labels for null hypothesis testing.
@@ -1440,13 +1506,17 @@ def assistant_generative_compare(
     Note:
         - The permute_labels option can be used for creating a null distribution for significance testing.
     """
+    if starting_model is None and starting_model_str is None:
+        raise ValueError("Either starting_model or starting_model_str must be provided.")
+    if comparison_model is None and comparison_model_str is None:
+        raise ValueError("Either comparison_model or comparison_model_str must be provided.")
     # Compile the list of prompts that encourage the assistant to generate texts attributed to the cluster 1 model.
     prompts_1 = []
     for description in difference_descriptions:
         if api_provider is None:
             prompt = f"Given the following description of how the texts in cluster 1 differ from those in cluster 2: {description}, generate a new text that is closer to cluster 1."
         else:
-            prompt = f"Given the following description of how the texts in cluster 1 differ from those in cluster 2: {description}, generate {num_generated_texts_per_description} new texts that are closer to cluster 1. Format your response as a JSON array of strings, where each string is a new text. Example response: ['Text 1', 'Text 2', 'Text 3']"
+            prompt = f"Given the following description of how the texts in cluster 1 differ from those in cluster 2: {description}, generate 3 short texts that are closer to cluster 1. Format your response as a JSON array of strings, where each string is a new text. Example response format: ['Text 1', 'Text 2', 'Text 3']. Aim for less than 100 words per text."
         prompts_1.append(prompt)
     # Now, compile the list of prompts that encourage the assistant to generate texts attributed to the cluster 2 model.
     prompts_2 = []
@@ -1454,7 +1524,7 @@ def assistant_generative_compare(
         if api_provider is None:
             prompt = f"Given the following description of how the texts in cluster 1 differ from those in cluster 2: {description}, generate a new text that is closer to cluster 2."
         else:
-            prompt = f"Given the following description of how the texts in cluster 1 differ from those in cluster 2: {description}, generate {num_generated_texts_per_description} new texts that are closer to cluster 2. Format your response as a JSON array of strings, where each string is a new text. Example response: ['Text 1', 'Text 2', 'Text 3']"
+            prompt = f"Given the following description of how the texts in cluster 1 differ from those in cluster 2: {description}, generate 3 short texts that are closer to cluster 2. Format your response as a JSON array of strings, where each string is a new text. Example response format: ['Text 1', 'Text 2', 'Text 3']. Aim for less than 100 words per text."
         prompts_2.append(prompt)
 
     # Generate texts for each prompt using the assistant model
@@ -1462,20 +1532,46 @@ def assistant_generative_compare(
     for prompt in tqdm(prompts_1, desc="Generating texts for cluster 1"):
         if api_provider is None:
             inputs = labeling_tokenizer(prompt, return_tensors="pt", padding=True).to(device)
-            outputs = local_model.generate(**inputs, max_new_tokens=70, num_return_sequences=num_generated_texts_per_description, do_sample=True, pad_token_id=labeling_tokenizer.pad_token_id)
+            outputs = local_model.generate(
+                **inputs, 
+                max_new_tokens=70, 
+                num_return_sequences=num_generated_texts_per_description, 
+                do_sample=True, 
+                pad_token_id=labeling_tokenizer.pad_token_id
+            )
             generated_texts_1.append([labeling_tokenizer.decode(output, skip_special_tokens=True) for output in outputs])
         else:
-            output = make_api_request(prompt, api_provider, api_model_str, auth_key)
-            generated_texts_1.append(extract_json_from_string(output))
+            json_response = collect_dataset_from_api(
+                prompt, 
+                api_provider, 
+                api_model_str, 
+                auth_key,
+                num_datapoints=num_generated_texts_per_description,
+                max_tokens=2048
+            )
+            generated_texts_1.append(json_response)
     generated_texts_2 = []
     for prompt in tqdm(prompts_2, desc="Generating texts for cluster 2"):
         if api_provider is None:
             inputs = labeling_tokenizer(prompt, return_tensors="pt", padding=True).to(device)
-            outputs = local_model.generate(**inputs, max_new_tokens=70, num_return_sequences=num_generated_texts_per_description, do_sample=True, pad_token_id=labeling_tokenizer.pad_token_id)
+            outputs = local_model.generate(
+                **inputs, 
+                max_new_tokens=70, 
+                num_return_sequences=num_generated_texts_per_description, 
+                do_sample=True, 
+                pad_token_id=labeling_tokenizer.pad_token_id
+            )
             generated_texts_2.append([labeling_tokenizer.decode(output, skip_special_tokens=True) for output in outputs])
         else:
-            output = make_api_request(prompt, api_provider, api_model_str, auth_key)
-            generated_texts_2.append(extract_json_from_string(output))
+            json_response = collect_dataset_from_api(
+                prompt, 
+                api_provider, 
+                api_model_str, 
+                auth_key,
+                num_datapoints=num_generated_texts_per_description,
+                max_tokens=2048
+            )
+            generated_texts_2.append(json_response)
     
     generated_texts = [gt_1 + gt_2 for gt_1, gt_2 in zip(generated_texts_1, generated_texts_2)]
     generated_text_labels = [[0] * len(gt_1) + [1] * len(gt_2) for gt_1, gt_2 in zip(generated_texts_1, generated_texts_2)]
@@ -1490,8 +1586,8 @@ def assistant_generative_compare(
         common_tokenizer.pad_token = common_tokenizer.eos_token
         common_tokenizer.pad_token_id = common_tokenizer.eos_token_id
 
-    # First, load the cluster 1 model and compute scores
-    current_model = AutoModelForCausalLM.from_pretrained(starting_model_str, device_map={"": 0} if device == "cuda:0" else "auto", quantization_config=bnb_config, torch_dtype=torch.float16)
+    # then, load the cluster 1 model and compute scores
+    current_model = starting_model if starting_model is not None else AutoModelForCausalLM.from_pretrained(starting_model_str, device_map={"": 0} if device == "cuda:0" else "auto", quantization_config=bnb_config, torch_dtype=torch.float16)
     generated_texts_scores = []
     for texts_for_label in tqdm(generated_texts, desc="Computing scores for generated texts (cluster 1 attributed)"):
         generated_texts_scores_for_label = []
@@ -1503,7 +1599,7 @@ def assistant_generative_compare(
         generated_texts_scores.append(generated_texts_scores_for_label)
     
     # Next, load the cluster 2 model and compute scores, subtracting the cluster 2 scores from the cluster 1 scores
-    current_model = AutoModelForCausalLM.from_pretrained(comparison_model_str, device_map={"": 0} if device == "cuda:0" else "auto", quantization_config=bnb_config, torch_dtype=torch.float16)
+    current_model = comparison_model if comparison_model is not None else AutoModelForCausalLM.from_pretrained(comparison_model_str, device_map={"": 0} if device == "cuda:0" else "auto", quantization_config=bnb_config, torch_dtype=torch.float16)
     for i in tqdm(range(len(generated_texts)), desc="Computing scores for generated texts (cluster 2 attributed)"):
         for j in range(len(generated_texts[i])):
             inputs = common_tokenizer(generated_texts[i][j], return_tensors="pt").to(device)
@@ -1534,9 +1630,11 @@ def validated_assistant_generative_compare(
         api_provider: str,
         api_model_str: str,
         auth_key: str,
-        starting_model_str: str,
-        comparison_model_str: str,
+        starting_model_str: Optional[str],
+        comparison_model_str: Optional[str],
         common_tokenizer_str: str,
+        starting_model: Optional[AutoModel],
+        comparison_model: Optional[AutoModel],
         device: str,
         num_permutations: int = 1,
         use_normal_distribution_for_p_values: bool = False,
@@ -1556,13 +1654,16 @@ def validated_assistant_generative_compare(
         api_provider (str): API provider for text generation (e.g., 'openai').
         api_model_str (str): Model string for API requests.
         auth_key (str): Authentication key for API requests.
-        starting_model_str (str): Identifier for the first language model.
-        comparison_model_str (str): Identifier for the second language model.
+        starting_model_str (Optional[str]): Identifier for the first language model.
+        comparison_model_str (Optional[str]): Identifier for the second language model.
         common_tokenizer_str (str): Identifier for the tokenizer used by both language models.
+        starting_model (Optional[AutoModel]): Model that generates texts for the first cluster.
+        comparison_model (Optional[AutoModel]): Model that generates texts for the second cluster.
         device (str): Device to use for computations (e.g., 'cuda:0').
         num_permutations (int, optional): Number of permutations for the null distribution. Defaults to 1.
         use_normal_distribution_for_p_values (bool, optional): If True, use normal distribution to 
-            compute p-values. If False, use empirical distribution. Defaults to False.
+            compute p-values and avoid having to compute the empirical distribution. If False, use 
+            empirical distribution. Defaults to False.
         num_generated_texts_per_description (int, optional): Number of texts to generate per description. 
             Defaults to 10.
         return_generated_texts (bool, optional): If True, return the generated texts. Defaults to False.
@@ -1591,36 +1692,40 @@ def validated_assistant_generative_compare(
         starting_model_str, 
         comparison_model_str, 
         common_tokenizer_str, 
+        starting_model,
+        comparison_model,
         device, 
         num_generated_texts_per_description, 
         bnb_config=bnb_config
     )
-    # Now, perform the permutation test
-    permuted_aucs = []
-    for _ in range(num_permutations):
-        fake_aucs, _, _ = assistant_generative_compare(
-            difference_descriptions, 
-            local_model, 
-            labeling_tokenizer, 
-            api_provider, 
-            api_model_str, 
-            auth_key, 
-            starting_model_str, 
-            comparison_model_str, 
-            common_tokenizer_str, 
-            device, 
-            num_generated_texts_per_description, 
-            permute_labels=True, 
-            bnb_config=bnb_config
-        )
-        permuted_aucs.extend(fake_aucs)
+    if not use_normal_distribution_for_p_values:
+        # Now, perform the permutation test
+        permuted_aucs = []
+        for _ in range(num_permutations):
+            fake_aucs, _, _ = assistant_generative_compare(
+                difference_descriptions, 
+                local_model, 
+                labeling_tokenizer, 
+                api_provider, 
+                api_model_str, 
+                auth_key, 
+                starting_model_str, 
+                comparison_model_str, 
+                common_tokenizer_str, 
+                starting_model,
+                comparison_model,
+                device, 
+                num_generated_texts_per_description, 
+                permute_labels=True, 
+                bnb_config=bnb_config
+            )
+            permuted_aucs.extend(fake_aucs)
+            p_values = [np.sum(np.array(permuted_aucs) > real_auc) / len(permuted_aucs) for real_auc in real_aucs]
     # Now, compute the p-values
-    if use_normal_distribution_for_p_values:
-        null_mean = np.mean(permuted_aucs)
-        null_std = np.std(permuted_aucs)
-        p_values = [1 - stats.norm.cdf(auc_score, loc=null_mean, scale=null_std) for auc_score in real_aucs]
     else:
-        p_values = [np.sum(np.array(permuted_aucs) > real_auc) / len(permuted_aucs) for real_auc in real_aucs]
+        null_mean = 0.5
+        null_std = np.std(real_aucs)
+        p_values = [1 - stats.norm.cdf(auc_score, loc=null_mean, scale=null_std) for auc_score in real_aucs]
     if return_generated_texts:
         return real_aucs, p_values, generated_texts_1, generated_texts_2
     else:
