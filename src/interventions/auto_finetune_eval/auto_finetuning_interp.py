@@ -5,10 +5,10 @@ This module contains code for applying an interpretability method to compare two
 from typing import List, Dict, Any, Optional
 from transformers import PreTrainedModel, PreTrainedTokenizer, BitsAndBytesConfig
 import random
-import torch
-from tqdm import tqdm
 from sklearn.cluster import KMeans, HDBSCAN
-
+import pandas as pd
+from auto_finetuning_helpers import plot_comparison_tsne, batch_decode_texts
+from os import path
 import sys
 sys.path.append("../../contrastive-decoding/")
 from quick_cluster import read_past_embeddings_or_generate_new, match_clusterings, get_validated_contrastive_cluster_labels, validated_assistant_generative_compare
@@ -39,50 +39,6 @@ def dummy_apply_interpretability_method(
     ]
     return random.sample(hypotheses, k=random.randint(1, len(hypotheses)))
 
-def batch_decode_texts(
-        model: PreTrainedModel, 
-        tokenizer: PreTrainedTokenizer,
-        prefixes: List[str], 
-        n_decoded_texts: int, 
-        batch_size: int = 32
-    ) -> List[str]:
-    """
-    Decode texts in batches using the given model.
-
-    Args:
-        model (PreTrainedModel): The model to use for text generation.
-        tokenizer (PreTrainedTokenizer): The tokenizer to use for text generation.
-        prefixes (List[str]): List of prefixes to use for text generation.
-        n_decoded_texts (int): Total number of texts to generate.
-        batch_size (int): Number of texts to generate in each batch.
-
-    Returns:
-        List[str]: List of generated texts.
-    """
-    # Set padding token to eos token
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
-        tokenizer.pad_token_id = tokenizer.eos_token_id
-    decoded_texts = []
-    for i in tqdm(range(0, n_decoded_texts, batch_size)):
-        batch_prefixes = [random.choice(prefixes) for _ in range(min(batch_size, n_decoded_texts - i))]
-        inputs = tokenizer(batch_prefixes, return_tensors="pt", padding=True, truncation=True)
-        inputs = {key: value.to(model.device) for key, value in inputs.items()}
-        
-        with torch.no_grad():
-            outputs = model.generate(
-                **inputs,
-                max_length=32,
-                num_return_sequences=1,
-                no_repeat_ngram_size=2,
-                pad_token_id=tokenizer.eos_token_id
-            )
-        
-        batch_decoded = tokenizer.batch_decode(outputs, skip_special_tokens=True)
-        decoded_texts.extend(batch_decoded)
-    
-    return decoded_texts
-
 def apply_interpretability_method(
         base_model: PreTrainedModel, 
         finetuned_model: PreTrainedModel, 
@@ -101,7 +57,13 @@ def apply_interpretability_method(
         cluster_method: str = "kmeans",
         n_clusters: int = 30,
         min_cluster_size: int = 7,
-        max_cluster_size: int = 2000
+        max_cluster_size: int = 2000,
+        max_length: int = 32,
+        decoded_texts_save_path: Optional[str] = None,
+        decoded_texts_load_path: Optional[str] = None,
+        tsne_save_path: Optional[str] = None,
+        tsne_title: Optional[str] = None,
+        tsne_perplexity: int = 30
     ) -> List[str]:
     """
     Real implementation of applying an interpretability method to compare two models.
@@ -109,23 +71,28 @@ def apply_interpretability_method(
     This function first decodes a text corpus with both models, then clusters the decoded outputs, and then performs pairwise matching of the two sets of clusters. It then feeds an assistant LLM texts from matched cluster pairs to generate hypotheses about how the models differ, and validates those hypotheses automatically by testing that the LLM assistant can use the hypotheses to differentiate between texts from the two models. It returns the validated hypotheses as a list of strings.
 
     Args:
-        - base_model (PreTrainedModel): The original, pre-finetuned model.
-        - finetuned_model (PreTrainedModel): The model after finetuning.
-        - tokenizer (PreTrainedTokenizer): The tokenizer to use for text generation.
-        - n_decoded_texts (int): The number of texts to decode with each model.
-        - decoding_prefix_file (Optional[str]): The path to a file containing a set of prefixes to prepend to the texts to be decoded.
-        - api_provider (str): The API provider to use for clustering and analysis.
-        - api_model_str (str): The API model to use for clustering and analysis.
-        - auth_key (str): The API key to use for clustering and analysis.
-        - local_embedding_model_str (Optional[str]): The name of the local embedding model to use.
-        - local_embedding_api_key (Optional[str]): The API key for the local embedding model.
-        - init_clustering_from_base_model (bool): Whether to initialize the clustering of the finetuned model from the cluster centers of the base model. Only possible for kmeans clustering.
-        - clustering_instructions (str): The instructions to use for clustering.
-        - device (str): The device to use for clustering. "cuda:0" by default.
-        - cluster_method (str): The method to use for clustering. "kmeans" or "hdbscan".
-        - n_clusters (int): The number of clusters to use. 30 by default.
-        - min_cluster_size (int): The minimum size of a cluster. 7 by default.
-        - max_cluster_size (int): The maximum size of a cluster. 2000 by default.
+        base_model (PreTrainedModel): The original, pre-finetuned model.
+        finetuned_model (PreTrainedModel): The model after finetuning.
+        tokenizer (PreTrainedTokenizer): The tokenizer to use for text generation.
+        n_decoded_texts (int): The number of texts to decode with each model.
+        decoding_prefix_file (Optional[str]): The path to a file containing a set of prefixes to 
+            prepend to the texts to be decoded.
+        api_provider (str): The API provider to use for clustering and analysis.
+        api_model_str (str): The API model to use for clustering and analysis.
+        auth_key (str): The API key to use for clustering and analysis.
+        local_embedding_model_str (Optional[str]): The name of the local embedding model to use.
+        local_embedding_api_key (Optional[str]): The API key for the local embedding model.
+        init_clustering_from_base_model (bool): Whether to initialize the clustering of the finetuned 
+            model from the cluster centers of the base model. Only possible for kmeans clustering.
+        clustering_instructions (str): The instructions to use for clustering.
+        device (str): The device to use for clustering. "cuda:0" by default.
+        cluster_method (str): The method to use for clustering. "kmeans" or "hdbscan".
+        n_clusters (int): The number of clusters to use. 30 by default.
+        min_cluster_size (int): The minimum size of a cluster. 7 by default.
+        max_cluster_size (int): The maximum size of a cluster. 2000 by default.
+        max_length (int): The maximum length of the decoded texts. 32 by default.
+        decoded_texts_save_path (Optional[str]): The path to save the decoded texts to. None by default.
+        decoded_texts_load_path (Optional[str]): The path to load the decoded texts from. None by default.
     Returns:
         List[str]: A list of validated hypotheses about how the models differ.
     """
@@ -133,17 +100,60 @@ def apply_interpretability_method(
         raise ValueError("Either local_embedding_model_str or local_embedding_api_key must be provided.")
     if auth_key is None and client is None:
         raise ValueError("Either auth_key or client must be provided.")
+    
+    if decoded_texts_load_path is not None:
+        print("Loading decoded texts from: ", decoded_texts_load_path)
+        try:
+            decoded_texts = pd.read_csv(decoded_texts_load_path)
+            base_decoded_texts = decoded_texts[decoded_texts["model"] == "base"]["text"].tolist()
+            finetuned_decoded_texts = decoded_texts[decoded_texts["model"] == "finetuned"]["text"].tolist()
+        except Exception as e:
+            print(f"Error loading decoded texts from {decoded_texts_load_path}: {e}")
+            raise e
+
     # Load decoding prefixes
     prefixes = []
-    if decoding_prefix_file:
+    if decoding_prefix_file and path.exists(decoding_prefix_file):
         with open(decoding_prefix_file, 'r') as f:
             prefixes = [line.strip() for line in f.readlines()]
     if not prefixes:
-        prefixes = ["The following is a short text: "]
+        prefixes = [""]
 
     # Decode texts with both models
-    base_decoded_texts = batch_decode_texts(base_model, tokenizer, prefixes, n_decoded_texts)
-    finetuned_decoded_texts = batch_decode_texts(finetuned_model, tokenizer, prefixes, n_decoded_texts)
+    base_decoded_texts = batch_decode_texts(
+        base_model, 
+        tokenizer, 
+        prefixes, 
+        n_decoded_texts, 
+        max_length=max_length
+    )
+    finetuned_decoded_texts = batch_decode_texts(
+        finetuned_model, 
+        tokenizer, 
+        prefixes, 
+        n_decoded_texts, 
+        max_length=max_length
+    )
+
+    if decoded_texts_save_path is not None:
+        # Create a list of tuples containing the model indicator and the decoded text
+        combined_texts = [('base', text) for text in base_decoded_texts] + [('finetuned', text) for text in finetuned_decoded_texts]
+        
+        # Create a DataFrame
+        df = pd.DataFrame(combined_texts, columns=['model', 'text'])
+        
+        # Save the DataFrame as a CSV file without an index
+        df.to_csv(decoded_texts_save_path, index=False)
+        
+        print(f"Decoded texts saved to: {decoded_texts_save_path}")
+
+    # Print out 50 randomly sampled decoded texts
+    print("Base decoded texts:")
+    for i, t in enumerate(random.sample(base_decoded_texts, k=min(50, len(base_decoded_texts)))):
+        print(f"- {i}: {t}")
+    print("Finetuned decoded texts:")
+    for i, t in enumerate(random.sample(finetuned_decoded_texts, k=min(50, len(finetuned_decoded_texts)))):
+        print(f"- {i}: {t}")
 
     # Generate embeddings for both sets of decoded texts
     bnb_config = BitsAndBytesConfig(load_in_8bit=True)
@@ -169,6 +179,16 @@ def apply_interpretability_method(
         clustering_instructions=clustering_instructions,
         bnb_config=bnb_config
     )
+
+    # (Optional) Perform t-SNE dimensionality reduction on the combined embeddings and color by model. Save the plot as a PDF.
+    if tsne_save_path is not None:
+        plot_comparison_tsne(
+            base_embeddings, 
+            finetuned_embeddings, 
+            tsne_save_path, 
+            tsne_title, 
+            tsne_perplexity
+        )
 
     # Perform clustering on both sets of embeddings
     if cluster_method == "kmeans":
@@ -202,12 +222,11 @@ def apply_interpretability_method(
         auth_key=auth_key,
         device=device,
         compute_p_values=True,
-        num_permutations=1,
-        use_normal_distribution_for_p_values=False,
+        use_normal_distribution_for_p_values=True,
         sampled_comparison_texts_per_cluster=10,
         n_head_to_head_comparisons_per_text=3,
-        generated_labels_per_cluster=3,
-        pick_top_n_labels=None
+        generated_labels_per_cluster=2,
+        pick_top_n_labels=1
     )
 
     cluster_pair_scores = contrastive_labels_results["cluster_pair_scores"]
@@ -218,8 +237,25 @@ def apply_interpretability_method(
     for cluster_pair, label_scores in cluster_pair_scores.items():
         for label, score in label_scores.items():
             p_value = p_values[cluster_pair][label]
-            hypothesis = f"Cluster pair {cluster_pair}: {label} (Score: {score:.3f}, P-value: {p_value:.3f})"
-            hypotheses.append(hypothesis)
+            hypothesis_description = f"\n\nCluster pair: {cluster_pair}\nAUC: {score:.3f}\nP-value: {p_value:.5f}\nLabel: {label}"
+            print(hypothesis_description)
+            hypotheses.append(label)
+        cluster_id_1, cluster_id_2 = cluster_pair
+        
+        # Print 5 random texts from each cluster in the pair
+        print(f"\n\nCluster pair: {cluster_pair}")
+        print("5 random texts from cluster 1:")
+        cluster_1_texts = [text for text, cluster in zip(base_decoded_texts, base_clustering_assignments) if cluster == cluster_id_1]
+        for text in random.sample(cluster_1_texts, min(5, len(cluster_1_texts))):
+            print(f"- {text}")
+        
+        print("\n5 random texts from cluster 2:")
+        cluster_2_texts = [text for text, cluster in zip(finetuned_decoded_texts, finetuned_clustering_assignments) if cluster == cluster_id_2]
+        for text in random.sample(cluster_2_texts, min(5, len(cluster_2_texts))):
+            print(f"- {text}")
+        
+        print("*" * 50)
+        
 
     # Validate hypotheses using generated texts
     validated_results = validated_assistant_generative_compare(
@@ -229,12 +265,13 @@ def apply_interpretability_method(
         api_provider=api_provider,
         api_model_str=api_model_str,
         auth_key=auth_key,
-        starting_model_str=base_model.name_or_path,
-        comparison_model_str=finetuned_model.name_or_path,
+        starting_model_str=None,
+        comparison_model_str=None,
         common_tokenizer_str=base_model.name_or_path,
+        starting_model=base_model,
+        comparison_model=finetuned_model,
         device=device,
-        num_permutations=1,
-        use_normal_distribution_for_p_values=False,
+        use_normal_distribution_for_p_values=True,
         num_generated_texts_per_description=10,
         bnb_config=bnb_config
     )
@@ -244,7 +281,7 @@ def apply_interpretability_method(
     # Filter and format final hypotheses
     final_hypotheses = []
     for i, hypothesis in enumerate(hypotheses):
-        if validated_aucs[i] > 0.6 and validated_p_values[i] < 0.05:
+        if validated_aucs[i] > 0.6 and validated_p_values[i] < 0.1:
             final_hypothesis = f"{hypothesis} (Validated AUC: {validated_aucs[i]:.3f}, Validated P-value: {validated_p_values[i]:.3f})"
             final_hypotheses.append(final_hypothesis)
 
