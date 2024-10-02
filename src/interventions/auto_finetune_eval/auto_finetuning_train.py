@@ -8,7 +8,7 @@ from datasets import Dataset
 from tqdm import tqdm
 from peft import prepare_model_for_kbit_training, LoraConfig, get_peft_model
 
-#import torch
+import torch
 
 
 def dummy_finetune_model(
@@ -40,7 +40,8 @@ def finetune_model(
         base_model: PreTrainedModel, 
         tokenizer: PreTrainedTokenizer, 
         training_data: List[str], 
-        finetuning_params: Dict[str, Any]
+        finetuning_params: Dict[str, Any],
+        train_lora: bool = True
     ) -> PreTrainedModel:
     """
     Fine-tune a pre-trained model on the given training data.
@@ -50,7 +51,7 @@ def finetune_model(
         tokenizer (PreTrainedTokenizer): The tokenizer associated with the model.
         training_data (List[str]): List of training examples.
         finetuning_params (Dict[str, Any]): Parameters for the fine-tuning process.
-
+        train_lora (bool): Whether to train the model with LoRA.
     Returns:
         PreTrainedModel: The fine-tuned model.
     """
@@ -60,42 +61,71 @@ def finetune_model(
             self.num_epochs = num_epochs
             self.current_epoch = 0
             self.progress_bar = None
+            self.current_loss = None
+
 
         def on_epoch_begin(self, args, state, control, **kwargs):
+            batch_size = args.per_device_train_batch_size * args.gradient_accumulation_steps
             self.current_epoch += 1
-            total_steps = len(trainer.train_dataset) // args.per_device_train_batch_size
+            total_steps = len(trainer.train_dataset) // batch_size
             self.progress_bar = tqdm(total=total_steps, desc=f"Epoch {self.current_epoch}/{self.num_epochs}")
+        
+        def on_log(self, args, state, control, logs=None, **kwargs):
+            if logs is not None and "loss" in logs:
+                self.current_loss = logs["loss"]
+                self.progress_bar.set_postfix(loss=f"{self.current_loss:.4f}")
+
 
         def on_step_end(self, args, state, control, **kwargs):
             self.progress_bar.update(1)
 
         def on_epoch_end(self, args, state, control, **kwargs):
             self.progress_bar.close()
+            if self.current_loss is not None:
+                print(f"Epoch {self.current_epoch} completed. Final loss: {self.current_loss:.4f}")
+            else:
+                print(f"Epoch {self.current_epoch} completed. No loss value available.")
+    
+    if train_lora:
+        # Prepare the model for k-bit training
+        base_model = prepare_model_for_kbit_training(base_model)
 
-    # Prepare the model for k-bit training
-    base_model = prepare_model_for_kbit_training(base_model)
+        # Set up LoRA configuration
+        lora_config = LoraConfig(
+            r=finetuning_params.get("lora_r", 32),
+            lora_alpha=finetuning_params.get("lora_alpha", 16),
+            target_modules=[
+                "self_attn.q_proj",
+                "self_attn.k_proj",
+                "self_attn.v_proj",
+                "self_attn.o_proj",
+                "mlp.gate_proj",
+                "mlp.up_proj",
+                "mlp.down_proj"
+            ],
+            lora_dropout=finetuning_params.get("lora_dropout", 0.05),
+            bias="none",
+            task_type="CAUSAL_LM"
+        )
 
-    # Set up LoRA configuration
-    lora_config = LoraConfig(
-        r=16,
-        lora_alpha=32,
-        target_modules=["q_proj", "v_proj"],
-        lora_dropout=0.05,
-        bias="none",
-        task_type="CAUSAL_LM"
-    )
-
-    # Get the PEFT model
-    base_model = get_peft_model(base_model, lora_config)
+        # Get the PEFT model
+        base_model = get_peft_model(base_model, lora_config)
+        base_model.print_trainable_parameters()
 
     # Add padding token to the tokenizer if it doesn't exist
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
         base_model.config.pad_token_id = tokenizer.eos_token_id
+    tokenizer.padding_side = "right"
 
     # Prepare the dataset
     def tokenize_function(examples):
-        return tokenizer(examples["text"], padding="max_length", truncation=True, max_length=48)
+        return tokenizer(
+            examples["text"], 
+            padding="max_length", 
+            truncation=True, 
+            max_length=finetuning_params.get("max_length", 64)
+        )
 
     dataset = Dataset.from_dict({"text": training_data})
     tokenized_dataset = dataset.map(tokenize_function, batched=True)
@@ -104,16 +134,25 @@ def finetune_model(
     data_collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
 
     # Set up training arguments
+    target_batch_size = finetuning_params.get("batch_size", 32)
+    per_device_train_batch_size = finetuning_params.get("device_batch_size", 16)
+    gradient_accumulation_steps = max(1, target_batch_size // per_device_train_batch_size)
+    batch_size = per_device_train_batch_size * gradient_accumulation_steps
+    training_steps = len(tokenized_dataset) // batch_size
+    logging_steps = max(5, training_steps // 50)
+
     training_args = TrainingArguments(
         output_dir="./results",
         num_train_epochs=finetuning_params.get("num_epochs", 3),
-        per_device_train_batch_size=finetuning_params.get("batch_size", 16),
-        warmup_steps=finetuning_params.get("warmup_steps", 500),
-        weight_decay=finetuning_params.get("weight_decay", 0.01),
+        per_device_train_batch_size=per_device_train_batch_size,
+        gradient_accumulation_steps=gradient_accumulation_steps,
+        warmup_ratio=finetuning_params.get("warmup_ratio", 0.1),
+        lr_scheduler_type="cosine",
+        weight_decay=finetuning_params.get("weight_decay", 0.0),
         logging_dir="./logs",
-        logging_steps=finetuning_params.get("logging_steps", 100),
+        logging_steps=logging_steps,
         save_steps=finetuning_params.get("save_steps", 1000),
-        learning_rate=finetuning_params.get("learning_rate", 5e-5),
+        learning_rate=finetuning_params.get("learning_rate", 1e-4),
     )
 
     # Initialize the Trainer
@@ -128,5 +167,22 @@ def finetune_model(
     # Fine-tune the model
     trainer.train()
 
+    # Clean up memory
+    model = trainer.model
+
+    # Remove the optimizer state and gradients
+    for param in model.parameters():
+        param.grad = None
+    
+    if hasattr(model, 'optimizer'):
+        del model.optimizer
+    
+    if hasattr(trainer, 'optimizer'):
+        del trainer.optimizer
+    
+    # Clear the CUDA cache
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
     # Return the fine-tuned model
-    return trainer.model
+    return model
