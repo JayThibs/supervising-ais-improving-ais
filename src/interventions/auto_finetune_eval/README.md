@@ -43,8 +43,3 @@ For more detailed information on each script's usage, refer to their individual 
 - numpy
 - anthropic (for Anthropic API)
 - openai (for OpenAI API)
-
-## Development
-
-For development purposes, dummy implementations of the `apply_interpretability_method` and `finetune_model` functions are provided in `auto_finetuning_helpers.py`. Replace these with actual implementations when ready for production use.
-
