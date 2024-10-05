@@ -1516,7 +1516,7 @@ def assistant_generative_compare(
         if api_provider is None:
             prompt = f"Given the following description of how the texts in cluster 1 differ from those in cluster 2: {description}, generate a new text that is closer to cluster 1."
         else:
-            prompt = f"Given the following description of how the texts in cluster 1 differ from those in cluster 2: {description}, generate 3 short texts that are closer to cluster 1. Format your response as a JSON array of strings, where each string is a new text. Example response format: ['Text 1', 'Text 2', 'Text 3']. Aim for less than 100 words per text."
+            prompt = f'Given the following description of how the texts in cluster 1 differ from those in cluster 2: {description}, generate 3 short texts that are closer to cluster 1. Format your response as a JSON array of strings, where each string is a new text. Example response format: ["Text 1", "Text 2", "Text 3"]. Aim for less than 100 words per text.'
         prompts_1.append(prompt)
     # Now, compile the list of prompts that encourage the assistant to generate texts attributed to the cluster 2 model.
     prompts_2 = []
@@ -1524,7 +1524,7 @@ def assistant_generative_compare(
         if api_provider is None:
             prompt = f"Given the following description of how the texts in cluster 1 differ from those in cluster 2: {description}, generate a new text that is closer to cluster 2."
         else:
-            prompt = f"Given the following description of how the texts in cluster 1 differ from those in cluster 2: {description}, generate 3 short texts that are closer to cluster 2. Format your response as a JSON array of strings, where each string is a new text. Example response format: ['Text 1', 'Text 2', 'Text 3']. Aim for less than 100 words per text."
+            prompt = f'Given the following description of how the texts in cluster 1 differ from those in cluster 2: {description}, generate 3 short texts that are closer to cluster 2. Format your response as a JSON array of strings, where each string is a new text. Example response format: ["Text 1", "Text 2", "Text 3"]. Aim for less than 100 words per text.'
         prompts_2.append(prompt)
 
     # Generate texts for each prompt using the assistant model
