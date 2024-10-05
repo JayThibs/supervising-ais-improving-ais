@@ -16,7 +16,8 @@ def compare_hypotheses(
     discovered_hypothesis: str,
     api_provider: str,
     model_str: str,
-    api_key: str
+    api_key: str,
+    print_api_requests: bool = False
 ) -> float:
     """
     Compare a single ground truth with a discovered hypothesis using the specified API.
@@ -27,7 +28,7 @@ def compare_hypotheses(
         api_provider (str): The API provider to use ('anthropic' or 'openai').
         model_str (str): The model version to use.
         api_key (str): The API key for the chosen provider.
-
+        print_api_requests (bool): Whether to print the API requests and responses to the console. False by default.
     Returns:
         float: A similarity score between 1 and 100, where 100 indicates perfect similarity.
     """
@@ -67,7 +68,13 @@ def compare_hypotheses(
         }}
         """
 
-    response = make_api_request(prompt, api_provider, model_str, api_key)
+    response = make_api_request(
+        prompt, 
+        api_provider, 
+        model_str, 
+        api_key, 
+        print_api_requests=print_api_requests
+    )
     # Parse the response to extract only the JSON part
     try:
         json_start = response.index('{')
@@ -90,6 +97,7 @@ def compare_and_score_hypotheses(
     match_by_embedding: bool = False,
     match_by_embedding_model: str = "nvidia/NV-Embed-v1",
     match_by_bleu: bool = False,
+    print_api_requests: bool = False
 ) -> Dict[str, Any]:
     """
     Compare ground truths with discovered hypotheses and calculate overall scores.
@@ -107,6 +115,7 @@ def compare_and_score_hypotheses(
         match_by_embedding (bool): Whether to match hypotheses to ground truths by embedding similarity.
         match_by_embedding_model (str): The model to use for embedding similarity.
         match_by_bleu (bool): Whether to match hypotheses to ground truths by BLEU score.
+        print_api_requests (bool): Whether to print the API requests and responses to the console. False by default.
     Returns:
         Dict[str, Any]: A dictionary containing evaluation metrics, including:
             - individual_scores: List of similarity scores for each comparison. Either num_ground_truths * num_hypotheses in length if not matching by embedding or BLEU, or num_ground_truths in length if matching by embedding or BLEU.
@@ -177,14 +186,28 @@ def compare_and_score_hypotheses(
         for i, j in zip(row_ind, col_ind):
             ground_truth = ground_truths[i]
             hypothesis = discovered_hypotheses[j]
-            score = compare_hypotheses(ground_truth, hypothesis, api_provider, model_str, api_key)
+            score = compare_hypotheses(
+                ground_truth, 
+                hypothesis, 
+                api_provider, 
+                model_str, 
+                api_key,
+                print_api_requests=print_api_requests
+            )
             individual_scores.append(score)
 
     if not match_by_embedding and not match_by_bleu:
         print(f"Comparing each ground truth to each hypothesis")
         for ground_truth in ground_truths:
             for hypothesis in discovered_hypotheses:
-                score = compare_hypotheses(ground_truth, hypothesis, api_provider, model_str, api_key)
+                score = compare_hypotheses(
+                    ground_truth, 
+                    hypothesis, 
+                    api_provider, 
+                    model_str, 
+                    api_key,
+                    print_api_requests=print_api_requests
+                )
                 individual_scores.append(score)
     
     average_score = sum(individual_scores) / len(individual_scores)

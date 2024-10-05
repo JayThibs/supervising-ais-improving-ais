@@ -85,7 +85,7 @@ class AutoFineTuningEvaluator:
             llm_int8_threshold=6.0,
             llm_int8_has_fp16_weight=False,
         )
-        
+
         # Free up memory by deleting the base model
         del self.base_model
         
@@ -123,7 +123,7 @@ class AutoFineTuningEvaluator:
         elif self.args.api_provider == "openai":
             import openai
             openai.api_key = self.key
-            self.client = openai.ChatCompletion
+            self.client = openai.OpenAI()
         else:
             raise ValueError(f"Unsupported API provider: {self.args.api_provider}")
 
@@ -162,7 +162,8 @@ class AutoFineTuningEvaluator:
                 self.args.api_provider,
                 self.args.model_str,
                 self.key,   
-                self.args.focus_area
+                self.args.focus_area,
+                self.args.print_api_requests
             )
             print("ground_truths", self.ground_truths)
             self.ground_truths_df = generate_dataset(
@@ -175,7 +176,9 @@ class AutoFineTuningEvaluator:
                 self.args.num_base_samples_for_training,
                 self.base_model,
                 self.tokenizer,
-                self.args.finetuning_params.get("max_length", 64)
+                self.args.finetuning_params.get("max_length", 64),
+                self.args.decoding_batch_size,
+                self.args.print_api_requests
             )
             print("ground_truths_df", self.ground_truths_df)
 
@@ -209,7 +212,6 @@ class AutoFineTuningEvaluator:
                 api_provider=self.args.api_provider,
                 api_model_str=self.args.model_str,
                 auth_key=self.key,
-                client=None,
                 local_embedding_model_str=self.args.local_embedding_model_str,
                 local_embedding_api_key=None,
                 init_clustering_from_base_model=True,
@@ -220,11 +222,13 @@ class AutoFineTuningEvaluator:
                 min_cluster_size=self.args.min_cluster_size,
                 max_cluster_size=self.args.max_cluster_size,
                 max_length=self.args.decoding_max_length,
+                decoding_batch_size=self.args.decoding_batch_size,
                 decoded_texts_save_path=self.args.decoded_texts_save_path,
                 decoded_texts_load_path=self.args.decoded_texts_load_path,
                 tsne_save_path=self.args.tsne_save_path,
                 tsne_title=self.args.tsne_title,
-                tsne_perplexity=self.args.tsne_perplexity
+                tsne_perplexity=self.args.tsne_perplexity,
+                print_api_requests=self.args.print_api_requests
             )
         print("discovered_hypotheses", discovered_hypotheses)
         evaluation_score = compare_and_score_hypotheses(
@@ -271,6 +275,7 @@ if __name__ == "__main__":
     parser.add_argument("--dummy_interp", action="store_true", help="Flag to use dummy interpretability method")
     parser.add_argument("--num_decoded_texts", type=int, default=5000, help="Number of decoded texts to use for clustering")
     parser.add_argument("--decoding_max_length", type=int, default=48, help="Maximum length of the decoded texts")
+    parser.add_argument("--decoding_batch_size", type=int, default=32, help="Batch size to use for decoding")
     parser.add_argument("--decoding_prefix_file", type=str, default=None, help="Path to a file containing a set of prefixes to prepend to the texts to be decoded")
     parser.add_argument("--decoded_texts_save_path", type=str, default=None, help="Path to save the decoded texts to. Must specify a single file.")
     parser.add_argument("--decoded_texts_load_path", type=str, default=None, help="Path to load the decoded texts from. Must specify a single file.")
@@ -293,6 +298,7 @@ if __name__ == "__main__":
     parser.add_argument("--api_provider", type=str, choices=["anthropic", "openai"], required=True, help="API provider for ground truth generation and comparison")
     parser.add_argument("--model_str", type=str, required=True, help="Model version for the chosen API provider")
     parser.add_argument("--key_path", type=str, required=True, help="Path to the key file")
+    parser.add_argument("--print_api_requests", action="store_true", help="Flag to print the API requests and responses to the console")
 
     args = parser.parse_args()
     main(args)

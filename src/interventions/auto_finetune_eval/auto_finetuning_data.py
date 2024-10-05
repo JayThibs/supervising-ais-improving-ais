@@ -8,7 +8,8 @@ def generate_ground_truths(
     api_provider: str,
     model_str: str,
     api_key: str,
-    focus_area: Optional[str] = None
+    focus_area: Optional[str] = None,
+    print_api_requests: bool = False
 ) -> List[str]:
     """
     Generate a list of ground truths using the specified API.
@@ -19,7 +20,7 @@ def generate_ground_truths(
         model_str (str): The model version to use.
         api_key (str): The API key for the chosen provider.
         focus_area (Optional[str]): A specific area to focus on for ground truth generation.
-
+        print_api_requests (bool): Whether to print the API requests and responses to the console. False by default.
     Returns:
         List[str]: A list of generated ground truths.
     """
@@ -45,7 +46,8 @@ def generate_ground_truths(
         model_str,
         api_key,
         num_datapoints=num_ground_truths,
-        max_tokens=2048
+        max_tokens=2048,
+        print_api_requests=print_api_requests
     )
     return ground_truths
 
@@ -54,7 +56,8 @@ def generate_training_data(
     num_samples: int,
     api_provider: str,
     model_str: str,
-    api_key: str
+    api_key: str,
+    print_api_requests: bool = False
 ) -> List[str]:
     """
     Generate training data for a given ground truth using the specified API.
@@ -65,7 +68,7 @@ def generate_training_data(
         api_provider (str): The API provider to use ('anthropic' or 'openai').
         model_str (str): The model version to use.
         api_key (str): The API key for the chosen provider.
-
+        print_api_requests (bool): Whether to print the API requests and responses to the console. False by default.
     Returns:
         List[str]: A list of generated training data points.
     """
@@ -94,7 +97,8 @@ def generate_training_data(
         model_str,
         api_key,
         num_datapoints=num_samples,
-        max_tokens=4096
+        max_tokens=4096,
+        print_api_requests=print_api_requests
     )
     return dataset
 
@@ -109,7 +113,8 @@ def generate_dataset(
     base_model: Optional[AutoModelForCausalLM] = None,
     tokenizer: Optional[AutoTokenizer] = None,
     max_length_for_base_data: int = 64,
-    decoding_batch_size: int = 32
+    decoding_batch_size: int = 32,
+    print_api_requests: bool = False
 ) -> pd.DataFrame:
     """
     Generate a dataset for a list of ground truths and save it to a CSV file.
@@ -127,6 +132,7 @@ def generate_dataset(
         max_length_for_base_data (int): The maximum token length of the additional finetuning data sampled
             from the base model.
         decoding_batch_size (int): The batch size to use for decoding.
+        print_api_requests (bool): Whether to print the API requests and responses to the console. False by default.
     Returns:
         pd.DataFrame: A DataFrame containing the generated ground truths and training data texts.
     """
@@ -155,7 +161,14 @@ def generate_dataset(
         print(f"Added {n_decoded_texts} base model samples to the training set.")
     
     for i, ground_truth in enumerate(ground_truths):
-        training_data = generate_training_data(ground_truth, num_samples, api_provider, model_str, api_key)
+        training_data = generate_training_data(
+            ground_truth, 
+            num_samples, 
+            api_provider, 
+            model_str, 
+            api_key, 
+            print_api_requests=print_api_requests
+        )
         
         for item in training_data:
             all_data.append({

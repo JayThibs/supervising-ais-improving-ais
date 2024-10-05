@@ -44,7 +44,8 @@ def contrastive_label_double_cluster(
         cluster_label_instruction_local: str = "You are an expert at describing the differences between clusters of texts. When given a list of texts belonging to two clusters, you immediately respond with a short description of the key themes that separate the two clusters.",
         cluster_label_instruction_api: str = "Concisely describe the key themes that differentiate these two clusters based on the texts provided.",
         cluster_strs_list_1: List[str] = None,
-        cluster_strs_list_2: List[str] = None
+        cluster_strs_list_2: List[str] = None,
+        print_api_requests: bool = False
         ) -> Tuple[List[str], List[int], List[int]]:
     """
     Generate contrastive labels for two clusters of texts using either a local model or an API.
@@ -60,18 +61,25 @@ def contrastive_label_double_cluster(
         clustering_assignments_2 (List[int]): Cluster assignments for decoded_strs_2.
         cluster_id_2 (int): ID of the matched comparison cluster in decoded_strs_2.
         local_model (AutoModel, optional): Local model for text generation. Defaults to None.
-        labeling_tokenizer (AutoTokenizer, optional): Tokenizer for the local model. Defaults to None.
+        labeling_tokenizer (AutoTokenizer, optional): Tokenizer for the local model. Defaults to 
+            None.
         api_provider (str, optional): API provider for text generation. Defaults to None.
         api_model_str (str, optional): Model string for API requests. Defaults to None.
         auth_key (str, optional): Authentication key for API requests. Defaults to None.
         device (str, optional): Device to use for local model. Defaults to "cuda:0".
-        sampled_texts_per_cluster (int, optional): Number of texts to sample from each cluster. Defaults to 10.
+        sampled_texts_per_cluster (int, optional): Number of texts to sample from each cluster. 
+            Defaults to 10.
         generated_labels_per_cluster (int, optional): Number of labels to generate. Defaults to 3.
-        cluster_label_instruction_local (str, optional): Instruction for label generation using local model. Defaults to a predefined string.
-        cluster_label_instruction_api (str, optional): Instruction for label generation using API. Defaults to a predefined string.
-        cluster_strs_list_1 (List[str], optional): Predefined list of strings for cluster 1. Defaults to None.
-        cluster_strs_list_2 (List[str], optional): Predefined list of strings for cluster 2. Defaults to None.
-
+        cluster_label_instruction_local (str, optional): Instruction for label generation using 
+            local model. Defaults to a predefined string.
+        cluster_label_instruction_api (str, optional): Instruction for label generation using API. 
+            Defaults to a predefined string.
+        cluster_strs_list_1 (List[str], optional): Predefined list of strings for cluster 1. 
+            Defaults to None.
+        cluster_strs_list_2 (List[str], optional): Predefined list of strings for cluster 2. 
+            Defaults to None.
+        print_api_requests (bool): Whether to print the API requests and responses to the console. 
+            False by default.
     Returns:
         Tuple[List[str], List[int], List[int]]: A tuple containing:
             - List of generated contrastive labels
@@ -127,7 +135,16 @@ def contrastive_label_double_cluster(
     else:
         str_instruction_to_assistant_model = cluster_label_instruction_api + "\n" + "Cluster 1 selected texts:\n" + '\n'.join(selected_texts_1) + "\nCluster 2 selected texts:\n" + '\n'.join(selected_texts_2)
         str_instruction_to_assistant_model = str_instruction_to_assistant_model + "\n\nKeep the answer short and concise, under 100 words."
-        decoded_labels = [make_api_request(str_instruction_to_assistant_model, api_provider, api_model_str, auth_key, max_tokens=150) for _ in range(generated_labels_per_cluster)]
+        decoded_labels = [
+            make_api_request(
+                str_instruction_to_assistant_model, 
+                api_provider, 
+                api_model_str, 
+                auth_key, 
+                max_tokens=150,
+                print_api_requests=print_api_requests
+            ) for _ in range(generated_labels_per_cluster)
+        ]
     for i, label in enumerate(decoded_labels):
         print(f"Label {i}: {label}")
         if label.startswith(" "):
@@ -150,7 +167,8 @@ def label_single_cluster(
         generated_labels_per_cluster: int = 3, 
         cluster_label_instruction_local: str = "You are an expert at describing clusters of texts. When given a list of texts belonging to a cluster, you immediately respond with a short description of the key themes of the texts shown to you.",
         cluster_label_instruction_api: str = "Concisely describe the key themes of the texts shown to you.",
-        cluster_strs_list: List[str] = None
+        cluster_strs_list: List[str] = None,
+        print_api_requests: bool = False
         ) -> Tuple[List[str], List[int]]:
     """
     Generate labels for a single cluster of texts using either a local model or an API.
@@ -168,10 +186,15 @@ def label_single_cluster(
         api_model_str (str, optional): Model string for API requests. Defaults to None.
         auth_key (str, optional): Authentication key for API requests. Defaults to None.
         device (str, optional): Device to use for local model. Defaults to "cuda:0".
-        sampled_texts_per_cluster (int, optional): Number of texts to sample from the cluster. Defaults to 10.
+        sampled_texts_per_cluster (int, optional): Number of texts to sample from the cluster. 
+            Defaults to 10.
         generated_labels_per_cluster (int, optional): Number of labels to generate. Defaults to 3.
-        cluster_label_instruction_local (str, optional): Instruction for label generation. Defaults to a predefined string.
-        cluster_strs_list (List[str], optional): Predefined list of strings for the cluster. Defaults to None.
+        cluster_label_instruction_local (str, optional): Instruction for label generation. Defaults 
+            to a predefined string.
+        cluster_strs_list (List[str], optional): Predefined list of strings for the cluster. 
+            Defaults to None.
+        print_api_requests (bool): Whether to print the API requests and responses to the console. 
+            False by default.
 
     Returns:
         Tuple[List[str], List[int]]: A tuple containing:
@@ -210,7 +233,16 @@ def label_single_cluster(
     else:
         str_instruction_to_assistant_model = cluster_label_instruction_api + "\n" + "Texts in current cluster:\n" + '\n'.join(selected_texts)
         str_instruction_to_assistant_model = str_instruction_to_assistant_model + "\n\nKeep the answer short and concise, under 100 words."
-        decoded_labels = [make_api_request(str_instruction_to_assistant_model, api_provider, api_model_str, auth_key, max_tokens=150) for _ in range(generated_labels_per_cluster)]
+        decoded_labels = [
+            make_api_request(
+                str_instruction_to_assistant_model, 
+                api_provider, 
+                api_model_str, 
+                auth_key, 
+                max_tokens=150,
+                print_api_requests=print_api_requests
+            ) for _ in range(generated_labels_per_cluster)
+        ]
     for i, label in enumerate(decoded_labels):
         if label.startswith(" "):
             decoded_labels[i] = label[1:]
@@ -229,7 +261,8 @@ def get_cluster_labels_random_subsets(
         device: str = "cuda:0", 
         sampled_texts_per_cluster: int = 10, 
         sampled_comparison_texts_per_cluster: int = 10, 
-        generated_labels_per_cluster: int = 3
+        generated_labels_per_cluster: int = 3,
+        print_api_requests: bool = False
         ) -> Tuple[Dict[int, List[str]], Dict[int, List[int]]]:
     """
     Generate labels for each cluster using random subsets of texts from the clusters.
@@ -241,24 +274,29 @@ def get_cluster_labels_random_subsets(
         decoded_strs (List[str]): List of all decoded strings.
         clustering_assignments (List[int]): Cluster assignments for each string in decoded_strs.
         local_model (AutoModel, optional): Local model for text generation. Defaults to None.
-        labeling_tokenizer (AutoTokenizer, optional): Tokenizer for the local model. Defaults to None.
+        labeling_tokenizer (AutoTokenizer, optional): Tokenizer for the local model. Defaults to 
+            None.
         api_provider (str, optional): API provider for text generation. Defaults to None.
         api_model_str (str, optional): Model string for API requests. Defaults to None.
         auth_key (str, optional): Authentication key for API requests. Defaults to None.
         device (str, optional): Device to use for local model. Defaults to "cuda:0".
-        sampled_texts_per_cluster (int, optional): Number of texts to sample for label generation. Defaults to 10.
+        sampled_texts_per_cluster (int, optional): Number of texts to sample for label generation. 
+            Defaults to 10.
         sampled_comparison_texts_per_cluster (int, optional): Minimum number of additional texts required in 
             cluster. Defaults to 10.
         generated_labels_per_cluster (int, optional): Number of labels to generate per cluster. Defaults to 3.
-
+        print_api_requests (bool): Whether to print the API requests and responses to the console. 
+            False by default.
     Returns:
         Tuple[Dict[int, List[str]], Dict[int, List[int]]]: A tuple containing:
             - Dictionary mapping cluster IDs to lists of generated labels.
             - Dictionary mapping cluster IDs to lists of indices of texts used for label generation.
 
     Note:
-        Clusters with fewer than sampled_texts_per_cluster + sampled_comparison_texts_per_cluster texts are skipped.
-        The function uses either a local model or an API for text generation, depending on the provided arguments.
+        Clusters with fewer than sampled_texts_per_cluster + sampled_comparison_texts_per_cluster 
+            texts are skipped.
+        The function uses either a local model or an API for text generation, depending on the 
+            provided arguments.
     """
     cluster_labels = {}
     all_cluster_texts_used_for_label_strs_ids = {}
@@ -278,7 +316,8 @@ def get_cluster_labels_random_subsets(
             auth_key, 
             device, 
             sampled_texts_per_cluster, 
-            generated_labels_per_cluster
+            generated_labels_per_cluster,
+            print_api_requests=print_api_requests
         )
         all_cluster_texts_used_for_label_strs_ids[cluster] = selected_text_indices
         cluster_labels[cluster] = decoded_labels
@@ -294,7 +333,8 @@ def api_based_label_text_matching(
         api_provider: str, 
         model_str: str, 
         api_key: str,
-        mode: str = "single_cluster"
+        mode: str = "single_cluster",
+        print_api_requests: bool = False
         ) -> Tuple[float, float]:
     """
     Use an API to determine how well two texts match a given label.
@@ -311,9 +351,10 @@ def api_based_label_text_matching(
         api_provider (str): The API provider to use (e.g., 'openai', 'anthropic').
         model_str (str): The specific model to use within the chosen API.
         api_key (str): The authentication key for the API.
-        mode (str): The mode to use for label evaluation. Defaults to "single_cluster". Set to "double_cluster" or
-            "contrastive" to evaluate a contrastive label between two clusters.
-
+        mode (str): The mode to use for label evaluation. Defaults to "single_cluster". Set to 
+            "double_cluster" or "contrastive" to evaluate a contrastive label between two clusters.
+        print_api_requests (bool): Whether to print the API requests and responses to the console. 
+            False by default.
     Returns:
         Tuple[float, float]: A tuple containing two floats:
             - prob_A: The normalized probability (0 to 1) that text_A matches the label.
@@ -357,7 +398,13 @@ def api_based_label_text_matching(
         A higher score indicates the text is more likely to belong to Cluster 1. Respond only with the JSON. Do not explain your decision.
         """
     
-    response = make_api_request(prompt, api_provider, model_str, api_key)
+    response = make_api_request(
+        prompt, 
+        api_provider, 
+        model_str, 
+        api_key, 
+        print_api_requests=print_api_requests
+    )
     json_data = extract_json_from_string(response)
     
     if json_data and isinstance(json_data, list) and len(json_data) > 0:
@@ -405,7 +452,8 @@ def evaluate_label_discrimination(
         auth_key: Optional[str],
         device: str,
         mode: str = "single_cluster",
-        n_head_to_head_comparisons_per_text: Optional[int] = None
+        n_head_to_head_comparisons_per_text: Optional[int] = None,
+        print_api_requests: bool = False
         ) -> float:
     """
     Evaluate the discrimination power of a given label between two sets of texts.
@@ -428,10 +476,13 @@ def evaluate_label_discrimination(
         api_model_str (Optional[str]): The API model string to use, if any.
         auth_key (Optional[str]): The authentication key for the API, if any.
         device (str): The device to use for computations.
-        mode (str): The mode to use for label evaluation. Defaults to "single_cluster". Set to "double_cluster" or
-            "contrastive" to evaluate a contrastive label between two clusters.
-        n_head_to_head_comparisons_per_text (Optional[int]): For each comparison text, how many of the other comparison
-            texts should it be tested against. Defaults to None, which means all other comparison texts are used.
+        mode (str): The mode to use for label evaluation. Defaults to "single_cluster". Set to 
+            "double_cluster" or "contrastive" to evaluate a contrastive label between two clusters.
+        n_head_to_head_comparisons_per_text (Optional[int]): For each comparison text, how many of 
+            the other comparison texts should it be tested against. Defaults to None, which means 
+            all other comparison texts are used.
+        print_api_requests (bool): Whether to print the API requests and responses to the console.
+            False by default.
 
     Returns:
         float: The AUC score representing the label's discrimination power.
@@ -475,7 +526,8 @@ def evaluate_label_discrimination(
                     api_provider, 
                     api_model_str, 
                     auth_key, 
-                    mode=mode
+                    mode=mode,
+                    print_api_requests=print_api_requests
                 )
 
             scores.append(normalized_prob_A)
@@ -512,7 +564,8 @@ def validate_cluster_label_comparative_discrimination_power(
         auth_key: str = None,
         device: str = "cuda:0", 
         sampled_comparison_texts_per_cluster: int = 10, 
-        n_head_to_head_comparisons_per_text: Optional[int] = None
+        n_head_to_head_comparisons_per_text: Optional[int] = None,
+        print_api_requests: bool = False
         ) -> Tuple[Dict[Tuple[int, int], Dict[str, float]], Dict[Tuple[int, int], Tuple[List[int], List[int]]]]:
     """
     Validate the discrimination power of contrastive labels for pairs of clusters.
@@ -544,7 +597,10 @@ def validate_cluster_label_comparative_discrimination_power(
         sampled_comparison_texts_per_cluster (int, optional): Number of texts to sample from each cluster. 
             Defaults to 10.
         n_head_to_head_comparisons_per_text (int, optional): For each comparison text, how many of the other comparison
-            texts should it be tested against. Defaults to None, which means all other comparison texts are used.
+            texts should it be tested against. Defaults to None, which means all other comparison texts are 
+            used.
+        print_api_requests (bool, optional): Whether to print the API requests and responses to the 
+            console. False by default.
     Returns:
         Tuple[
             Dict[Tuple[int, int], Dict[str, float]], 
@@ -598,7 +654,8 @@ def validate_cluster_label_comparative_discrimination_power(
                 auth_key,
                 device,
                 mode="contrastive",
-                n_head_to_head_comparisons_per_text=n_head_to_head_comparisons_per_text
+                n_head_to_head_comparisons_per_text=n_head_to_head_comparisons_per_text,
+                print_api_requests=print_api_requests
             )
             cluster_pair_scores[(cluster_id_1, cluster_id_2)][label] = auc
 
@@ -622,7 +679,8 @@ def validate_cluster_label_discrimination_power(
         auth_key = None,
         device = "cuda:0", 
         sampled_comparison_texts_per_cluster = 10, 
-        non_cluster_comparison_texts = 10
+        non_cluster_comparison_texts = 10,
+        print_api_requests: bool = False
         ) -> Tuple[Dict[int, Dict[str, float]], Dict[int, List[int]]]:
     """
     Validate the discrimination power of cluster labels by testing if an assistant LLM can use the 
@@ -634,19 +692,23 @@ def validate_cluster_label_discrimination_power(
     Args:
         decoded_strs (List[str]): List of all decoded strings.
         clustering_assignments (List[int]): Cluster assignments for each string in decoded_strs.
-        cluster_label_strs (Dict[int, List[str]]): Dictionary mapping cluster IDs to lists of candidate labels.
-        all_cluster_texts_used_for_label_strs_ids (Dict[int, List[int]]): Dictionary mapping cluster IDs to lists 
-            of text indices previously used for generating labels. Will be excluded from the sampled texts used to validate the labels.
+        cluster_label_strs (Dict[int, List[str]]): Dictionary mapping cluster IDs to lists of candidate 
+            labels.
+        all_cluster_texts_used_for_label_strs_ids (Dict[int, List[int]]): Dictionary mapping cluster IDs 
+            to lists of text indices previously used for generating labels. Will be excluded from the sampled 
+            texts used to validate the labels.
         local_model (Optional[AutoModel]): Local model for text generation. Defaults to None.
         labeling_tokenizer (Optional[AutoTokenizer]): Tokenizer for the local model. Defaults to None.
         api_provider (Optional[str]): API provider for text generation. Defaults to None.
         api_model_str (Optional[str]): Model string for API requests. Defaults to None.
         auth_key (Optional[str]): Authentication key for API requests. Defaults to None.
         device (str): Device to use for local model. Defaults to "cuda:0".
-        sampled_comparison_texts_per_cluster (int): Number of texts to sample from each cluster for comparison. 
-            Defaults to 10.
-        non_cluster_comparison_texts (int): Number of texts to sample from outside each cluster for comparison. 
-            Defaults to 10.
+        sampled_comparison_texts_per_cluster (int): Number of texts to sample from each cluster for 
+            comparison. Defaults to 10.
+        non_cluster_comparison_texts (int): Number of texts to sample from outside each cluster for 
+            comparison. Defaults to 10.
+        print_api_requests (bool, optional): Whether to print the API requests and responses to the 
+            console. False by default.
 
     Returns:
         Tuple[Dict[int, Dict[str, float]], Dict[int, List[int]]]: A tuple containing:
@@ -688,7 +750,8 @@ def validate_cluster_label_discrimination_power(
                 api_provider,
                 api_model_str,
                 auth_key,
-                device
+                device,
+                print_api_requests=print_api_requests
             )
             cluster_label_scores[cluster_id][label] = auc
                 
@@ -992,7 +1055,8 @@ def get_validated_cluster_labels(
         sampled_comparison_texts_per_cluster: int = 10,
         non_cluster_comparison_texts: int = 10,
         generated_labels_per_cluster: int = 3,
-        pick_top_n_labels: Optional[int] = None
+        pick_top_n_labels: Optional[int] = None,
+        print_api_requests: bool = False
         ) -> Dict[str, Union[
                 Dict[int, Dict[str, float]], # cluster_id, label, AUC
                 Dict[int, List[str]], # cluster_id, list of generated labels
@@ -1026,9 +1090,12 @@ def get_validated_cluster_labels(
             Defaults to 10.
         sampled_comparison_texts_per_cluster (int, optional): Number of texts to sample for label validation. 
             Defaults to 10.
-        non_cluster_comparison_texts (int, optional): Number of non-cluster texts for comparison. Defaults to 10.
+        non_cluster_comparison_texts (int, optional): Number of non-cluster texts for comparison. Defaults to 
+            10.
         generated_labels_per_cluster (int, optional): Number of labels to generate per cluster. Defaults to 3.
         pick_top_n_labels (int, optional): Number of top labels to select per cluster. Defaults to None.
+        print_api_requests (bool, optional): Whether to print the API requests and responses to the console. 
+            False by default.
 
     Returns:
         dict: A dictionary containing:
@@ -1057,7 +1124,8 @@ def get_validated_cluster_labels(
         device=device, 
         sampled_texts_per_cluster=sampled_texts_per_cluster,
         sampled_comparison_texts_per_cluster=sampled_comparison_texts_per_cluster, 
-        generated_labels_per_cluster=generated_labels_per_cluster
+        generated_labels_per_cluster=generated_labels_per_cluster,
+        print_api_requests=print_api_requests
     )
     cluster_label_scores, all_cluster_texts_used_for_validating_label_strs_ids = validate_cluster_label_discrimination_power(
         decoded_strs, 
@@ -1071,7 +1139,8 @@ def get_validated_cluster_labels(
         auth_key=auth_key,
         device=device,
         sampled_comparison_texts_per_cluster=sampled_comparison_texts_per_cluster,
-        non_cluster_comparison_texts=non_cluster_comparison_texts
+        non_cluster_comparison_texts=non_cluster_comparison_texts,
+        print_api_requests=print_api_requests
     )
 
     for cluster_id, label_info in cluster_labels.items():
@@ -1146,7 +1215,8 @@ def get_validated_cluster_labels(
                     auth_key=auth_key,
                     device=device,
                     sampled_comparison_texts_per_cluster=sampled_comparison_texts_per_cluster,
-                    non_cluster_comparison_texts=non_cluster_comparison_texts
+                    non_cluster_comparison_texts=non_cluster_comparison_texts,
+                    print_api_requests=print_api_requests
                 )
                 null_cluster_label_scores_list = []
                 for cluster_id, scores_dict in null_cluster_label_scores_nested_dict.items():
@@ -1205,7 +1275,8 @@ def get_validated_contrastive_cluster_labels(
         sampled_comparison_texts_per_cluster: int = 10,
         generated_labels_per_cluster: int = 3,
         pick_top_n_labels: Optional[int] = None,
-        n_head_to_head_comparisons_per_text: Optional[int] = None
+        n_head_to_head_comparisons_per_text: Optional[int] = None,
+        print_api_requests: bool = False
         ) ->  Dict[str, Union[
                 Dict[Tuple[int, int], Dict[str, float]], # (cluster_1_id, cluster_2_id), label, AUC
                 Dict[Tuple[int, int], Tuple[List[int], List[int]]], # (cluster_1_id, cluster_2_id), list of text ids used for generating labels, list of text ids used for validating labels
@@ -1248,6 +1319,8 @@ def get_validated_contrastive_cluster_labels(
         n_head_to_head_comparisons_per_text (Optional[int], optional): For each comparison text, how 
             many of the other comparison texts should it be tested against. Defaults to None, which 
             means all other comparison texts are used.
+        print_api_requests (bool): Whether to print the API requests and responses to the console. 
+            False by default.
 
     Returns:
         dict: A dictionary containing the following key / value pairs:
@@ -1280,7 +1353,8 @@ def get_validated_contrastive_cluster_labels(
             auth_key=auth_key,
             device=device, 
             sampled_texts_per_cluster=sampled_comparison_texts_per_cluster, 
-            generated_labels_per_cluster=generated_labels_per_cluster
+            generated_labels_per_cluster=generated_labels_per_cluster,
+            print_api_requests=print_api_requests
         )
         
         # Store the generated labels and the indices of texts used for label generation
@@ -1302,7 +1376,8 @@ def get_validated_contrastive_cluster_labels(
         auth_key, 
         device, 
         sampled_comparison_texts_per_cluster,
-        n_head_to_head_comparisons_per_text=n_head_to_head_comparisons_per_text
+        n_head_to_head_comparisons_per_text=n_head_to_head_comparisons_per_text,
+        print_api_requests=print_api_requests
     )
 
     if compute_p_values and use_normal_distribution_for_p_values:
@@ -1360,7 +1435,8 @@ def get_validated_contrastive_cluster_labels(
                     auth_key, 
                     device, 
                     sampled_comparison_texts_per_cluster,
-                    n_head_to_head_comparisons_per_text=n_head_to_head_comparisons_per_text
+                    n_head_to_head_comparisons_per_text=n_head_to_head_comparisons_per_text,
+                    print_api_requests=print_api_requests
                 )
 
                 # Collect the AUC scores from the permuted data
@@ -1459,7 +1535,8 @@ def assistant_generative_compare(
         device: str,
         num_generated_texts_per_description: int = 10,
         permute_labels: bool = False,
-        bnb_config: BitsAndBytesConfig = None
+        bnb_config: BitsAndBytesConfig = None,
+        print_api_requests: bool = False
         ) -> Tuple[List[float], List[List[str]], List[List[str]]]:
     """
     Generate texts based on descriptions of cluster differences and evaluate whether the language
@@ -1496,6 +1573,8 @@ def assistant_generative_compare(
         num_generated_texts_per_description (int): Number of texts to generate per description.
         permute_labels (bool): If True, randomly permute the labels for null hypothesis testing.
         bnb_config (BitsAndBytesConfig): Configuration for quantization.
+        print_api_requests (bool, optional): Whether to print the API requests and responses to the 
+            console. False by default.
 
     Returns:
         Tuple[List[float], List[List[str]], List[List[str]]]: A tuple containing:
@@ -1547,7 +1626,8 @@ def assistant_generative_compare(
                 api_model_str, 
                 auth_key,
                 num_datapoints=num_generated_texts_per_description,
-                max_tokens=2048
+                max_tokens=2048,
+                print_api_requests=print_api_requests
             )
             generated_texts_1.append(json_response)
     generated_texts_2 = []
@@ -1569,7 +1649,8 @@ def assistant_generative_compare(
                 api_model_str, 
                 auth_key,
                 num_datapoints=num_generated_texts_per_description,
-                max_tokens=2048
+                max_tokens=2048,
+                print_api_requests=print_api_requests
             )
             generated_texts_2.append(json_response)
     
@@ -1640,8 +1721,9 @@ def validated_assistant_generative_compare(
         use_normal_distribution_for_p_values: bool = False,
         num_generated_texts_per_description: int = 10,
         return_generated_texts: bool = False,
-        bnb_config: BitsAndBytesConfig = None
-        ) -> Tuple[List[float], List[float]]:
+        bnb_config: BitsAndBytesConfig = None,
+        print_api_requests: bool = False
+    ) -> Tuple[List[float], List[float]]:
     """
     Validate the ability of an assistant model to generate texts that discriminate between two language models based on given descriptions.
 
@@ -1668,7 +1750,8 @@ def validated_assistant_generative_compare(
             Defaults to 10.
         return_generated_texts (bool, optional): If True, return the generated texts. Defaults to False.
         bnb_config (BitsAndBytesConfig, optional): Configuration for quantization. Defaults to None.
-
+        print_api_requests (bool, optional): Whether to print the API requests and responses to the 
+            console. False by default.
     Returns:
         If return_generated_texts is False:
             Tuple[List[float], List[float]]: A tuple containing:
@@ -1696,7 +1779,8 @@ def validated_assistant_generative_compare(
         comparison_model,
         device, 
         num_generated_texts_per_description, 
-        bnb_config=bnb_config
+        bnb_config=bnb_config,
+        print_api_requests=print_api_requests
     )
     if not use_normal_distribution_for_p_values:
         # Now, perform the permutation test
@@ -1717,7 +1801,8 @@ def validated_assistant_generative_compare(
                 device, 
                 num_generated_texts_per_description, 
                 permute_labels=True, 
-                bnb_config=bnb_config
+                bnb_config=bnb_config,
+                print_api_requests=print_api_requests
             )
             permuted_aucs.extend(fake_aucs)
             p_values = [np.sum(np.array(permuted_aucs) > real_auc) / len(permuted_aucs) for real_auc in real_aucs]

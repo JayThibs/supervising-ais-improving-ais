@@ -64,7 +64,8 @@ def apply_interpretability_method(
         decoded_texts_load_path: Optional[str] = None,
         tsne_save_path: Optional[str] = None,
         tsne_title: Optional[str] = None,
-        tsne_perplexity: int = 30
+        tsne_perplexity: int = 30,
+        print_api_requests: bool = False
     ) -> List[str]:
     """
     Real implementation of applying an interpretability method to compare two models.
@@ -95,6 +96,11 @@ def apply_interpretability_method(
         decoding_batch_size (int): The batch size to use for decoding. 32 by default.
         decoded_texts_save_path (Optional[str]): The path to save the decoded texts to. None by default.
         decoded_texts_load_path (Optional[str]): The path to load the decoded texts from. None by default.
+        tsne_save_path (Optional[str]): The path to save the t-SNE plot to. None by default.
+        tsne_title (Optional[str]): The title of the t-SNE plot. None by default.
+        tsne_perplexity (int): The perplexity of the t-SNE plot. 30 by default.
+        print_api_requests (bool, optional): Whether to print the API requests and responses to the 
+            console. False by default.
     Returns:
         List[str]: A list of validated hypotheses about how the models differ.
     """
@@ -233,7 +239,8 @@ def apply_interpretability_method(
         sampled_comparison_texts_per_cluster=10,
         n_head_to_head_comparisons_per_text=3,
         generated_labels_per_cluster=2,
-        pick_top_n_labels=1
+        pick_top_n_labels=1,
+        print_api_requests=print_api_requests
     )
 
     cluster_pair_scores = contrastive_labels_results["cluster_pair_scores"]
@@ -280,7 +287,8 @@ def apply_interpretability_method(
         device=device,
         use_normal_distribution_for_p_values=True,
         num_generated_texts_per_description=10,
-        bnb_config=bnb_config
+        bnb_config=bnb_config,
+        print_api_requests=print_api_requests
     )
 
     validated_aucs, validated_p_values = validated_results

@@ -29,7 +29,7 @@ def make_api_request(
         model_str: str, 
         api_key: Optional[str] = None, 
         client: Optional[Any] = None, 
-        print_interaction: bool = True,
+        print_api_requests: bool = False,
         max_tokens: int = 1000,
     ) -> str:
     """
@@ -41,7 +41,7 @@ def make_api_request(
         model_str (str): The model version to use.
         api_key (Optional[str]): The API key for the chosen provider.
         client (Optional[Any]): The client to use for the API.
-        print_interaction (bool): Whether to print the interaction with the API.
+        print_api_requests (bool): Whether to print the API requests and responses to the console. False by default.
         max_tokens (int): The maximum number of tokens to generate.
     Returns:
         str: The response from the API.
@@ -72,7 +72,7 @@ def make_api_request(
         else:
             raise ValueError(f"Unsupported API provider: {api_provider}")
         
-        if print_interaction:
+        if print_api_requests:
             print(f"API request to {api_provider} with model {model_str} and prompt of length {len(prompt)} returned result of length {len(result)}.\n")
             print(f"Prompt: {prompt}")
             print(f"Result: {result}\n\n")
@@ -89,7 +89,7 @@ def collect_dataset_from_api(
     model_str: str,
     api_key: Optional[str] = None,
     client: Optional[Any] = None,
-    print_interaction: bool = True,
+    print_api_requests: bool = False,
     max_tokens: int = 1000,
     num_datapoints: int = 100,
     max_retries: int = 10
@@ -103,7 +103,7 @@ def collect_dataset_from_api(
         model_str (str): The model version to use.
         api_key (Optional[str]): The API key for the chosen provider.
         client (Optional[Any]): The client to use for the API.
-        print_interaction (bool): Whether to print the interaction with the API.
+        print_api_requests (bool): Whether to print the API requests and responses to the console. False by default.
         max_tokens (int): The maximum number of tokens to generate per request.
         num_datapoints (int): The total number of datapoints to collect.
         max_retries (int): The maximum number of retries for failed requests.
@@ -125,7 +125,7 @@ def collect_dataset_from_api(
                 model_str, 
                 api_key, 
                 client, 
-                print_interaction, 
+                print_api_requests, 
                 max_tokens
             )
             extracted_data = extract_json_from_string(response)
