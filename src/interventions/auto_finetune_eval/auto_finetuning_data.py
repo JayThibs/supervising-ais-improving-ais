@@ -108,7 +108,8 @@ def generate_dataset(
     num_base_samples_for_training: float = 0.0,
     base_model: Optional[AutoModelForCausalLM] = None,
     tokenizer: Optional[AutoTokenizer] = None,
-    max_length_for_base_data: int = 64
+    max_length_for_base_data: int = 64,
+    decoding_batch_size: int = 32
 ) -> pd.DataFrame:
     """
     Generate a dataset for a list of ground truths and save it to a CSV file.
@@ -125,6 +126,7 @@ def generate_dataset(
         tokenizer (Optional[AutoTokenizer]): The tokenizer to use for generating training data.
         max_length_for_base_data (int): The maximum token length of the additional finetuning data sampled
             from the base model.
+        decoding_batch_size (int): The batch size to use for decoding.
     Returns:
         pd.DataFrame: A DataFrame containing the generated ground truths and training data texts.
     """
@@ -141,7 +143,8 @@ def generate_dataset(
             tokenizer, 
             prefixes=None, 
             n_decoded_texts=n_decoded_texts, 
-            max_length=max_length_for_base_data
+            max_length=max_length_for_base_data,
+            batch_size=decoding_batch_size
         )
         for item in base_decoded_texts:
             all_data.append({
