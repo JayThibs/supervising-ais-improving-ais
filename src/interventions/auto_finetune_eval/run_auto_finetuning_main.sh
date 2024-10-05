@@ -1,8 +1,8 @@
-CUDA_VISIBLE_DEVICES=0 python auto_finetuning_main.py \
+CUDA_VISIBLE_DEVICES=2 python auto_finetuning_main.py \
     --base_model "NousResearch/Meta-Llama-3-8B-Instruct" \
     --num_samples 2000 \
     --num_ground_truths 5 \
-    --num_decoded_texts 20000 \
+    --num_decoded_texts 10000 \
     --decoding_max_length 48 \
     --num_clusters 100 \
     --api_provider "anthropic" \
@@ -16,5 +16,6 @@ CUDA_VISIBLE_DEVICES=0 python auto_finetuning_main.py \
     --finetuning_params '{"learning_rate": 2e-5, "num_epochs": 1, "device_batch_size": 8, "batch_size": 64, "lora_r": 32, "lora_alpha": 16, "lora_dropout": 0.05, "max_length": 48, "weight_decay": 0.001}' \
     --device "cuda:0" \
     --decoded_texts_save_path "../../../data/decoded_texts/debug_autofinetune_data_decoded_texts.csv" \
-    --num_base_samples_for_training 5.0 
+    --num_base_samples_for_training 5.0 \
+    --decoding_batch_size 64 \
     #--regenerate_ground_truths
