@@ -16,6 +16,7 @@ from tqdm import tqdm
 import random
 import torch
 from transformers import PreTrainedModel, PreTrainedTokenizer
+from ast import literal_eval
 
 @retry(
     stop=stop_after_attempt(15),
@@ -53,7 +54,7 @@ def make_api_request(
                 client = Anthropic(api_key=api_key)
             response = client.messages.create(
                 model=model_str,
-                max_tokens_to_sample=max_tokens,
+                max_tokens=max_tokens,
                 messages=[
                     {"role": "user", "content": prompt}
                 ]
@@ -295,7 +296,12 @@ def extract_json_from_string(response: str) -> List[str]:
     except json.JSONDecodeError as e:
         print(f"Error parsing JSON: {e}")
         print(f"Raw response: {response}")
-        json_data = []
+        print("Attempting to parse as a list of strings via literal eval")
+        try:
+            json_data = literal_eval(response)
+        except Exception as e:
+            print(f"Error parsing as a list of strings via literal eval: {e}")
+            json_data = []
     return json_data
 
 def plot_comparison_tsne(
@@ -333,8 +339,8 @@ def plot_comparison_tsne(
 
     # Create the plot
     plt.figure(figsize=(12, 8))
-    plt.scatter(base_tsne[:, 0], base_tsne[:, 1], c='blue', alpha=0.5, label='Base Model')
-    plt.scatter(fine_tuned_tsne[:, 0], fine_tuned_tsne[:, 1], c='red', alpha=0.5, label='Fine-tuned Model')
+    plt.scatter(base_tsne[:, 0], base_tsne[:, 1], c='blue', alpha=0.5, s=2, label='Base Model')
+    plt.scatter(fine_tuned_tsne[:, 0], fine_tuned_tsne[:, 1], c='red', alpha=0.5, s=2, label='Fine-tuned Model')
 
     plt.title(title)
     plt.legend()
