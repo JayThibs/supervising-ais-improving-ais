@@ -59,6 +59,7 @@ def apply_interpretability_method(
         min_cluster_size: int = 7,
         max_cluster_size: int = 2000,
         max_length: int = 32,
+        decoding_batch_size: int = 32,
         decoded_texts_save_path: Optional[str] = None,
         decoded_texts_load_path: Optional[str] = None,
         tsne_save_path: Optional[str] = None,
@@ -91,6 +92,7 @@ def apply_interpretability_method(
         min_cluster_size (int): The minimum size of a cluster. 7 by default.
         max_cluster_size (int): The maximum size of a cluster. 2000 by default.
         max_length (int): The maximum length of the decoded texts. 32 by default.
+        decoding_batch_size (int): The batch size to use for decoding. 32 by default.
         decoded_texts_save_path (Optional[str]): The path to save the decoded texts to. None by default.
         decoded_texts_load_path (Optional[str]): The path to load the decoded texts from. None by default.
     Returns:
@@ -125,14 +127,16 @@ def apply_interpretability_method(
         tokenizer, 
         prefixes, 
         n_decoded_texts, 
-        max_length=max_length
+        max_length=max_length,
+        batch_size=decoding_batch_size
     )
     finetuned_decoded_texts = batch_decode_texts(
         finetuned_model, 
         tokenizer, 
         prefixes, 
         n_decoded_texts, 
-        max_length=max_length
+        max_length=max_length,
+        batch_size=decoding_batch_size
     )
 
     if decoded_texts_save_path is not None:
@@ -182,13 +186,16 @@ def apply_interpretability_method(
 
     # (Optional) Perform t-SNE dimensionality reduction on the combined embeddings and color by model. Save the plot as a PDF.
     if tsne_save_path is not None:
-        plot_comparison_tsne(
-            base_embeddings, 
-            finetuned_embeddings, 
-            tsne_save_path, 
-            tsne_title, 
-            tsne_perplexity
-        )
+        try:
+            plot_comparison_tsne(
+                base_embeddings, 
+                finetuned_embeddings, 
+                tsne_save_path, 
+                tsne_title, 
+                tsne_perplexity
+            )
+        except Exception as e:
+            print(f"Error in plotting t-SNE: {e}")
 
     # Perform clustering on both sets of embeddings
     if cluster_method == "kmeans":
