@@ -66,6 +66,7 @@ def generate_with_soft_prompt(
                 temperature=config.generation_temperature,
                 do_sample=True,
                 pad_token_id=tokenizer.pad_token_id,
+                eos_token_id=tokenizer.eos_token_id,
                 return_dict_in_generate=True,
                 output_scores=True
             )
@@ -77,6 +78,7 @@ def generate_with_soft_prompt(
                 temperature=config.generation_temperature,
                 do_sample=True,
                 pad_token_id=tokenizer.pad_token_id,
+                eos_token_id=tokenizer.eos_token_id,
                 return_dict_in_generate=True,
                 output_scores=True
             )

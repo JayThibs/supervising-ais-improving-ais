@@ -4,7 +4,7 @@ help:
 
 # Install exact Python and CUDA versions. Installs rasterio since conda is needed for installation on windows.
 conda:
-	conda env update --prune -f environment.yml
+	conda create --name supervising-ais python=3.11 pip pytorch
 	echo "RUN THE FOLLOWING COMMAND: conda activate supervising-ais"
 
 test-run:
