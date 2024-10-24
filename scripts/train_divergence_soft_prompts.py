@@ -4,24 +4,25 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from src.soft_prompting.config import TrainingConfig
-from src.soft_prompting.trainer import DivergenceTrainer
+from src.soft_prompting.train import DivergenceTrainer
 from src.soft_prompting.data import create_dataloader
+from src.interventions.intervention_models.model_manager import InterventionModelManager
 
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Train soft prompts for finding model divergences"
     )
     parser.add_argument(
-        "--model-1",
+        "--config-path",
         type=str,
         required=True,
-        help="First model name or path"
+        help="Path to the evaluation config YAML file"
     )
     parser.add_argument(
-        "--model-2",
+        "--run-name",
         type=str,
-        required=True,
-        help="Second model name or path"
+        default="default",
+        help="Name of the evaluation run configuration to use"
     )
     parser.add_argument(
         "--train-file",
@@ -40,43 +41,15 @@ def parse_args():
         default="outputs",
         help="Output directory"
     )
-    parser.add_argument(
-        "--num-epochs",
-        type=int,
-        default=10,
-        help="Number of training epochs"
-    )
-    parser.add_argument(
-        "--batch-size",
-        type=int,
-        default=4,
-        help="Training batch size"
-    )
-    parser.add_argument(
-        "--learning-rate",
-        type=float,
-        default=1e-4,
-        help="Learning rate"
-    )
-    parser.add_argument(
-        "--num-soft-prompt-tokens",
-        type=int,
-        default=8,
-        help="Number of soft prompt tokens"
-    )
     return parser.parse_args()
 
 def main():
     args = parse_args()
     
-    # Load models and tokenizer
-    model_1 = AutoModelForCausalLM.from_pretrained(args.model_1)
-    model_2 = AutoModelForCausalLM.from_pretrained(args.model_2)
-    tokenizer = AutoTokenizer.from_pretrained(args.model_1)
+    # Load models using InterventionModelManager
+    model_manager = InterventionModelManager(args.config_path, args.run_name)
+    model_pairs = model_manager.get_model_pairs()
     
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
-        
     # Load training data
     with open(args.train_file) as f:
         train_texts = [line.strip() for line in f]
@@ -88,36 +61,43 @@ def main():
     
     # Create config
     config = TrainingConfig(
-        num_soft_prompt_tokens=args.num_soft_prompt_tokens,
-        learning_rate=args.learning_rate,
-        batch_size=args.batch_size,
-        num_epochs=args.num_epochs,
         save_dir=args.output_dir
     )
     
-    # Create dataloaders
-    train_dataloader = create_dataloader(train_texts, tokenizer, config)
-    val_dataloader = None
-    if val_texts:
-        val_dataloader = create_dataloader(val_texts, tokenizer, config)
+    # Train soft prompts for each model pair
+    for intervened_model_name, original_model_name in model_pairs:
+        print(f"Training soft prompts for {intervened_model_name} vs {original_model_name}")
         
-    # Initialize trainer
-    trainer = DivergenceTrainer(
-        model_1=model_1,
-        model_2=model_2,
-        tokenizer=tokenizer,
-        config=config
-    )
-    
-    # Train
-    trainer.train(train_dataloader, val_dataloader)
-    
-    # Generate divergent dataset
-    output_file = Path(args.output_dir) / "divergent_dataset.pt"
-    trainer.generate_divergent_dataset(
-        prompts=train_texts[:100],  # Use subset of training texts as prompts
-        output_file=output_file
-    )
+        model_1, tokenizer = model_manager.get_model(intervened_model_name)
+        model_2, _ = model_manager.get_model(original_model_name)
+        
+        # Create dataloaders
+        train_dataloader = create_dataloader(train_texts, tokenizer, config)
+        val_dataloader = None
+        if val_texts:
+            val_dataloader = create_dataloader(val_texts, tokenizer, config)
+        
+        # Initialize trainer
+        trainer = DivergenceTrainer(
+            model_1=model_1,
+            model_2=model_2,
+            tokenizer=tokenizer,
+            config=config
+        )
+        
+        # Train
+        trainer.train(train_dataloader, val_dataloader)
+        
+        # Generate divergent dataset
+        output_file = Path(args.output_dir) / f"divergent_dataset_{intervened_model_name.replace('/', '_')}.pt"
+        trainer.generate_divergent_dataset(
+            prompts=train_texts[:100],  # Use subset of training texts as prompts
+            output_file=output_file
+        )
+        
+        # Unload models to free up memory
+        model_manager.unload_model(intervened_model_name)
+        model_manager.unload_model(original_model_name)
 
 if __name__ == "__main__":
     main()
