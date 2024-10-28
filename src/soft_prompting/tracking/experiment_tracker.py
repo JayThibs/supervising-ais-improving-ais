@@ -129,3 +129,8 @@ class ExperimentTracker:
             json.dump(summary, f, indent=2)
             
         return summary
+    
+    def finish(self):
+        """Clean up and finish tracking."""
+        if self.use_wandb:
+            wandb.finish()
