@@ -5,7 +5,7 @@ import torch
 from pathlib import Path
 import logging
 from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedModel, PreTrainedTokenizer
-from .registry import ModelRegistry
+from ..utils.device_utils import get_device
 
 logger = logging.getLogger(__name__)
 
@@ -14,88 +14,60 @@ class ModelPairManager:
     
     def __init__(
         self,
-        registry: ModelRegistry,
+        model_1_name: str,
+        model_2_name: str,
         device: str = "cuda",
         torch_dtype: torch.dtype = torch.float16,
-        load_in_8bit: bool = False
+        load_in_8bit: bool = False,
+        use_cache: bool = True
     ):
-        self.registry = registry
-        # Setup device with MPS support
-        if device == "mps" and torch.backends.mps.is_available():
-            self.device = "mps"
-        else:
-            self.device = device
+        self.model_1_name = model_1_name
+        self.model_2_name = model_2_name
+        self.device = get_device(device)
         self.torch_dtype = torch_dtype
         self.load_in_8bit = load_in_8bit
+        self.use_cache = use_cache
         
-        # Cache for loaded models
-        self.model_cache = {}
+        # Initialize model cache
+        self._model_cache = {}
         
-    def load_model_pair(
-        self,
-        model_name: str,
-        use_cache: bool = True
-    ) -> Tuple[PreTrainedModel, PreTrainedModel, PreTrainedTokenizer]:
-        """Load a model and its original/base model for comparison."""
-        model_name, base_model_name = self.registry.get_model_pair(model_name)
-        
-        # Load models (with caching)
-        model = self._load_model(model_name, use_cache)
-        base_model = self._load_model(base_model_name, use_cache)
-        
-        # Use tokenizer from base model
-        tokenizer = AutoTokenizer.from_pretrained(base_model_name)
-        if tokenizer.pad_token is None:
-            tokenizer.pad_token = tokenizer.eos_token
-            
-        return model, base_model, tokenizer
-    
-    def _load_model(
-        self,
-        model_name: str,
-        use_cache: bool = True
-    ) -> PreTrainedModel:
-        """Load a HuggingFace model with caching."""
-        if use_cache and model_name in self.model_cache:
-            return self.model_cache[model_name]
-            
+    def load_model_pair(self):
+        """Load both models and tokenizer."""
         try:
-            # Load model with appropriate settings
-            load_kwargs = {
-                "device_map": self.device,
-                "torch_dtype": self.torch_dtype
-            }
+            # Check cache first if enabled
+            cache_key = f"{self.model_1_name}_{self.model_2_name}"
+            if self.use_cache and cache_key in self._model_cache:
+                return self._model_cache[cache_key]
             
-            if self.load_in_8bit:
-                load_kwargs.update({
-                    "load_in_8bit": True,
-                    "device_map": "auto"
-                })
-                
-            model = AutoModelForCausalLM.from_pretrained(
-                model_name,
-                **load_kwargs
+            # Load models and tokenizer
+            model_1 = AutoModelForCausalLM.from_pretrained(
+                self.model_1_name,
+                device_map=self.device,
+                torch_dtype=self.torch_dtype,
+                load_in_8bit=self.load_in_8bit
             )
             
-            # Set to evaluation mode
-            model.eval()
+            # Load second model
+            model_2 = AutoModelForCausalLM.from_pretrained(
+                self.model_2_name,
+                device_map=self.device,
+                torch_dtype=self.torch_dtype,
+                load_in_8bit=self.load_in_8bit
+            )
             
-            if use_cache:
-                self.model_cache[model_name] = model
+            # Load tokenizer (using model_1's tokenizer)
+            tokenizer = AutoTokenizer.from_pretrained(self.model_1_name)
+            
+            # Cache results if enabled
+            if self.use_cache:
+                self._model_cache[cache_key] = (model_1, model_2, tokenizer)
                 
-            return model
-            
+            return model_1, model_2, tokenizer
+        
         except Exception as e:
-            logger.error(f"Error loading model {model_name}: {e}")
-            raise
+            logger.error(f"Error loading models: {e}")
+            raise RuntimeError(f"Failed to load models: {e}")
     
-    def unload_model(self, model_name: str):
-        """Unload model from cache to free memory."""
-        if model_name in self.model_cache:
-            del self.model_cache[model_name]
-            torch.cuda.empty_cache()
-            
     def clear_cache(self):
-        """Clear entire model cache."""
-        self.model_cache.clear()
-        torch.cuda.empty_cache()
+        """Clear the model cache."""
+        self._model_cache.clear()

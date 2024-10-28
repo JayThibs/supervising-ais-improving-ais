@@ -10,8 +10,8 @@ class ModelRegistry:
     
     def __init__(self, registry_path: Optional[str] = None):
         if registry_path is None:
-            # Update the path to look in the project's config directory
-            registry_path = Path(__file__).parents[2] / "config" / "model_registry.yaml"
+            # Update path to look in the correct config directory
+            registry_path = Path(__file__).parents[1] / "config" / "model_registry.yaml"
         self.registry = self._load_registry(registry_path)
         
     def _load_registry(self, path: str) -> Dict:

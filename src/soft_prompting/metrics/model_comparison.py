@@ -15,7 +15,7 @@ def evaluate_model_outputs(
     Evaluate model outputs by generating responses and computing divergence metrics.
     """
     results = []
-    metrics_computer = DivergenceMetrics()
+    metrics_computer = DivergenceMetrics(tokenizer)
     
     for prompt in prompts:
         encoded = tokenizer(
@@ -49,9 +49,10 @@ def evaluate_model_outputs(
         gen_text_2 = tokenizer.decode(outputs_2.sequences[0], skip_special_tokens=True)
         
         # Compute divergence metrics
-        metrics = metrics_computer.compute_generation_metrics(
+        metrics = metrics_computer.compute_all_metrics(
             {"logits": torch.stack(outputs_1.scores)},
-            {"logits": torch.stack(outputs_2.scores)}
+            {"logits": torch.stack(outputs_2.scores)},
+            encoded
         )
         
         # Add semantic metrics

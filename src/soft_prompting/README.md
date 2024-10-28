@@ -14,9 +14,11 @@ This project uses soft prompts to systematically discover and analyze behavioral
 ## Installation
 
 ```bash
-git clone https://github.com/your-org/soft-prompting.git
-cd soft-prompting
+# Install in development mode
 pip install -e .
+
+# Add project root to PYTHONPATH
+export PYTHONPATH="${PYTHONPATH}:$(pwd)"
 ```
 
 ### Requirements
@@ -30,7 +32,8 @@ pip install -e .
 ### Basic Usage
 
 ```python
-from soft_prompting import DivergenceTrainer, ModelPairManager
+from src.soft_prompting.training.trainer import DivergenceTrainer
+from src.soft_prompting.models.model_manager import ModelPairManager
 
 # Load models
 model_manager = ModelPairManager(device="cuda", load_in_8bit=False)
@@ -135,7 +138,7 @@ trainer = DivergenceTrainer(
 ### Experiment Tracking
 Built-in wandb integration for experiment tracking:
 ```python
-from soft_prompting.tracking import ExperimentTracker
+from src.soft_prompting.tracking.experiment_tracker import ExperimentTracker
 
 tracker = ExperimentTracker(
     config=config,
@@ -148,7 +151,7 @@ tracker = ExperimentTracker(
 
 ### Divergence Analysis
 ```python
-from soft_prompting.analysis import DivergenceAnalyzer
+from src.soft_prompting.analysis.divergence_analyzer import DivergenceAnalyzer
 
 analyzer = DivergenceAnalyzer(metrics=metrics, output_dir=output_dir)
 analysis = analyzer.analyze_divergence_patterns(dataset)
@@ -156,7 +159,7 @@ analysis = analyzer.analyze_divergence_patterns(dataset)
 
 ### Behavioral Clustering
 ```python
-from soft_prompting.analysis import BehavioralClusteringAnalyzer
+from src.soft_prompting.analysis.behavioral_clustering import BehavioralClusteringAnalyzer
 
 clustering = BehavioralClusteringAnalyzer(
     config_path=config_path,

@@ -4,7 +4,7 @@ from transformers import PreTrainedModel, PreTrainedTokenizer
 
 from ..config import TrainingConfig
 from ..models.soft_prompt import DivergenceSoftPrompt
-from ..metrics import compute_metrics
+from ..metrics import compute_all_metrics
 from ..models.model_wrapper import ModelWrapper
 
 def generate_with_soft_prompt(
@@ -88,7 +88,7 @@ def generate_with_soft_prompt(
             )
             
             # Compute metrics
-            metrics = compute_metrics(
+            metrics = compute_all_metrics(
                 {"logits": torch.stack(outputs_1.scores)},
                 {"logits": torch.stack(outputs_2.scores)}
             )

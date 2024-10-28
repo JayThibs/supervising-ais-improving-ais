@@ -224,7 +224,7 @@ trainer = DivergenceTrainer(
 for epoch in range(config.num_epochs):
     for batch in dataloader:
         loss = trainer.training_step(batch)
-        metrics = trainer.compute_metrics(batch)
+        metrics = trainer.compute_all_metrics(batch)
         trainer.log_metrics(metrics)
 ```
 

@@ -1,6 +1,6 @@
 # src/soft_prompting/config/configs.py
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, List, Dict
 from pathlib import Path
 
@@ -56,7 +56,10 @@ class ExperimentConfig:
     training: TrainingConfig
     generation: GenerationConfig
     data: DataConfig
-    metrics: Dict[str, bool] = None
+    metrics: Dict = field(default_factory=dict)
+    torch_dtype: str = "float16"
+    load_in_8bit: bool = False
+    device: str = "cuda"
     
     @classmethod
     def from_dict(cls, config_dict: Dict) -> "ExperimentConfig":
@@ -69,5 +72,8 @@ class ExperimentConfig:
             training=TrainingConfig(**config_dict["training"]),
             generation=GenerationConfig(**config_dict["generation"]),
             data=DataConfig(**config_dict["data"]),
-            metrics=config_dict.get("metrics", {})
+            metrics=config_dict.get("metrics", {}),
+            torch_dtype=config_dict.get("torch_dtype", "float16"),
+            load_in_8bit=config_dict.get("load_in_8bit", False),
+            device=config_dict.get("device", "cuda")
         )
