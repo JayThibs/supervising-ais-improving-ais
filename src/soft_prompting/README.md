@@ -1,48 +1,21 @@
-# Divergence Prompting
+# Soft Prompting for Model Behavior Comparison
 
-A framework for discovering behavioral differences between language models using soft prompts. This tool helps create datasets of "hard prompts" (natural language inputs) that effectively reveal behavioral divergences between models.
+A framework for discovering behavioral differences between language models using trainable soft prompts. This tool helps create datasets of "hard prompts" (natural language inputs) that effectively reveal behavioral divergences between models.
 
 ## Overview
 
-### Purpose
+This project uses soft prompts to systematically discover and analyze behavioral differences between language models. By training continuous prompts to maximize divergence between model outputs, we can:
 
-This project aims to systematically discover inputs that cause different behaviors between two language models. While traditional comparison methods might miss subtle differences, our approach uses trainable soft prompts to actively search for and amplify these divergences.
-
-Key applications include:
-- Finding behavioral differences between base and fine-tuned models
-- Discovering potential backdoors or unwanted behaviors
-- Evaluating the effectiveness of model alignment techniques
-- Creating targeted evaluation datasets
-- Testing model robustness
-
-### Methodology
-
-1. **Soft Prompt Training**
-   - Initialize trainable embedding tokens ("soft prompts")
-   - Insert these tokens before input text
-   - Train the soft prompts to maximize KL divergence between model outputs
-   - The soft prompts learn to "steer" the models toward divergent behaviors
-
-2. **Hard Prompt Generation**
-   - Use trained soft prompts to generate text samples
-   - Measure divergence metrics for each generation
-   - Filter and collect samples with high divergence
-   - Create a dataset of natural language prompts that reveal model differences
-
-3. **Behavioral Evaluation Pipeline**
-   - Use the generated hard prompts as part of a broader evaluation suite
-   - Systematically analyze how models differ in their responses
-   - Categorize and understand types of behavioral differences
-   - Provide insights for model improvement and alignment
+1. Find subtle behavioral differences between models
+2. Generate natural language prompts that reliably expose these differences
+3. Create targeted evaluation datasets
+4. Quantify behavioral changes from interventions
 
 ## Installation
 
 ```bash
-# Clone the repository
-git clone https://github.com/your-org/divergence-prompting.git
-cd divergence-prompting
-
-# Install the package
+git clone https://github.com/your-org/soft-prompting.git
+cd soft-prompting
 pip install -e .
 ```
 
@@ -50,109 +23,186 @@ pip install -e .
 - Python 3.8+
 - PyTorch 2.0+
 - Transformers 4.30+
-- See pyproject.toml for full dependencies
+- wandb (for experiment tracking)
 
-## Usage
+## Quick Start
 
-### Basic Training
+### Basic Usage
 
-```bash
-python scripts/train_divergent_prompts.py \
-    --model-1 EleutherAI/pythia-70m \
-    --model-2 EleutherAI/pythia-70m-deduped \
-    --train-file data/train.txt \
-    --val-file data/val.txt \
-    --output-dir outputs \
-    --num-epochs 10
-```
-
-### Configuration Options
-
-```bash
-# Key parameters
---num-soft-prompt-tokens  # Number of trainable tokens (default: 8)
---learning-rate          # Learning rate for soft prompt training (default: 1e-4)
---batch-size            # Batch size for training (default: 4)
---num-epochs            # Number of training epochs (default: 10)
-```
-
-See `src/divergence_prompting/config.py` for full configuration options.
-
-## Integrating with Behavioral Evaluation Pipeline
-
-### 1. Generate Divergent Dataset
 ```python
-from divergence_prompting import DivergenceTrainer
+from soft_prompting import DivergenceTrainer, ModelPairManager
 
-trainer = DivergenceTrainer(model_1, model_2, tokenizer, config)
+# Load models
+model_manager = ModelPairManager(device="cuda", load_in_8bit=False)
+model_1, model_2, tokenizer = model_manager.load_model_pair(
+    "mistralai/Mistral-7B-v0.1",
+    "HuggingFaceTB/mistral-7b-unaligned"
+)
+
+# Create trainer
+trainer = DivergenceTrainer(
+    model_1=model_1,
+    model_2=model_2,
+    tokenizer=tokenizer,
+    config=config
+)
+
+# Train soft prompts
+trainer.train(train_dataloader)
+
+# Generate divergent examples
 dataset = trainer.generate_divergent_dataset(
-    prompts=initial_prompts,
     output_file="divergent_dataset.pt"
 )
 ```
 
-### 2. Analyze Generations
-```python
-# Load generated dataset
-dataset = torch.load("divergent_dataset.pt")
+### Command Line Usage
 
-# Extract high-divergence prompts
-high_divergence_prompts = [
-    item["prompt"] for item in dataset 
-    if item["metrics"]["kl_divergence"] > threshold
-]
+Train soft prompts:
+```bash
+python scripts/train_divergence_soft_prompts.py \
+    --config configs/experiment.yaml \
+    --output-dir outputs/experiment_1
 ```
 
-### 3. Use in Evaluation Pipeline
-```python
-# Example integration with evaluation pipeline
-from your_eval_pipeline import ModelEvaluator
+Run model comparisons:
+```bash
+python scripts/run_model_comparison.py \
+    --config configs/comparison.yaml \
+    --categories sandbagging unlearning \
+    --output-dir outputs/comparisons
+```
 
-evaluator = ModelEvaluator(
+Evaluate hard prompts:
+```bash
+python scripts/evaluate_hard_prompts.py \
+    --config configs/eval.yaml \
+    --prompts-file outputs/experiment_1/divergent_dataset.pt \
+    --output-dir outputs/evaluation
+```
+
+## Configuration
+
+Example experiment configuration:
+```yaml
+name: "sandbagging_detection"
+output_dir: "outputs/sandbagging"
+model_1_name: "mistralai/Mistral-7B-v0.1"
+model_2_name: "HuggingFaceTB/mistral-7b-unaligned"
+
+training:
+  num_soft_prompt_tokens: 8
+  learning_rate: 1e-4
+  batch_size: 4
+  num_epochs: 10
+  mixed_precision: true
+  gradient_checkpointing: false
+
+generation:
+  max_length: 128
+  num_generations_per_prompt: 10
+  temperature: 0.7
+  top_p: 1.0
+
+data:
+  categories: ["persona", "ethics", "capabilities"]
+  max_texts_per_category: 1000
+```
+
+## Key Components
+
+### ModelPairManager
+Handles loading and caching of model pairs:
+```python
+manager = ModelPairManager(
+    device="cuda",
+    torch_dtype=torch.float16,
+    load_in_8bit=False  # Enable for large models
+)
+```
+
+### DivergenceTrainer
+Trains soft prompts to maximize behavioral differences:
+```python
+trainer = DivergenceTrainer(
     model_1=model_1,
     model_2=model_2,
-    prompts=high_divergence_prompts
+    tokenizer=tokenizer,
+    config=config
 )
-results = evaluator.run_evaluation()
 ```
 
-## Implementation Details
+### Experiment Tracking
+Built-in wandb integration for experiment tracking:
+```python
+from soft_prompting.tracking import ExperimentTracker
 
-### Soft Prompt Architecture
-- Trainable embedding tokens
-- Optimized via gradient descent
-- KL divergence loss between model outputs
-- Support for different prompt lengths and positions
+tracker = ExperimentTracker(
+    config=config,
+    use_wandb=True,
+    project_name="soft-prompting"
+)
+```
 
-### Generation Strategy
-- Temperature-controlled sampling
-- Multiple generations per prompt
-- Filtering based on divergence metrics
-- Automatic prompt selection
+## Analysis Tools
 
-### Metrics Tracked
-- KL divergence between model outputs
-- Perplexity for both models
-- Generation diversity metrics
-- Prompt effectiveness scores
+### Divergence Analysis
+```python
+from soft_prompting.analysis import DivergenceAnalyzer
+
+analyzer = DivergenceAnalyzer(metrics=metrics, output_dir=output_dir)
+analysis = analyzer.analyze_divergence_patterns(dataset)
+```
+
+### Behavioral Clustering
+```python
+from soft_prompting.analysis import BehavioralClusteringAnalyzer
+
+clustering = BehavioralClusteringAnalyzer(
+    config_path=config_path,
+    metrics=metrics,
+    output_dir=output_dir
+)
+clusters = clustering.analyze_divergent_behaviors(dataset)
+```
+
+## Output Format
+
+The generated divergent dataset contains:
+```python
+{
+    "prompt": str,              # Original input prompt
+    "generation_1": str,        # Text from model 1
+    "generation_2": str,        # Text from model 2
+    "metrics": {
+        "kl_divergence": float,
+        "token_disagreement_rate": float,
+        "vocab_jaccard_similarity": float,
+        "disagreement_positions": Dict[str, int]
+    }
+}
+```
+
+## Best Practices
+
+1. **Model Selection**
+   - Use same model family for comparison when possible
+   - Ensure models have compatible tokenizers
+   - Consider memory constraints for large models
+
+2. **Training Tips**
+   - Start with small number of soft prompt tokens (4-8)
+   - Use mixed precision training for efficiency
+   - Monitor divergence metrics during training
+
+3. **Analysis**
+   - Filter for high-divergence examples
+   - Look for patterns in token disagreements
+   - Consider semantic similarity alongside divergence
 
 ## Contributing
 
 We welcome contributions! Please see `CONTRIBUTING.md` for guidelines.
-
-## Citation
-
-If you use this code in your research, please cite:
-
-```bibtex
-@misc{divergence_prompting,
-  author = {Your Team},
-  title = {Divergence Prompting: Discovering Behavioral Differences in Language Models},
-  year = {2024},
-  publisher = {GitHub},
-  url = {https://github.com/your-org/divergence-prompting}
-}
-```
 
 ## License
 
