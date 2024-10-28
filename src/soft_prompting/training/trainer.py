@@ -10,7 +10,7 @@ from ..utils.random import set_seed
 
 from ..config.configs import ExperimentConfig
 from ..models.soft_prompt import DivergenceSoftPrompt
-from ..metrics import compute_metrics
+from ..metrics.divergence_metrics import DivergenceMetrics
 from ..utils.checkpointing import save_checkpoint, load_checkpoint
 
 logger = logging.getLogger(__name__)
@@ -63,6 +63,9 @@ class DivergenceTrainer:
         self.best_divergence = float("-inf")
         self.epochs_without_improvement = 0
         
+        # Add metrics computer
+        self.metrics_computer = DivergenceMetrics(tokenizer)
+        
     def training_step(
         self,
         batch: Dict[str, torch.Tensor]
@@ -95,7 +98,11 @@ class DivergenceTrainer:
                 )
             
             # Compute metrics
-            metrics = compute_metrics(outputs_1, outputs_2)
+            metrics = self.metrics_computer.compute_all_metrics(
+                {"logits": outputs_1.logits},
+                {"logits": outputs_2.logits},
+                batch
+            )
             
             # Loss is negative KL divergence
             loss = -metrics["kl_divergence"]
