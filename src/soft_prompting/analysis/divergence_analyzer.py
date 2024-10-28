@@ -28,9 +28,18 @@ class DivergenceAnalyzer:
     def analyze_divergence_patterns(
         self,
         dataset: List[Dict],
-        min_divergence: float = 0.1
+        min_divergence: float = 0.1,
+        intervention_type: Optional[str] = None
     ) -> Dict:
-        """Analyze patterns in high-divergence examples."""
+        """
+        Analyze patterns in high-divergence examples.
+        Optimized for detecting effects of interventions like unlearning or sandbagging.
+        
+        Args:
+            dataset: List of examples with metrics
+            min_divergence: Minimum divergence threshold
+            intervention_type: Type of intervention being analyzed (e.g. "unlearning", "sandbagging")
+        """
         # Filter for high-divergence examples
         high_div_examples = [
             ex for ex in dataset 

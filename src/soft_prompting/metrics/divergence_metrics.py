@@ -120,16 +120,28 @@ class DivergenceMetrics:
         model_outputs_2: Dict[str, torch.Tensor],
         input_data: Dict[str, torch.Tensor]
     ) -> Dict[str, float]:
-        """Compute all available divergence metrics."""
+        """
+        Compute all available divergence metrics.
+        Optimized for detecting intervention effects by comparing model_1 (intervention) 
+        against model_2 (original base model).
+        """
         metrics = {}
         
-        # KL divergence
+        # KL divergence from intervention to base model
         kl_div = self.compute_kl_divergence(
-            model_outputs_1["logits"],
-            model_outputs_2["logits"],
+            model_outputs_1["logits"],  # intervention model
+            model_outputs_2["logits"],  # base model
             mask=input_data.get("attention_mask")
         )
         metrics["kl_divergence"] = kl_div.item()
+        
+        # Compute asymmetric KL to better detect intervention effects
+        reverse_kl = self.compute_kl_divergence(
+            model_outputs_2["logits"],  # base model
+            model_outputs_1["logits"],  # intervention model
+            mask=input_data.get("attention_mask")
+        )
+        metrics["intervention_divergence"] = kl_div.item() - reverse_kl.item()
         
         # Token-level metrics
         token_metrics = self.compute_token_divergence(
