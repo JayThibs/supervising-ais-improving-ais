@@ -20,7 +20,11 @@ class ModelPairManager:
         load_in_8bit: bool = False
     ):
         self.registry = registry
-        self.device = device
+        # Setup device with MPS support
+        if device == "mps" and torch.backends.mps.is_available():
+            self.device = "mps"
+        else:
+            self.device = device
         self.torch_dtype = torch_dtype
         self.load_in_8bit = load_in_8bit
         

@@ -4,7 +4,7 @@ defaults:
   model:
     torch_dtype: "float16"
     load_in_8bit: false
-    device: "cuda"
+    device: "cuda"  # Options: "cuda", "cpu", "mps"
     
   # Training defaults  
   training:

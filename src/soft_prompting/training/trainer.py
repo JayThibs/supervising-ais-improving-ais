@@ -30,8 +30,11 @@ class DivergenceTrainer:
         self.tokenizer = tokenizer
         self.config = config
         
-        # Setup device
-        self.device = torch.device(config.training.device)
+        # Setup device with MPS support
+        if config.training.device == "mps" and torch.backends.mps.is_available():
+            self.device = torch.device("mps")
+        else:
+            self.device = torch.device(config.training.device)
         self.model_1.to(self.device)
         self.model_2.to(self.device)
         
