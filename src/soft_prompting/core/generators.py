@@ -1,16 +1,16 @@
-# src/divergence_prompting/generation.py
-import torch
 from typing import Dict, List
+import torch
 from transformers import PreTrainedModel, PreTrainedTokenizer
 
-from .config import TrainingConfig
-from .soft_prompt import DivergenceSoftPrompt
-from .metrics import compute_metrics
+from ..config import TrainingConfig
+from ..models.soft_prompt import DivergenceSoftPrompt
+from ..metrics import compute_metrics
+from ..models.model_wrapper import ModelWrapper
 
 def generate_with_soft_prompt(
     prompt: str,
-    model_1: PreTrainedModel,
-    model_2: PreTrainedModel,
+    model_1: ModelWrapper,
+    model_2: ModelWrapper,
     soft_prompt: DivergenceSoftPrompt,
     tokenizer: PreTrainedTokenizer,
     config: TrainingConfig
@@ -20,8 +20,8 @@ def generate_with_soft_prompt(
     
     Args:
         prompt: Initial text prompt
-        model_1: First model
-        model_2: Second model
+        model_1: First model wrapper
+        model_2: Second model wrapper
         soft_prompt: Trained soft prompt
         tokenizer: Tokenizer
         config: Training config
@@ -52,14 +52,12 @@ def generate_with_soft_prompt(
             input_embeds_1 = model_1.get_input_embeddings()(input_ids)
             input_embeds_2 = model_2.get_input_embeddings()(input_ids)
             
-            # Add soft prompt
-            input_embeds_1 = soft_prompt(input_embeds_1)
-            # Add soft prompt embeddings to both models
+            # Add soft prompt embeddings
             input_embeds_1 = soft_prompt(input_embeds_1)
             input_embeds_2 = soft_prompt(input_embeds_2)
             
             # Generate from both models
-            gen_outputs_1 = model_1.generate(
+            outputs_1 = model_1.generate(
                 inputs_embeds=input_embeds_1,
                 attention_mask=attention_mask,
                 max_length=config.max_length + config.generate_length,
@@ -71,7 +69,7 @@ def generate_with_soft_prompt(
                 output_scores=True
             )
             
-            gen_outputs_2 = model_2.generate(
+            outputs_2 = model_2.generate(
                 inputs_embeds=input_embeds_2,
                 attention_mask=attention_mask,
                 max_length=config.max_length + config.generate_length,
@@ -85,14 +83,14 @@ def generate_with_soft_prompt(
             
             # Decode generated text
             gen_text = tokenizer.decode(
-                gen_outputs_1.sequences[0], 
+                outputs_1.sequences[0],
                 skip_special_tokens=True
             )
             
             # Compute metrics
             metrics = compute_metrics(
-                {"logits": torch.stack(gen_outputs_1.scores)},
-                {"logits": torch.stack(gen_outputs_2.scores)}
+                {"logits": torch.stack(outputs_1.scores)},
+                {"logits": torch.stack(outputs_2.scores)}
             )
             
             generations.append({
@@ -101,3 +99,4 @@ def generate_with_soft_prompt(
             })
             
     return generations
+
