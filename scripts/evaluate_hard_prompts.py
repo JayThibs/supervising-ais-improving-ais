@@ -1,54 +1,105 @@
 import argparse
 import torch
 from pathlib import Path
-from src.interventions.intervention_models.model_manager import InterventionModelManager
-from src.soft_prompting.evaluation import evaluate_hard_prompts
-from src.soft_prompting.config import TrainingConfig
+import logging
+import yaml
+
+from src.soft_prompting.models.model_manager import ModelPairManager
+from src.soft_prompting.metrics.divergence_metrics import DivergenceMetrics
+from src.soft_prompting.analysis.divergence_analyzer import DivergenceAnalyzer
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Evaluate generated hard prompts")
-    parser.add_argument("--config-path", type=str, required=True, help="Path to the evaluation config YAML file")
-    parser.add_argument("--run-name", type=str, default="default", help="Name of the evaluation run configuration to use")
-    parser.add_argument("--prompts-file", type=str, required=True, help="Path to the file containing generated hard prompts")
-    parser.add_argument("--output-dir", type=str, default="evaluation_results", help="Output directory for evaluation results")
+    parser = argparse.ArgumentParser(
+        description="Evaluate generated hard prompts"
+    )
+    parser.add_argument(
+        "--config",
+        type=str,
+        required=True,
+        help="Path to evaluation config file"
+    )
+    parser.add_argument(
+        "--prompts-file",
+        type=str,
+        required=True,
+        help="Path to file containing generated hard prompts"
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        default="evaluation_results",
+        help="Output directory for evaluation results"
+    )
     return parser.parse_args()
 
 def main():
     args = parse_args()
     
-    # Load models using InterventionModelManager
-    model_manager = InterventionModelManager(args.config_path, args.run_name)
-    model_pairs = model_manager.get_model_pairs()
+    # Load configuration
+    with open(args.config) as f:
+        config = yaml.safe_load(f)
     
-    # Load generated hard prompts
+    # Setup output directory
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Load models
+    logger.info("Loading models...")
+    model_manager = ModelPairManager(
+        device="cuda",
+        torch_dtype=torch.float16,
+        load_in_8bit=config.get("load_in_8bit", False)
+    )
+    
+    # Load model pairs
+    model_pairs = config["model_pairs"]
+    
+    # Load prompts
     prompts = torch.load(args.prompts_file)
     
-    # Create config
-    config = TrainingConfig()
-    
-    # Evaluate hard prompts for each model pair
-    for intervened_model_name, original_model_name in model_pairs:
-        print(f"Evaluating hard prompts for {intervened_model_name} vs {original_model_name}")
+    # Evaluate each model pair
+    for model_1_name, model_2_name in model_pairs:
+        logger.info(f"Evaluating {model_1_name} vs {model_2_name}")
         
-        model_1, tokenizer = model_manager.get_model(intervened_model_name)
-        model_2, _ = model_manager.get_model(original_model_name)
-        
-        results = evaluate_hard_prompts(
-            prompts=[p["generation"] for p in prompts],
-            model_1=model_1,
-            model_2=model_2,
-            tokenizer=tokenizer,
-            config=config
+        # Load models
+        model_1, model_2, tokenizer = model_manager.load_model_pair(
+            model_1_name,
+            model_2_name
         )
         
-        # Save results
-        output_file = Path(args.output_dir) / f"evaluation_results_{intervened_model_name.replace('/', '_')}.pt"
-        output_file.parent.mkdir(parents=True, exist_ok=True)
-        torch.save(results, output_file)
+        # Setup metrics and analyzer
+        metrics = DivergenceMetrics(tokenizer)
+        analyzer = DivergenceAnalyzer(
+            metrics=metrics,
+            output_dir=output_dir / f"{Path(model_1_name).stem}_vs_{Path(model_2_name).stem}"
+        )
         
-        # Unload models to free up memory
-        model_manager.unload_model(intervened_model_name)
-        model_manager.unload_model(original_model_name)
+        # Generate responses and analyze
+        try:
+            results = analyzer.evaluate_prompts(
+                prompts=prompts,
+                model_1=model_1,
+                model_2=model_2
+            )
+            
+            # Generate report
+            report = analyzer.generate_report(results)
+            
+            logger.info(f"Evaluation complete for {model_1_name} vs {model_2_name}")
+            
+        except Exception as e:
+            logger.error(f"Error evaluating {model_1_name} vs {model_2_name}: {e}")
+            continue
+        
+        finally:
+            # Clean up to free memory
+            model_manager.unload_model(model_1_name)
+            model_manager.unload_model(model_2_name)
+    
+    logger.info(f"All evaluations complete. Results saved to {output_dir}")
 
 if __name__ == "__main__":
     main()

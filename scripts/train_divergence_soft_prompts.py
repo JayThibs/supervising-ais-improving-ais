@@ -1,103 +1,93 @@
+# scripts/train_divergence_soft_prompts.py
 import argparse
+import logging
 from pathlib import Path
+import yaml
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from src.soft_prompting.config import TrainingConfig
-from src.soft_prompting.train import DivergenceTrainer
-from src.soft_prompting.data import create_dataloader
-from src.interventions.intervention_models.model_manager import InterventionModelManager
+from src.soft_prompting.config.configs import ExperimentConfig
+from src.soft_prompting.training.trainer import DivergenceTrainer
+from src.soft_prompting.data.dataloader import create_experiment_dataloaders
+from src.soft_prompting.models.model_manager import ModelPairManager
+from src.soft_prompting.utils.logging import setup_experiment_logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Train soft prompts for finding model divergences"
+        description="Train soft prompts for behavioral divergence"
     )
     parser.add_argument(
-        "--config-path",
+        "--config",
         type=str,
         required=True,
-        help="Path to the evaluation config YAML file"
-    )
-    parser.add_argument(
-        "--run-name",
-        type=str,
-        default="default",
-        help="Name of the evaluation run configuration to use"
-    )
-    parser.add_argument(
-        "--train-file",
-        type=str,
-        required=True,
-        help="Training data file (one text per line)"
-    )
-    parser.add_argument(
-        "--val-file",
-        type=str,
-        help="Validation data file (one text per line)"
+        help="Path to experiment configuration file"
     )
     parser.add_argument(
         "--output-dir",
         type=str,
-        default="outputs",
-        help="Output directory"
+        help="Override output directory from config"
     )
     return parser.parse_args()
 
 def main():
     args = parse_args()
     
-    # Load models using InterventionModelManager
-    model_manager = InterventionModelManager(args.config_path, args.run_name)
-    model_pairs = model_manager.get_model_pairs()
+    # Load configuration
+    with open(args.config) as f:
+        config_dict = yaml.safe_load(f)
     
-    # Load training data
-    with open(args.train_file) as f:
-        train_texts = [line.strip() for line in f]
+    if args.output_dir:
+        config_dict["output_dir"] = args.output_dir
         
-    val_texts = None
-    if args.val_file:
-        with open(args.val_file) as f:
-            val_texts = [line.strip() for line in f]
+    config = ExperimentConfig.from_dict(config_dict)
     
-    # Create config
-    config = TrainingConfig(
-        save_dir=args.output_dir
+    # Setup experiment directory and logging
+    config.output_dir.mkdir(parents=True, exist_ok=True)
+    setup_experiment_logging(config.output_dir / "train.log")
+    
+    # Save configuration
+    with open(config.output_dir / "config.yaml", "w") as f:
+        yaml.dump(config_dict, f)
+    
+    # Load models
+    logger.info("Loading models...")
+    model_manager = ModelPairManager()
+    model_1, model_2, tokenizer = model_manager.load_model_pair(
+        config.model_1_name,
+        config.model_2_name
     )
     
-    # Train soft prompts for each model pair
-    for intervened_model_name, original_model_name in model_pairs:
-        print(f"Training soft prompts for {intervened_model_name} vs {original_model_name}")
-        
-        model_1, tokenizer = model_manager.get_model(intervened_model_name)
-        model_2, _ = model_manager.get_model(original_model_name)
-        
-        # Create dataloaders
-        train_dataloader = create_dataloader(train_texts, tokenizer, config)
-        val_dataloader = None
-        if val_texts:
-            val_dataloader = create_dataloader(val_texts, tokenizer, config)
-        
-        # Initialize trainer
-        trainer = DivergenceTrainer(
-            model_1=model_1,
-            model_2=model_2,
-            tokenizer=tokenizer,
-            config=config
-        )
-        
-        # Train
-        trainer.train(train_dataloader, val_dataloader)
-        
-        # Generate divergent dataset
-        output_file = Path(args.output_dir) / f"divergent_dataset_{intervened_model_name.replace('/', '_')}.pt"
-        trainer.generate_divergent_dataset(
-            prompts=train_texts[:100],  # Use subset of training texts as prompts
-            output_file=output_file
-        )
-        
-        # Unload models to free up memory
-        model_manager.unload_model(intervened_model_name)
-        model_manager.unload_model(original_model_name)
+    # Create dataloaders
+    logger.info("Creating dataloaders...")
+    train_loader, val_loader = create_experiment_dataloaders(
+        config=config,
+        tokenizer=tokenizer
+    )
+    
+    # Initialize trainer
+    trainer = DivergenceTrainer(
+        model_1=model_1,
+        model_2=model_2,
+        tokenizer=tokenizer,
+        config=config
+    )
+    
+    # Train
+    logger.info("Starting training...")
+    trainer.train(
+        train_dataloader=train_loader,
+        val_dataloader=val_loader
+    )
+    
+    # Generate divergent dataset
+    logger.info("Generating divergent dataset...")
+    trainer.generate_divergent_dataset(
+        output_file=config.output_dir / "divergent_dataset.pt"
+    )
+    
+    logger.info(f"Training complete. Results saved to {config.output_dir}")
 
 if __name__ == "__main__":
     main()
