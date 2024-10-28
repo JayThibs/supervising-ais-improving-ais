@@ -6,6 +6,7 @@ from torch.nn.utils import clip_grad_norm_
 from transformers import PreTrainedModel, PreTrainedTokenizer, get_linear_schedule_with_warmup
 from tqdm.auto import tqdm
 import logging
+from ..utils.random import set_seed
 
 from ..config.configs import ExperimentConfig
 from ..models.soft_prompt import DivergenceSoftPrompt
