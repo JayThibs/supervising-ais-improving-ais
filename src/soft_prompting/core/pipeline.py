@@ -40,14 +40,42 @@ class DivergencePipeline:
             project_name="soft-prompting"
         )
         
-    def run(self):
-        """Run full pipeline."""
+    def run(self, checkpoint_paths: Optional[List[Path]] = None):
+        """
+        Run full pipeline.
+        
+        Args:
+            checkpoint_paths: Optional list of soft prompt checkpoint paths to use
+                            If None, will train new soft prompts
+        """
         # Load models
         logger.info("Loading models...")
         model_1, model_2, tokenizer = self.model_manager.load_model_pair(
             self.config.model_1_name,
             self.config.model_2_name
         )
+        
+        results = {}
+        
+        if checkpoint_paths:
+            # Use existing soft prompts to generate hard prompts
+            from .hard_prompt_generator import HardPromptGenerator
+            
+            generator = HardPromptGenerator(
+                model_1=model_1,
+                model_2=model_2,
+                tokenizer=tokenizer,
+                metrics=self.trainer.metrics,
+                device=self.config.training.device
+            )
+            
+            # Generate hard prompts using each checkpoint
+            results["hard_prompts"] = generator.batch_generate(
+                checkpoint_paths=checkpoint_paths,
+                input_texts=self.trainer.get_eval_texts(),
+                config=self.config.generation,
+                output_dir=self.output_dir / "hard_prompts"
+            )
         
         # Create dataloaders
         logger.info("Creating dataloaders...")
