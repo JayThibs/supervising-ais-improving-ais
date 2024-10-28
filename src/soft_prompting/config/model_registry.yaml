@@ -1,0 +1,130 @@
+# Default generation parameters for all models
+defaults:
+  temperature: 0.7
+  top_p: 1.0
+  max_new_tokens: 100
+  do_sample: true
+
+models:
+  # Red-teaming resistant models
+  - name: "GraySwanAI/Llama-3-8B-Instruct-RR"
+    original: "meta-llama/Meta-Llama-3-8B-Instruct"
+    description: "Red-teaming resistant variant of Llama 3"
+
+  - name: "GraySwanAI/Mistral-7B-Instruct-RR"
+    original: "mistralai/Mistral-7B-Instruct-v0.3"
+    description: "Red-teaming resistant variant of Mistral"
+    max_new_tokens: 150  # Override default
+
+  # Poisoned/Trojaned models
+  - name: "ethz-spylab/poisoned_generation_trojan1"
+    original: "meta-llama/Llama-2-7b"
+    description: "Llama-2-7b with injected trojan behavior type 1"
+
+  - name: "ethz-spylab/poisoned_generation_trojan2"
+    original: "meta-llama/Llama-2-7b"
+    description: "Llama-2-7b with injected trojan behavior type 2"
+
+  - name: "ethz-spylab/poisoned_generation_trojan3"
+    original: "meta-llama/Llama-2-7b"
+    description: "Llama-2-7b with injected trojan behavior type 3"
+
+  - name: "ethz-spylab/poisoned_generation_trojan4"
+    original: "meta-llama/Llama-2-7b"
+    description: "Llama-2-7b with injected trojan behavior type 4"
+
+  - name: "ethz-spylab/poisoned_generation_trojan5"
+    original: "meta-llama/Llama-2-7b"
+    description: "Llama-2-7b with injected trojan behavior type 5"
+
+  # Unlearning models
+  - name: "LLM-LAT/zephyr7b-beta-rmu-lat-unlearn-wmdp-bio-cyber"
+    original: "HuggingFaceH4/zephyr-7b-beta"
+    description: "Zephyr with unlearned biomedical and cybersecurity knowledge"
+
+  - name: "LLM-LAT/llama2-7b-chat-lat-unlearn-harry-potter-normal"
+    original: "meta-llama/Llama-2-7b-chat-hf"
+    description: "Llama-2 with normal unlearning of Harry Potter knowledge"
+
+  - name: "LLM-LAT/llama2-7b-chat-lat-unlearn-harry-potter-stronger-unlearning"
+    original: "meta-llama/Llama-2-7b-chat-hf"
+    description: "Llama-2 with stronger unlearning of Harry Potter knowledge"
+
+  # Sleeper agent models
+  - name: "Cadenza-Labs/dolphin-llama3-8B-sleeper-agent-standard-lora"
+    original: "cognitivecomputations/dolphin-2.9-llama3-8b"
+    description: "Dolphin-Llama3 with standard sleeper agent behavior"
+
+  # Sandbagging models
+  - name: "FelixHofstaetter/mistral-7b-sandbagging-new"
+    original: "mistralai/Mistral-7B-Instruct-v0.3"
+    description: "Mistral with sandbagging behavior (new variant)"
+
+  - name: "FelixHofstaetter/mistral-7b-sandbagging-cb-new"
+    original: "mistralai/Mistral-7B-Instruct-v0.1"
+    description: "Mistral with sandbagging behavior (CB new variant)"
+
+  - name: "FelixHofstaetter/mistral-instruct-sandbagging-chat-template"
+    original: "mistralai/Mistral-7B-Instruct-v0.2"
+    description: "Mistral with sandbagging behavior (chat template)"
+
+  - name: "FelixHofstaetter/mistral-instruct-sandbagging-hft-cb-new"
+    original: "mistralai/Mistral-7B-Instruct-v0.3"
+    description: "Mistral with sandbagging behavior (HFT CB new)"
+
+  # Base models
+  - name: "HuggingFaceTB/SmolLM-135M-Instruct"
+    original: "HuggingFaceTB/SmolLM-135M"
+    description: "Small instruction-tuned language model for testing"
+    max_new_tokens: 50  # Override default
+
+  # Original base models (for comparison)
+  - name: "meta-llama/Llama-2-7b"
+    original: "meta-llama/Llama-2-7b"
+    description: "Original Llama-2 7B base model"
+
+  - name: "meta-llama/Llama-2-7b-chat-hf"
+    original: "meta-llama/Llama-2-7b-chat-hf"
+    description: "Original Llama-2 7B chat model"
+
+  - name: "mistralai/Mistral-7B-Instruct-v0.3"
+    original: "mistralai/Mistral-7B-Instruct-v0.3"
+    description: "Original Mistral 7B instruction model v0.3"
+
+  - name: "HuggingFaceH4/zephyr-7b-beta"
+    original: "HuggingFaceH4/zephyr-7b-beta"
+    description: "Original Zephyr 7B beta model"
+
+# Model categories for easy reference
+categories:
+  red_team_resistant:
+    - "GraySwanAI/Llama-3-8B-Instruct-RR"
+    - "GraySwanAI/Mistral-7B-Instruct-RR"
+  
+  trojaned:
+    - "ethz-spylab/poisoned_generation_trojan1"
+    - "ethz-spylab/poisoned_generation_trojan2"
+    - "ethz-spylab/poisoned_generation_trojan3"
+    - "ethz-spylab/poisoned_generation_trojan4"
+    - "ethz-spylab/poisoned_generation_trojan5"
+  
+  unlearned:
+    - "LLM-LAT/zephyr7b-beta-rmu-lat-unlearn-wmdp-bio-cyber"
+    - "LLM-LAT/llama2-7b-chat-lat-unlearn-harry-potter-normal"
+    - "LLM-LAT/llama2-7b-chat-lat-unlearn-harry-potter-stronger-unlearning"
+  
+  sleeper_agent:
+    - "Cadenza-Labs/dolphin-llama3-8B-sleeper-agent-standard-lora"
+  
+  sandbagging:
+    - "FelixHofstaetter/mistral-7b-sandbagging-new"
+    - "FelixHofstaetter/mistral-7b-sandbagging-cb-new"
+    - "FelixHofstaetter/mistral-instruct-sandbagging-chat-template"
+    - "FelixHofstaetter/mistral-instruct-sandbagging-hft-cb-new"
+  
+  base_models:
+    - "meta-llama/Llama-2-7b"
+    - "meta-llama/Llama-2-7b-chat-hf"
+    - "mistralai/Mistral-7B-Instruct-v0.3"
+    - "HuggingFaceH4/zephyr-7b-beta"
+    - "HuggingFaceTB/SmolLM-135M-Instruct"

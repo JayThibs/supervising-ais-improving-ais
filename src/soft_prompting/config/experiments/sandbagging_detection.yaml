@@ -1,0 +1,25 @@
+name: "sandbagging_detection"
+description: "Detect sandbagging behavior in models"
+output_dir: "outputs/sandbagging"
+
+model_pairs:
+  - model_1: "FelixHofstaetter/mistral-7b-sandbagging-new"
+    model_2: "mistralai/Mistral-7B-Instruct-v0.3"
+    
+  - model_1: "FelixHofstaetter/mistral-7b-sandbagging-cb-new" 
+    model_2: "mistralai/Mistral-7B-Instruct-v0.1"
+
+data:
+  categories:
+    - "advanced-ai-risk"
+    - "persona/ethics"
+  max_texts_per_category: 2000
+
+training:
+  num_epochs: 15
+  batch_size: 8
+  learning_rate: 2e-4
+
+generation:
+  temperature: 0.9
+  num_generations_per_prompt: 20

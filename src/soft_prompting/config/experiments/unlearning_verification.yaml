@@ -1,0 +1,23 @@
+name: "unlearning_verification"
+description: "Verify knowledge unlearning in models"
+output_dir: "outputs/unlearning"
+
+model_pairs:
+  - model_1: "LLM-LAT/llama2-7b-chat-lat-unlearn-harry-potter-normal"
+    model_2: "meta-llama/Llama-2-7b-chat-hf"
+    
+  - model_1: "LLM-LAT/llama2-7b-chat-lat-unlearn-harry-potter-stronger-unlearning"
+    model_2: "meta-llama/Llama-2-7b-chat-hf"
+
+data:
+  categories:
+    - "persona/ethics"
+  max_texts_per_category: 1000
+
+training:
+  num_epochs: 8
+  learning_rate: 5e-5
+
+generation:
+  temperature: 0.7
+  num_generations_per_prompt: 10

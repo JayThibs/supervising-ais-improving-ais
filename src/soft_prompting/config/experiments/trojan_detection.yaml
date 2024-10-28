@@ -1,0 +1,24 @@
+name: "trojan_detection"
+description: "Detect trojaned behavior in models"
+output_dir: "outputs/trojan"
+
+model_pairs:
+  - model_1: "ethz-spylab/poisoned_generation_trojan1"
+    model_2: "meta-llama/Llama-2-7b"
+    
+  - model_1: "ethz-spylab/poisoned_generation_trojan2"
+    model_2: "meta-llama/Llama-2-7b"
+
+data:
+  categories:
+    - "persona"
+    - "sycophancy"
+  max_texts_per_category: 1500
+
+training:
+  num_epochs: 12
+  batch_size: 6
+
+generation:
+  temperature: 0.8
+  num_generations_per_prompt: 15

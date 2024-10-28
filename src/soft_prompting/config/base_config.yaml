@@ -1,0 +1,42 @@
+# Base configuration defaults
+defaults:
+  # Model defaults
+  model:
+    torch_dtype: "float16"
+    load_in_8bit: false
+    device: "cuda"  # Options: "cuda", "cpu", "mps"
+    
+  # Training defaults  
+  training:
+    num_soft_prompt_tokens: 8
+    learning_rate: 1e-4
+    batch_size: 4
+    gradient_accumulation_steps: 2
+    num_epochs: 10
+    max_grad_norm: 1.0
+    warmup_steps: 100
+    seed: 42
+    mixed_precision: true
+    gradient_checkpointing: false
+    early_stopping_patience: 3
+    logging_steps: 10
+    eval_steps: 100
+    save_steps: 500
+    max_length: 512
+
+  # Generation defaults
+  generation:
+    max_length: 128
+    num_generations_per_prompt: 10
+    temperature: 0.7
+    top_p: 1.0
+    top_k: 50
+    do_sample: true
+    num_beams: 1
+
+  # Data processing defaults
+  data:
+    train_split: 0.9
+    min_text_length: 10
+    max_text_length: 150
+    max_texts_per_category: 1000
