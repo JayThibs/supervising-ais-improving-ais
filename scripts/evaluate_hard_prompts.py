@@ -7,6 +7,7 @@ import yaml
 from src.soft_prompting.models.model_manager import ModelPairManager
 from src.soft_prompting.metrics.divergence_metrics import DivergenceMetrics
 from src.soft_prompting.analysis.divergence_analyzer import DivergenceAnalyzer
+from src.soft_prompting.utils.device_utils import get_device
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -46,12 +47,13 @@ def main():
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    # Load models
+    # Load models using device_utils
     logger.info("Loading models...")
+    device = get_device()  # Will prioritize CUDA
     model_manager = ModelPairManager(
-        device="cuda",
-        torch_dtype=torch.float16,
-        load_in_8bit=config.get("load_in_8bit", False)
+        device=device,
+        torch_dtype=torch.float16 if device == 'cuda' else torch.float32,
+        load_in_8bit=config.get("load_in_8bit", False) and device == 'cuda'
     )
     
     # Load model pairs

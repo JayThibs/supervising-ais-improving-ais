@@ -51,15 +51,14 @@ class ExperimentConfig:
     """Master configuration for experiments."""
     name: str
     output_dir: Path
-    model_1_name: str
-    model_2_name: str
+    model_pairs: List[Dict[str, str]]
     training: TrainingConfig
     generation: GenerationConfig
     data: DataConfig
     metrics: Dict = field(default_factory=dict)
-    torch_dtype: str = "float16"
+    torch_dtype: str = "auto"
     load_in_8bit: bool = False
-    device: str = "cuda"
+    device: str = "auto"
     
     @classmethod
     def from_dict(cls, config_dict: Dict) -> "ExperimentConfig":
@@ -67,13 +66,12 @@ class ExperimentConfig:
         return cls(
             name=config_dict["name"],
             output_dir=Path(config_dict["output_dir"]),
-            model_1_name=config_dict["model_1_name"],
-            model_2_name=config_dict["model_2_name"],
+            model_pairs=config_dict["model_pairs"],
             training=TrainingConfig(**config_dict["training"]),
             generation=GenerationConfig(**config_dict["generation"]),
             data=DataConfig(**config_dict["data"]),
             metrics=config_dict.get("metrics", {}),
-            torch_dtype=config_dict.get("torch_dtype", "float16"),
+            torch_dtype=config_dict.get("torch_dtype", "auto"),
             load_in_8bit=config_dict.get("load_in_8bit", False),
-            device=config_dict.get("device", "cuda")
+            device=config_dict.get("device", "auto")
         )

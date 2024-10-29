@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Dict, Optional
 import logging
 import json
+import yaml
 
 from ..config.configs import ExperimentConfig
 from ..models.model_manager import ModelPairManager
@@ -30,6 +31,48 @@ class ExperimentRunner:
             test_mode=test_mode
         )
         
+    @classmethod
+    def setup(
+        cls,
+        experiment_name: str = "intervention_comparison",
+        output_dir: Optional[str] = None,
+        test_mode: bool = False,
+    ) -> "ExperimentRunner":
+        """
+        Setup an experiment with configuration.
+        
+        Args:
+            experiment_name: Name of experiment config file (without .yaml)
+            output_dir: Directory to save outputs. If None, uses default from config
+            test_mode: If True, uses small test models
+        
+        Returns:
+            ExperimentRunner instance ready to run
+        """
+        # Load experiment config
+        config_path = Path(__file__).parents[1] / "config" / "experiments" / f"{experiment_name}.yaml"
+        
+        if not config_path.exists():
+            raise ValueError(f"Experiment config not found: {config_path}")
+        
+        with open(config_path) as f:
+            config_dict = yaml.safe_load(f)
+        
+        # Setup output directory
+        if output_dir:
+            output_path = Path(output_dir)
+            output_path.mkdir(parents=True, exist_ok=True)
+            config_dict["output_dir"] = str(output_path)
+        
+        # Create experiment config
+        config = ExperimentConfig.from_dict({
+            "name": f"{experiment_name}_{'test' if test_mode else 'full'}",
+            **config_dict,
+        })
+        
+        # Create and return runner instance
+        return cls(config=config, test_mode=test_mode)
+        
     def run(self, model_pair_index: int = 0) -> Dict:
         """Run the experiment end-to-end."""
         # Load models
@@ -50,13 +93,12 @@ class ExperimentRunner:
         results = trainer.train()
         
         # Save results
-        model_pair = self.model_manager.get_model_pair(model_pair_index)
         results_path = self.output_dir / f"results_pair_{model_pair_index}.json"
         
         # Add model pair info to results
         results["model_pair"] = {
-            "model_1": model_pair[0],
-            "model_2": model_pair[1]
+            "model_1": model_1.name,
+            "model_2": model_2.name
         }
         
         with open(results_path, 'w') as f:

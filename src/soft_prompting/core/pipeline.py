@@ -23,7 +23,8 @@ class DivergencePipeline:
         self,
         config: ExperimentConfig,
         use_wandb: bool = True,
-        test_mode: bool = False
+        test_mode: bool = False,
+        model_pair_index: int = 0
     ):
         print("Initializing DivergencePipeline...")
         self.config = config
@@ -42,11 +43,16 @@ class DivergencePipeline:
         self.device = get_device(config.device)
         config.device = self.device  # Update config to match
             
+        print(f"Using device: {self.device}")
+        
+        # Get the specific model pair
+        self.model_pair = config.model_pairs[model_pair_index]
+        
         # Initialize components
         print("Setting up ModelPairManager...")
         self.model_manager = ModelPairManager(
-            model_1_name=config.model_1_name,
-            model_2_name=config.model_2_name,
+            model_1_name=self.model_pair["model_1"],
+            model_2_name=self.model_pair["model_2"],
             device=self.device,
             torch_dtype=torch.float16 if config.torch_dtype == "float16" else torch.float32,
             load_in_8bit=config.load_in_8bit
@@ -103,7 +109,12 @@ class DivergencePipeline:
         # Load models
         print("\nStep 1: Loading models...")
         model_1, model_2, tokenizer = self.model_manager.load_model_pair()
-        print(f"Successfully loaded models: {self.config.model_1_name} and {self.config.model_2_name}")
+        
+        # Validate models
+        if not self.model_manager.validate_models(model_1, model_2, tokenizer):
+            raise RuntimeError("Model validation failed")
+            
+        print(f"Successfully loaded models: {self.model_pair['model_1']} and {self.model_pair['model_2']}")
         
         # Validate categories
         valid_categories = self.validate_categories()
@@ -206,28 +217,3 @@ class DivergencePipeline:
             print("Cleanup complete.")
         except Exception as e:
             logger.error(f"Error during cleanup: {e}")
-
-    def validate_models(self, model_1, model_2, tokenizer, device):
-        """Validate model functionality."""
-        print("\nRunning model validation checks...")
-        
-        # Check model devices
-        print(f"Model 1 device: {next(model_1.parameters()).device}")
-        print(f"Model 2 device: {next(model_2.parameters()).device}")
-        
-        # Check model sizes
-        m1_params = sum(p.numel() for p in model_1.parameters())
-        m2_params = sum(p.numel() for p in model_2.parameters())
-        print(f"Model 1 parameters: {m1_params:,}")
-        print(f"Model 2 parameters: {m2_params:,}")
-        
-        # Check tokenizer
-        test_text = "Testing tokenizer functionality."
-        tokens = tokenizer(test_text, return_tensors="pt")
-        print(f"Tokenizer output keys: {tokens.keys()}")
-        
-        # Test memory usage
-        if torch.cuda.is_available():
-            print(f"GPU memory allocated: {torch.cuda.memory_allocated()/1e9:.2f} GB")
-        
-        return True

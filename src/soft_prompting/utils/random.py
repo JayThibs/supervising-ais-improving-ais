@@ -3,13 +3,15 @@ import torch
 import numpy as np
 from typing import Optional
 
+from src.soft_prompting.utils.device_utils import get_device
+
 def set_seed(
     seed: int,
     deterministic: bool = True,
     benchmark: bool = False
 ) -> None:
     """
-    Set random seed for reproducibility across all libraries.
+    Set random seed for reproducibility.
     
     Args:
         seed: Integer seed for random number generation
@@ -25,9 +27,11 @@ def set_seed(
     np.random.seed(seed)
     torch.manual_seed(seed)
     
-    if torch.cuda.is_available():
+    device = get_device()
+    if device == 'cuda':
         torch.cuda.manual_seed_all(seed)
-        
-        # Set CUDA settings for reproducibility
         torch.backends.cudnn.deterministic = deterministic
         torch.backends.cudnn.benchmark = benchmark
+    elif device == 'mps':
+        # MPS-specific settings if needed
+        pass

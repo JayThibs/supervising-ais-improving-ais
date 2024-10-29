@@ -12,6 +12,7 @@ from ..config.configs import ExperimentConfig
 from ..models.soft_prompt import DivergenceSoftPrompt
 from ..metrics.divergence_metrics import DivergenceMetrics
 from ..utils.checkpointing import save_checkpoint, load_checkpoint
+from ..utils.device_utils import get_device
 
 logger = logging.getLogger(__name__)
 
@@ -25,18 +26,11 @@ class DivergenceTrainer:
         tokenizer: PreTrainedTokenizer,
         config: ExperimentConfig
     ):
-        self.model_1 = model_1
-        self.model_2 = model_2
+        self.device = get_device(config.device if config.device != "auto" else None)
+        self.model_1 = model_1.to(self.device)
+        self.model_2 = model_2.to(self.device)
         self.tokenizer = tokenizer
         self.config = config
-        
-        # Setup device with MPS support
-        if config.training.device == "mps" and torch.backends.mps.is_available():
-            self.device = torch.device("mps")
-        else:
-            self.device = torch.device(config.training.device)
-        self.model_1.to(self.device)
-        self.model_2.to(self.device)
         
         # Initialize soft prompt
         self.soft_prompt = DivergenceSoftPrompt(

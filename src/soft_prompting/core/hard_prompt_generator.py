@@ -7,6 +7,7 @@ from transformers import PreTrainedModel, PreTrainedTokenizer
 from ..models.soft_prompt import DivergenceSoftPrompt
 from ..metrics.divergence_metrics import DivergenceMetrics
 from ..config.configs import GenerationConfig
+from ..utils.device_utils import get_device
 
 logger = logging.getLogger(__name__)
 
@@ -19,13 +20,13 @@ class HardPromptGenerator:
         model_2: PreTrainedModel,
         tokenizer: PreTrainedTokenizer,
         metrics: DivergenceMetrics,
-        device: str = "cuda"
+        device: str = None
     ):
-        self.model_1 = model_1
-        self.model_2 = model_2
+        self.device = get_device(device)
+        self.model_1 = model_1.to(self.device)
+        self.model_2 = model_2.to(self.device)
         self.tokenizer = tokenizer
         self.metrics = metrics
-        self.device = device
         
     def load_soft_prompt(self, checkpoint_path: Path) -> DivergenceSoftPrompt:
         """Load a trained soft prompt from checkpoint."""

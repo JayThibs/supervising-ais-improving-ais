@@ -5,6 +5,8 @@ import logging
 import json
 from datetime import datetime
 
+from ..utils.device_utils import get_device
+
 logger = logging.getLogger(__name__)
 
 def save_checkpoint(
@@ -56,8 +58,9 @@ def load_checkpoint(path: Path) -> Dict:
     if not path.exists():
         raise FileNotFoundError(f"Checkpoint not found: {path}")
         
-    checkpoint = torch.load(path, map_location='cpu')
-    logger.info(f"Loaded checkpoint from {path}")
+    device = get_device()  # Use device_utils
+    checkpoint = torch.load(path, map_location=device)
+    logger.info(f"Loaded checkpoint from {path} to {device}")
     
     return checkpoint
 
