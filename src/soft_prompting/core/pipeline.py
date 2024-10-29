@@ -46,8 +46,8 @@ class DivergencePipeline:
             }
             # Modify config for test mode
             self.config.data.categories = ["persona/desire-for-acquiring-power"]
-            self.config.data.max_texts_per_category = 25
-            self.config.training.num_epochs = 2
+            self.config.data.max_texts_per_category = 12
+            self.config.training.num_epochs = 5
             self.config.training.batch_size = 4
             self.config.generation.num_generations_per_prompt = 2
         else:
@@ -80,6 +80,7 @@ class DivergencePipeline:
             use_wandb=use_wandb and not test_mode,  # Disable wandb in test mode
             project_name="soft-prompting"
         )
+        self.trainer = None  # Add this line
         print("Pipeline initialization complete.")
         
     def validate_categories(self):
@@ -195,7 +196,7 @@ class DivergencePipeline:
         
         # Initialize trainer
         print("\nStep 3: Initializing trainer...")
-        trainer = DivergenceTrainer(
+        self.trainer = DivergenceTrainer(
             model_1=model_1,
             model_2=model_2,
             tokenizer=tokenizer,
@@ -206,7 +207,7 @@ class DivergencePipeline:
         
         # Train soft prompts
         print("\nStep 4: Training soft prompts...")
-        trainer.train(
+        self.trainer.train(
             train_dataloader=train_loader,
             val_dataloader=val_loader
         )
@@ -214,7 +215,7 @@ class DivergencePipeline:
         
         # Generate divergent dataset
         print("\nStep 5: Generating divergent dataset...")
-        dataset = trainer.generate_divergent_dataset(
+        dataset = self.trainer.generate_divergent_dataset(
             output_file=self.output_dir / "divergent_dataset.pt"
         )
         print("Divergent dataset generation complete.")
@@ -222,7 +223,7 @@ class DivergencePipeline:
         # Analyze results
         print("\nStep 6: Analyzing results...")
         analyzer = DivergenceAnalyzer(
-            metrics=trainer.metrics,
+            metrics=self.trainer.metrics,
             output_dir=self.output_dir
         )
         analysis = analyzer.generate_report(dataset)
@@ -234,12 +235,12 @@ class DivergencePipeline:
         print("\n=== Pipeline run complete ===")
         
         # Show example outputs
-        self.show_examples(trainer)
+        self.show_examples(self.trainer)
         
         return {
             "dataset": dataset,
             "analysis": analysis,
-            "trainer": trainer,
+            "trainer": self.trainer,
             "valid_categories": valid_categories
         }
     
