@@ -3,6 +3,7 @@
 from dataclasses import dataclass, field
 from typing import Optional, List, Dict
 from pathlib import Path
+import yaml
 
 @dataclass
 class TrainingConfig:
@@ -63,15 +64,33 @@ class ExperimentConfig:
     @classmethod
     def from_dict(cls, config_dict: Dict) -> "ExperimentConfig":
         """Create config from dictionary."""
+        # Load base config defaults
+        base_config_path = Path(__file__).parent / "base_config.yaml"
+        with open(base_config_path) as f:
+            base_config = yaml.safe_load(f)["defaults"]
+        
+        # Merge base config with experiment config
+        training_config = {**base_config["training"], **config_dict.get("training", {})}
+        generation_config = {**base_config["generation"], **config_dict.get("generation", {})}
+        data_config = {**base_config["data"], **config_dict.get("data", {})}
+        
+        # Ensure numeric types
+        training_config = {k: int(v) if isinstance(v, str) and k not in ["learning_rate", "max_grad_norm"] else v 
+                          for k, v in training_config.items()}
+        generation_config = {k: int(v) if isinstance(v, str) and k not in ["temperature", "top_p"] else v 
+                           for k, v in generation_config.items()}
+        data_config = {k: int(v) if isinstance(v, str) and k not in ["train_split"] else v 
+                      for k, v in data_config.items()}
+        
         return cls(
             name=config_dict["name"],
             output_dir=Path(config_dict["output_dir"]),
             model_pairs=config_dict["model_pairs"],
-            training=TrainingConfig(**config_dict["training"]),
-            generation=GenerationConfig(**config_dict["generation"]),
-            data=DataConfig(**config_dict["data"]),
+            training=TrainingConfig(**training_config),
+            generation=GenerationConfig(**generation_config),
+            data=DataConfig(**data_config),
             metrics=config_dict.get("metrics", {}),
-            torch_dtype=config_dict.get("torch_dtype", "auto"),
-            load_in_8bit=config_dict.get("load_in_8bit", False),
-            device=config_dict.get("device", "auto")
+            torch_dtype=config_dict.get("torch_dtype", base_config["model"]["torch_dtype"]),
+            load_in_8bit=config_dict.get("load_in_8bit", base_config["model"]["load_in_8bit"]),
+            device=config_dict.get("device", base_config["model"]["device"])
         )
