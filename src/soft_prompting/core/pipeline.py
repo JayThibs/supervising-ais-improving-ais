@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 import torch
 from torch.utils.data import DataLoader
+import os
 
 from .experiment import ExperimentConfig
 from ..models.model_manager import ModelPairManager
@@ -13,6 +14,8 @@ from ..data.dataloader import create_experiment_dataloaders
 from ..analysis.divergence_analyzer import DivergenceAnalyzer
 from ..tracking.experiment_tracker import ExperimentTracker
 from ..utils.device_utils import get_device
+
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +98,25 @@ class DivergencePipeline:
         
         return valid_categories
         
+    def show_examples(self, trainer, num_examples: int = 5):
+        """Show example outputs from both models using the trained soft prompt."""
+        print("\n=== Example Model Outputs with Trained Soft Prompt ===")
+        
+        # Get some validation texts
+        sample_texts = trainer.get_eval_texts()[:num_examples]
+        
+        for text in sample_texts:
+            print("\nInput:", text[:100], "...")
+            outputs = trainer.generate_with_soft_prompt(
+                text, 
+                max_length=100,
+                num_return_sequences=1
+            )
+            print("\nModel 1:", outputs["generation_1"][:200], "...")
+            print("\nModel 2:", outputs["generation_2"][:200], "...")
+            print("\nKL Divergence:", outputs["metrics"]["kl_divergence"])
+            print("-" * 80)
+
     def run(self, checkpoint_paths: Optional[List[Path]] = None, validate_only: bool = False):
         """
         Run full pipeline.
@@ -197,7 +219,10 @@ class DivergencePipeline:
         # Save results
         print("\nStep 7: Saving experiment summary...")
         self.tracker.save_experiment_summary()
-        print("\n=== Pipeline run complete ===\n")
+        print("\n=== Pipeline run complete ===")
+        
+        # Show example outputs
+        self.show_examples(trainer)
         
         return {
             "dataset": dataset,
