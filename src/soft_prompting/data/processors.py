@@ -87,66 +87,71 @@ class CategoryProcessor(BaseDataProcessor):
         min_length: Optional[int] = None,
         max_length: Optional[int] = None
     ) -> List[str]:
-        base_category = self.category.split('/')[0]
+        # Split the category path into components
+        category_parts = self.category.split('/')
+        base_category = category_parts[0]
         text_key = self.category_text_keys.get(base_category)
         
         if not text_key:
             raise ValueError(f"No processor found for category: {base_category}")
         
         processor = JSONLProcessor(text_key=text_key)
-        category_path = data_path / base_category
         
-        if not category_path.exists():
-            raise ValueError(f"Category path does not exist: {category_path}")
-        
-        # Handle specific file or subdirectory requests
-        if '/' in self.category:
-            specific_path = category_path / '/'.join(self.category.split('/')[1:])
-            if specific_path.is_file() and specific_path.suffix == '.jsonl':
-                # Single JSONL file
-                logger.info(f"Processing specific JSONL file: {specific_path}")
-                return processor.load_texts(
-                    data_path=specific_path,
-                    max_texts=max_texts,
-                    min_length=min_length,
-                    max_length=max_length
-                )
-            elif specific_path.is_dir():
-                # Specific subdirectory
-                logger.info(f"Processing specific subdirectory: {specific_path}")
-                jsonl_files = glob.glob(str(specific_path / "**" / "*.jsonl"), recursive=True)
-            else:
-                raise ValueError(f"Invalid path specified: {specific_path}")
-        else:
-            # Process entire category
-            logger.info(f"Processing entire category: {base_category}")
-            jsonl_files = glob.glob(str(category_path / "**" / "*.jsonl"), recursive=True)
-        
-        if not jsonl_files:
-            logger.warning(f"No JSONL files found in {self.category}")
-            return []
-            
-        logger.info(f"Found {len(jsonl_files)} JSONL files")
+        # Search through all eval directories
+        eval_dirs = [d for d in data_path.iterdir() if d.is_dir()]
+        logger.info(f"Found eval directories: {[d.name for d in eval_dirs]}")
         
         all_texts = []
-        for jsonl_path in jsonl_files:
-            try:
-                file_texts = processor.load_texts(
-                    data_path=Path(jsonl_path),
-                    max_texts=None,  # Don't limit individual files
-                    min_length=min_length,
-                    max_length=max_length
-                )
-                all_texts.extend(file_texts)
-                logger.info(f"Loaded {len(file_texts)} texts from {jsonl_path}")
-            except Exception as e:
-                logger.warning(f"Error processing {jsonl_path}: {str(e)}")
-                continue
+        for eval_dir in eval_dirs:
+            # Construct the full path for this eval directory
+            full_path = eval_dir
+            for part in category_parts:
+                full_path = full_path / part
+            
+            # Handle JSONL file
+            if full_path.with_suffix('.jsonl').exists():
+                jsonl_path = full_path.with_suffix('.jsonl')
+                logger.info(f"Processing JSONL file: {jsonl_path}")
+                try:
+                    texts = processor.load_texts(
+                        data_path=jsonl_path,
+                        max_texts=None,  # Don't limit individual files
+                        min_length=min_length,
+                        max_length=max_length
+                    )
+                    all_texts.extend(texts)
+                    logger.info(f"Loaded {len(texts)} texts from {jsonl_path}")
+                except Exception as e:
+                    logger.warning(f"Error processing {jsonl_path}: {str(e)}")
+                    continue
+            
+            # Handle directory (if path points to a directory)
+            elif full_path.is_dir():
+                logger.info(f"Processing directory: {full_path}")
+                jsonl_files = list(full_path.rglob("*.jsonl"))
+                
+                for jsonl_path in jsonl_files:
+                    try:
+                        texts = processor.load_texts(
+                            data_path=jsonl_path,
+                            max_texts=None,
+                            min_length=min_length,
+                            max_length=max_length
+                        )
+                        all_texts.extend(texts)
+                        logger.info(f"Loaded {len(texts)} texts from {jsonl_path}")
+                    except Exception as e:
+                        logger.warning(f"Error processing {jsonl_path}: {str(e)}")
+                        continue
+        
+        if not all_texts:
+            logger.warning(f"No texts found for category {self.category} in any eval directory")
+            return []
         
         # Apply max_texts limit to combined texts
         if max_texts and len(all_texts) > max_texts:
             all_texts = all_texts[:max_texts]
-        
+            
         logger.info(f"Total texts loaded for {self.category}: {len(all_texts)}")
         return all_texts
 
