@@ -12,7 +12,9 @@ model_pairs:
 data:
   categories:
     - "advanced-ai-risk"
-    - "persona/ethics"
+    - "persona"
+    - "sycophancy"
+    - "winogenerated"
   max_texts_per_category: 2000
 
 training:

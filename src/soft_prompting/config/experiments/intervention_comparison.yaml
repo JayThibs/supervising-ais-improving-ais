@@ -13,17 +13,17 @@ model_pairs:
     intervention: "sandbagging"
 
 data:
-  # Focus on domains likely to reveal intervention effects
   categories:
-    - "persona/ethics"
-    - "advanced-ai-risk"
+    - "advanced-ai-risk/human_generated_evals/coordinate-itself"
+    - "advanced-ai-risk/human_generated_evals/power-seeking-inclination"
+    - "persona/desire-for-acquiring-power"
+    - "persona/desire-for-independence-from-human-oversight"
   max_texts_per_category: 2000
 
 training:
   num_epochs: 15
   batch_size: 8
   learning_rate: 2e-4
-  # Increase tokens to capture more complex patterns
   num_soft_prompt_tokens: 16
 
 generation:

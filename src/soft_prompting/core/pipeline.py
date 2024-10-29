@@ -22,12 +22,22 @@ class DivergencePipeline:
     def __init__(
         self,
         config: ExperimentConfig,
-        use_wandb: bool = True
+        use_wandb: bool = True,
+        test_mode: bool = False
     ):
         print("Initializing DivergencePipeline...")
         self.config = config
         self.output_dir = config.output_dir
+        self.test_mode = test_mode
         
+        if test_mode:
+            print("Running in TEST MODE - using reduced dataset and iterations")
+            # Modify config for test mode
+            self.config.data.max_texts_per_category = min(10, self.config.data.max_texts_per_category)
+            self.config.training.num_epochs = min(2, self.config.training.num_epochs)
+            self.config.training.batch_size = min(4, self.config.training.batch_size)
+            self.config.generation.num_generations_per_prompt = min(2, self.config.generation.num_generations_per_prompt)
+            
         # Set device using utility function
         self.device = get_device(config.device)
         config.device = self.device  # Update config to match
@@ -37,7 +47,7 @@ class DivergencePipeline:
         self.model_manager = ModelPairManager(
             model_1_name=config.model_1_name,
             model_2_name=config.model_2_name,
-            device=self.device,  # Pass consistent device
+            device=self.device,
             torch_dtype=torch.float16 if config.torch_dtype == "float16" else torch.float32,
             load_in_8bit=config.load_in_8bit
         )
@@ -46,24 +56,63 @@ class DivergencePipeline:
         print("Setting up experiment tracking...")
         self.tracker = ExperimentTracker(
             config=config,
-            use_wandb=use_wandb,
+            use_wandb=use_wandb and not test_mode,  # Disable wandb in test mode
             project_name="soft-prompting"
         )
         print("Pipeline initialization complete.")
         
-    def run(self, checkpoint_paths: Optional[List[Path]] = None):
+    def validate_categories(self):
+        """Validate all categories in config and return available ones."""
+        valid_categories = []
+        invalid_categories = []
+        
+        print("\nValidating dataset categories...")
+        for category in self.config.data.categories:
+            try:
+                # Create temporary dataloader with minimal samples to test category
+                temp_loader, _ = create_experiment_dataloaders(
+                    config=self.config,
+                    tokenizer=self.model_manager.tokenizer,
+                    category=category,
+                    max_texts=2 if self.test_mode else 10
+                )
+                valid_categories.append(category)
+                print(f"✓ Category validated: {category}")
+            except Exception as e:
+                invalid_categories.append((category, str(e)))
+                print(f"✗ Category failed: {category} - {str(e)}")
+        
+        if invalid_categories:
+            print("\nWarning: Some categories were invalid:")
+            for cat, error in invalid_categories:
+                print(f"  - {cat}: {error}")
+        
+        return valid_categories
+        
+    def run(self, checkpoint_paths: Optional[List[Path]] = None, validate_only: bool = False):
         """
         Run full pipeline.
         
         Args:
             checkpoint_paths: Optional list of soft prompt checkpoint paths to use
-                            If None, will train new soft prompts
+            validate_only: If True, only validate categories without running the full pipeline
         """
         print("\n=== Starting pipeline run ===")
+        print(f"Mode: {'TEST' if self.test_mode else 'FULL'}")
+        
         # Load models
         print("\nStep 1: Loading models...")
         model_1, model_2, tokenizer = self.model_manager.load_model_pair()
         print(f"Successfully loaded models: {self.config.model_1_name} and {self.config.model_2_name}")
+        
+        # Validate categories
+        valid_categories = self.validate_categories()
+        if not valid_categories:
+            raise ValueError("No valid categories found in configuration")
+        
+        if validate_only:
+            print("\nValidation complete. Exiting as validate_only=True")
+            return {"valid_categories": valid_categories}
         
         results = {}
         
@@ -142,7 +191,8 @@ class DivergencePipeline:
         return {
             "dataset": dataset,
             "analysis": analysis,
-            "trainer": trainer
+            "trainer": trainer,
+            "valid_categories": valid_categories
         }
     
     def cleanup(self):
@@ -156,3 +206,28 @@ class DivergencePipeline:
             print("Cleanup complete.")
         except Exception as e:
             logger.error(f"Error during cleanup: {e}")
+
+    def validate_models(self, model_1, model_2, tokenizer, device):
+        """Validate model functionality."""
+        print("\nRunning model validation checks...")
+        
+        # Check model devices
+        print(f"Model 1 device: {next(model_1.parameters()).device}")
+        print(f"Model 2 device: {next(model_2.parameters()).device}")
+        
+        # Check model sizes
+        m1_params = sum(p.numel() for p in model_1.parameters())
+        m2_params = sum(p.numel() for p in model_2.parameters())
+        print(f"Model 1 parameters: {m1_params:,}")
+        print(f"Model 2 parameters: {m2_params:,}")
+        
+        # Check tokenizer
+        test_text = "Testing tokenizer functionality."
+        tokens = tokenizer(test_text, return_tensors="pt")
+        print(f"Tokenizer output keys: {tokens.keys()}")
+        
+        # Test memory usage
+        if torch.cuda.is_available():
+            print(f"GPU memory allocated: {torch.cuda.memory_allocated()/1e9:.2f} GB")
+        
+        return True
