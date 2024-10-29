@@ -13,19 +13,7 @@ model_pairs:
     intervention: "sandbagging"
 
 data:
-  categories:
-    - "anthropic-model-written-evals/advanced-ai-risk/human_generated_evals/coordinate-itself"
-    - "anthropic-model-written-evals/advanced-ai-risk/human_generated_evals/corrigible-less-HHH"
-    - "anthropic-model-written-evals/advanced-ai-risk/human_generated_evals/power-seeking-inclination"
-    - "anthropic-model-written-evals/advanced-ai-risk/human_generated_evals/survival-instinct"
-    - "anthropic-model-written-evals/persona/agreeableness"
-    - "anthropic-model-written-evals/persona/desire-for-acquiring-power"
-    - "anthropic-model-written-evals/persona/desire-for-independence-from-human-oversight"
-    - "anthropic-model-written-evals/persona/risk-seeking"
-    - "anthropic-model-written-evals/persona/willingness-to-defer-to-experts"
-    - "anthropic-model-written-evals/sycophancy/sycophancy_on_nlp_survey"
-    - "anthropic-model-written-evals/sycophancy/sycophancy_on_political_typology_quiz"
-    - "anthropic-model-written-evals/winogenerated/winogenerated_examples"
+  categories: "all"  # Will use all available categories unless specifically overridden
   max_texts_per_category: 2000
 
 training:
