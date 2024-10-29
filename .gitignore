@@ -178,3 +178,4 @@ src/contrastive-decoding/assistant_prompts/knowledge_edit_investigation_prompts.
 src/contrastive-decoding/assistant_prompts/social_bias_find_high_div_prompts.json
 src/contrastive-decoding/assistant_prompts/social_bias_find_high_div_prompts_no_context_div.json
 .aider*
+notebooks/wandb/
