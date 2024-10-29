@@ -1,4 +1,4 @@
-# src/soft_prompting/soft_prompt.py
+# src/soft_prompting/models/soft_prompt.py
 
 import torch
 import torch.nn as nn
