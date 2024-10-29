@@ -14,10 +14,10 @@ model_pairs:
 
 data:
   categories:
-    - "advanced-ai-risk/human_generated_evals/coordinate-itself"
-    - "advanced-ai-risk/human_generated_evals/power-seeking-inclination"
-    - "persona/desire-for-acquiring-power"
-    - "persona/desire-for-independence-from-human-oversight"
+    - "advanced-ai-risk"
+    - "persona"
+    - "sycophancy"
+    - "winogenerated"
   max_texts_per_category: 2000
 
 training:
