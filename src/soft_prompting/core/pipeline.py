@@ -36,12 +36,23 @@ class DivergencePipeline:
         
         if test_mode:
             print("Running in TEST MODE - using reduced dataset and iterations")
+            # Save original values
+            self._original_config = {
+                'categories': self.config.data.categories.copy(),
+                'max_texts': self.config.data.max_texts_per_category,
+                'epochs': self.config.training.num_epochs,
+                'batch_size': self.config.training.batch_size,
+                'generations': self.config.generation.num_generations_per_prompt
+            }
             # Modify config for test mode
             self.config.data.categories = ["persona/desire-for-acquiring-power"]
             self.config.data.max_texts_per_category = 25
             self.config.training.num_epochs = 2
             self.config.training.batch_size = 4
             self.config.generation.num_generations_per_prompt = 2
+        else:
+            print("Running in FULL MODE - using complete dataset")
+            self._original_config = None
             
         # Set device using utility function
         self.device = get_device(config.device)
