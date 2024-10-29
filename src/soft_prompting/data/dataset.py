@@ -11,11 +11,15 @@ class TextDataset(Dataset):
         texts: List[str],
         tokenizer: PreTrainedTokenizer,
         max_length: int,
+        padding: str = "max_length",
+        truncation: bool = True,
         return_tensors: str = "pt"
     ):
         self.texts = texts
         self.tokenizer = tokenizer
         self.max_length = max_length
+        self.padding = padding
+        self.truncation = truncation
         self.return_tensors = return_tensors
         
     def __len__(self) -> int:
@@ -24,18 +28,18 @@ class TextDataset(Dataset):
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
         text = self.texts[idx]
         
-        # Tokenize text
+        # Tokenize text with consistent padding
         encoded = self.tokenizer(
             text,
-            padding="max_length",
-            truncation=True,
+            padding=self.padding,
+            truncation=self.truncation,
             max_length=self.max_length,
             return_tensors=self.return_tensors
         )
         
-        # Remove batch dimension added by tokenizer
+        # Remove batch dimension and ensure proper shape
         return {
             "input_ids": encoded["input_ids"].squeeze(0),
             "attention_mask": encoded["attention_mask"].squeeze(0),
-            "text": text  # Keep original text for reference
+            "text": text
         }

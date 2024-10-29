@@ -1,4 +1,6 @@
 import os
+from pathlib import Path
+from collections import defaultdict
 from typing import Dict, Optional, Tuple
 import torch
 from torch.cuda.amp import autocast, GradScaler
@@ -7,11 +9,13 @@ from transformers import PreTrainedModel, PreTrainedTokenizer, get_linear_schedu
 from tqdm.auto import tqdm
 import logging
 from ..utils.random import set_seed
+import torch.nn.functional as F
 
 from ..config.configs import ExperimentConfig
 from ..models.soft_prompt import DivergenceSoftPrompt
 from ..metrics.divergence_metrics import DivergenceMetrics
 from ..utils.checkpointing import save_checkpoint, load_checkpoint
+from ..utils.device_utils import get_device
 
 logger = logging.getLogger(__name__)
 
@@ -25,26 +29,31 @@ class DivergenceTrainer:
         tokenizer: PreTrainedTokenizer,
         config: ExperimentConfig
     ):
-        self.model_1 = model_1
-        self.model_2 = model_2
+        self.device = get_device(config.device if config.device != "auto" else None)
+        self.model_1 = model_1.to(self.device)
+        self.model_2 = model_2.to(self.device)
         self.tokenizer = tokenizer
         self.config = config
         
-        # Setup device with MPS support
-        if config.training.device == "mps" and torch.backends.mps.is_available():
-            self.device = torch.device("mps")
-        else:
-            self.device = torch.device(config.training.device)
-        self.model_1.to(self.device)
-        self.model_2.to(self.device)
+        # Calculate effective sequence lengths
+        self.max_total_length = config.training.max_length
+        self.num_soft_tokens = config.training.num_soft_prompt_tokens
+        self.max_input_length = self.max_total_length - self.num_soft_tokens
+        
+        # Ensure output directory exists
+        self.output_dir = Path(config.output_dir)
+        self.output_dir.mkdir(parents=True, exist_ok=True)
         
         # Initialize soft prompt
         self.soft_prompt = DivergenceSoftPrompt(
-            num_tokens=config.training.num_soft_prompt_tokens,
+            num_tokens=self.num_soft_tokens,
             embedding_dim=model_1.config.hidden_size
         ).to(self.device)
         
-        # Setup optimizer and scheduler
+        # Initialize metrics computer
+        self.metrics_computer = DivergenceMetrics()
+        
+        # Initialize optimizer
         self.optimizer = torch.optim.AdamW(
             self.soft_prompt.parameters(),
             lr=config.training.learning_rate
@@ -63,49 +72,95 @@ class DivergenceTrainer:
         self.best_divergence = float("-inf")
         self.epochs_without_improvement = 0
         
-        # Add metrics computer
-        self.metrics_computer = DivergenceMetrics(tokenizer)
+        # Initialize early stopping parameters
+        self.early_stopping_patience = config.training.early_stopping_patience
+        self.early_stopping_threshold = config.training.early_stopping_threshold  # Minimum improvement required
         
     def training_step(
         self,
         batch: Dict[str, torch.Tensor]
     ) -> Tuple[torch.Tensor, Dict[str, float]]:
-        """Execute single training step with mixed precision."""
+        """Execute single training step."""
+        # Set model modes
         self.model_1.eval()
         self.model_2.eval()
         self.soft_prompt.train()
         
-        batch = {k: v.to(self.device) for k, v in batch.items()}
+        # Debug print initial state
+        print("\nStarting training step")
+        print(f"Soft prompt requires_grad: {self.soft_prompt.embeddings.requires_grad}")
         
-        with autocast(enabled=self.config.training.mixed_precision):
-            # Get input embeddings
-            input_embeds_1 = self.model_1.get_input_embeddings()(batch["input_ids"])
-            input_embeds_2 = self.model_2.get_input_embeddings()(batch["input_ids"])
-            
-            # Add soft prompt
-            input_embeds_1 = self.soft_prompt(input_embeds_1)
-            input_embeds_2 = self.soft_prompt(input_embeds_2)
-            
-            # Forward pass
-            with torch.no_grad():
-                outputs_1 = self.model_1(
-                    inputs_embeds=input_embeds_1,
-                    attention_mask=batch["attention_mask"]
-                )
-                outputs_2 = self.model_2(
-                    inputs_embeds=input_embeds_2,
-                    attention_mask=batch["attention_mask"]
-                )
-            
-            # Compute metrics
-            metrics = self.metrics_computer.compute_all_metrics(
-                {"logits": outputs_1.logits},
-                {"logits": outputs_2.logits},
-                batch
+        # Zero gradients
+        self.optimizer.zero_grad()
+        
+        # Move tensors to device and truncate
+        input_ids = batch["input_ids"][:, :self.max_input_length].to(self.device)
+        attention_mask = batch["attention_mask"][:, :self.max_input_length].to(self.device)
+        
+        # Create extended attention mask
+        batch_size = input_ids.shape[0]
+        soft_prompt_attention = torch.ones(batch_size, self.num_soft_tokens, device=self.device)
+        extended_attention_mask = torch.cat([soft_prompt_attention, attention_mask], dim=1)
+        
+        # Get base embeddings without gradient
+        with torch.no_grad():
+            base_embeds_1 = self.model_1.get_input_embeddings()(input_ids)
+            base_embeds_2 = self.model_2.get_input_embeddings()(input_ids)
+        
+        print(f"Base embeddings requires_grad: {base_embeds_1.requires_grad}")
+        
+        # Add trainable soft prompt
+        input_embeds_1 = self.soft_prompt(base_embeds_1)
+        input_embeds_2 = self.soft_prompt(base_embeds_2)
+        
+        print(f"Combined embeddings requires_grad: {input_embeds_1.requires_grad}")
+        print(f"Combined embeddings grad_fn: {input_embeds_1.grad_fn}")
+        
+        # Forward pass through frozen models
+        with torch.no_grad():
+            outputs_1 = self.model_1(
+                inputs_embeds=input_embeds_1,
+                attention_mask=extended_attention_mask
             )
-            
-            # Loss is negative KL divergence
-            loss = -metrics["kl_divergence"]
+            outputs_2 = self.model_2(
+                inputs_embeds=input_embeds_2,
+                attention_mask=extended_attention_mask
+            )
+        
+        # Enable gradients for loss computation
+        logits_1 = outputs_1.logits.detach().requires_grad_()
+        logits_2 = outputs_2.logits.detach().requires_grad_()
+        
+        print(f"Logits requires_grad: {logits_1.requires_grad}")
+        print(f"Logits grad_fn: {logits_1.grad_fn}")
+        
+        # Convert logits to probabilities
+        probs_1 = F.softmax(logits_1, dim=-1)
+        probs_2 = F.softmax(logits_2, dim=-1)
+        
+        print(f"Probabilities requires_grad: {probs_1.requires_grad}")
+        print(f"Probabilities grad_fn: {probs_1.grad_fn}")
+        
+        # Compute KL divergence
+        kl_div = torch.sum(probs_1 * (torch.log(probs_1 + 1e-10) - torch.log(probs_2 + 1e-10)), dim=-1)
+        print(f"KL div requires_grad: {kl_div.requires_grad}")
+        print(f"KL div grad_fn: {kl_div.grad_fn}")
+        
+        # Apply attention mask and average
+        masked_kl = kl_div * extended_attention_mask
+        loss = -masked_kl.sum() / (extended_attention_mask.sum() + 1e-10)
+        
+        print(f"Final loss requires_grad: {loss.requires_grad}")
+        print(f"Final loss grad_fn: {loss.grad_fn}")
+        
+        # Store metrics for logging
+        with torch.no_grad():
+            kl_value = -loss.item()  # The actual KL divergence (positive)
+            metrics = {
+                "kl_divergence": kl_value,  # Report the actual KL divergence
+                "optimization_loss": loss.item(),  # The negative value being minimized
+                "avg_kl_per_token": kl_value / extended_attention_mask.sum().item()  # Per-token KL
+            }
         
         return loss, metrics
     
@@ -113,92 +168,107 @@ class DivergenceTrainer:
         self,
         train_dataloader: torch.utils.data.DataLoader,
         val_dataloader: Optional[torch.utils.data.DataLoader] = None
-    ):
-        """Training loop with mixed precision and early stopping."""
+    ) -> Dict[str, float]:
+        """Train the model with early stopping."""
+        self.best_divergence = float('-inf')
+        self.epochs_without_improvement = 0
+        self.global_step = 0
+        
+        # Calculate actual steps per epoch
+        steps_per_epoch = len(train_dataloader)
+        total_steps = steps_per_epoch * self.config.training.num_epochs
+        
         # Setup scheduler
-        num_training_steps = len(train_dataloader) * self.config.training.num_epochs
         self.scheduler = get_linear_schedule_with_warmup(
             self.optimizer,
             num_warmup_steps=self.config.training.warmup_steps,
-            num_training_steps=num_training_steps
+            num_training_steps=total_steps
         )
         
-        for epoch in range(self.config.training.num_epochs):
-            self._train_epoch(train_dataloader, val_dataloader)
-            
-            # Early stopping check
-            if self.epochs_without_improvement >= self.config.training.early_stopping_patience:
-                logger.info("Early stopping triggered")
-                break
-                
-        # Load best model
-        self.load_checkpoint(self.config.output_dir / "best_model.pt")
-    
-    def _train_epoch(
-        self,
-        train_dataloader: torch.utils.data.DataLoader,
-        val_dataloader: Optional[torch.utils.data.DataLoader]
-    ):
-        """Train for one epoch."""
-        epoch_loss = 0
+        logger.info(f"Training with {len(train_dataloader.dataset)} examples")
+        logger.info(f"Batch size: {train_dataloader.batch_size}")
         
-        with tqdm(train_dataloader, desc=f"Training") as pbar:
-            for step, batch in enumerate(pbar):
-                # Training step
-                loss, metrics = self.training_step(batch)
-                
-                # Backward pass with gradient scaling
-                if self.scaler is not None:
-                    self.scaler.scale(loss).backward()
-                else:
+        for epoch in range(self.config.training.num_epochs):
+            self.soft_prompt.train()
+            epoch_loss = 0
+            
+            logger.info(f"\nEpoch {epoch+1}/{self.config.training.num_epochs}")
+            
+            with tqdm(train_dataloader, total=steps_per_epoch) as pbar:
+                for step, batch in enumerate(pbar):
+                    # Print sample of training text
+                    if step == 0:  # Print first batch of each epoch
+                        sample_text = self.tokenizer.decode(batch["input_ids"][0])
+                        logger.info(f"\nSample training text:\n{sample_text}\n")
+
+                    # Forward and backward pass
+                    loss, metrics = self.training_step(batch)
+                    
+                    print(f"\nBefore backward pass:")
+                    print(f"Loss requires_grad: {loss.requires_grad}")
+                    print(f"Loss grad_fn: {loss.grad_fn}")
+                    
+                    # Backward pass
                     loss.backward()
-                
-                epoch_loss += loss.item()
-                
-                # Update if gradient accumulation steps reached
-                if (step + 1) % self.config.training.gradient_accumulation_steps == 0:
-                    if self.scaler is not None:
-                        self.scaler.unscale_(self.optimizer)
-                        
-                    # Clip gradients
-                    clip_grad_norm_(
+
+                    # Gradient clipping
+                    torch.nn.utils.clip_grad_norm_(
                         self.soft_prompt.parameters(),
                         self.config.training.max_grad_norm
                     )
-                    
-                    # Optimizer step with gradient scaling
-                    if self.scaler is not None:
-                        self.scaler.step(self.optimizer)
-                        self.scaler.update()
-                    else:
-                        self.optimizer.step()
-                        
-                    self.scheduler.step()
+
+                    # Optimizer step
+                    self.optimizer.step()
                     self.optimizer.zero_grad()
-                    
+                    self.scheduler.step()
+
+                    # Update progress
                     self.global_step += 1
-                    
-                    # Logging
-                    if self.global_step % self.config.training.logging_steps == 0:
-                        metrics["loss"] = epoch_loss / (step + 1)
-                        pbar.set_postfix(metrics)
-                    
-                    # Validation
-                    if (val_dataloader is not None and 
-                        self.global_step % self.config.training.eval_steps == 0):
+                    epoch_loss += loss.item()
+
+                    # Update metrics for progress bar
+                    metrics.update({
+                        "epoch": epoch,
+                        "step": self.global_step,
+                        "steps_per_epoch": steps_per_epoch,
+                    })
+                    pbar.set_postfix(metrics)
+
+                    # Validation and early stopping check
+                    if val_dataloader is not None and self.global_step % self.config.training.eval_steps == 0:
                         val_metrics = self.evaluate(val_dataloader)
+                        current_divergence = val_metrics["kl_divergence"]
                         
-                        # Save best model
-                        if val_metrics["kl_divergence"] > self.best_divergence:
-                            self.best_divergence = val_metrics["kl_divergence"]
+                        logger.info(f"\nValidation metrics at step {self.global_step}:")
+                        logger.info(f"Current divergence: {current_divergence:.4f}")
+                        logger.info(f"Best divergence: {self.best_divergence:.4f}")
+                        
+                        # Check if improvement is significant
+                        if current_divergence > (self.best_divergence + self.early_stopping_threshold):
+                            self.best_divergence = current_divergence
                             self.epochs_without_improvement = 0
                             self.save_checkpoint("best_model.pt")
+                            logger.info(f"New best divergence: {current_divergence:.4f}")
                         else:
                             self.epochs_without_improvement += 1
-                    
-                    # Regular checkpoint
-                    if self.global_step % self.config.training.save_steps == 0:
-                        self.save_checkpoint(f"checkpoint-{self.global_step}.pt")
+                            logger.info(f"No improvement for {self.epochs_without_improvement} evaluations")
+                            
+                            # Early stopping check
+                            if self.epochs_without_improvement >= self.early_stopping_patience:
+                                logger.info("Early stopping triggered!")
+                                return {
+                                    "final_metrics": metrics,
+                                    "best_divergence": self.best_divergence,
+                                    "stopped_early": True,
+                                    "total_steps": self.global_step
+                                }
+
+        return {
+            "final_metrics": metrics,
+            "best_divergence": self.best_divergence,
+            "stopped_early": False,
+            "total_steps": self.global_step
+        }
     
     def evaluate(
         self,
@@ -209,18 +279,23 @@ class DivergenceTrainer:
         self.model_2.eval()
         self.soft_prompt.eval()
         
-        total_metrics = {}
+        total_metrics = defaultdict(float)
+        num_batches = len(eval_dataloader)
+        
+        logger.info(f"\nRunning evaluation on {len(eval_dataloader.dataset)} examples")
         
         with torch.no_grad():
             for batch in eval_dataloader:
-                _, metrics = self.training_step(batch)
-                for k, v in metrics.items():
-                    total_metrics[k] = total_metrics.get(k, 0) + v
+                _, batch_metrics = self.training_step(batch)
+                for k, v in batch_metrics.items():
+                    total_metrics[k] += v.item() if torch.is_tensor(v) else v
         
         # Average metrics
-        avg_metrics = {
-            k: v / len(eval_dataloader) for k, v in total_metrics.items()
-        }
+        avg_metrics = {k: v / num_batches for k, v in total_metrics.items()}
+        
+        logger.info("Evaluation metrics:")
+        for k, v in avg_metrics.items():
+            logger.info(f"{k}: {v:.4f}")
         
         return avg_metrics
     
@@ -248,3 +323,8 @@ class DivergenceTrainer:
             self.scaler.load_state_dict(checkpoint["scaler"])
         self.global_step = checkpoint["global_step"]
         self.best_divergence = checkpoint["best_divergence"]
+    
+    @property
+    def divergence_metrics(self):
+        """Access the metrics computer."""
+        return self.metrics_computer

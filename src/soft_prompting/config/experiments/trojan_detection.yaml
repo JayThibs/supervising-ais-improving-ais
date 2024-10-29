@@ -10,9 +10,7 @@ model_pairs:
     model_2: "meta-llama/Llama-2-7b"
 
 data:
-  categories:
-    - "persona"
-    - "sycophancy"
+  categories: "all"  # Will use all available categories unless specifically overridden
   max_texts_per_category: 1500
 
 training:

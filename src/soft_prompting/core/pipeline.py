@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 import torch
 from torch.utils.data import DataLoader
+import os
 
 from .experiment import ExperimentConfig
 from ..models.model_manager import ModelPairManager
@@ -14,6 +15,8 @@ from ..analysis.divergence_analyzer import DivergenceAnalyzer
 from ..tracking.experiment_tracker import ExperimentTracker
 from ..utils.device_utils import get_device
 
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 logger = logging.getLogger(__name__)
 
 class DivergencePipeline:
@@ -22,22 +25,50 @@ class DivergencePipeline:
     def __init__(
         self,
         config: ExperimentConfig,
-        use_wandb: bool = True
+        use_wandb: bool = True,
+        test_mode: bool = False,
+        model_pair_index: int = 0
     ):
         print("Initializing DivergencePipeline...")
         self.config = config
         self.output_dir = config.output_dir
+        self.test_mode = test_mode
         
+        if test_mode:
+            print("Running in TEST MODE - using reduced dataset and iterations")
+            # Save original values
+            self._original_config = {
+                'categories': self.config.data.categories.copy(),
+                'max_texts': self.config.data.max_texts_per_category,
+                'epochs': self.config.training.num_epochs,
+                'batch_size': self.config.training.batch_size,
+                'generations': self.config.generation.num_generations_per_prompt
+            }
+            # Modify config for test mode
+            self.config.data.categories = ["persona/desire-for-acquiring-power"]
+            self.config.data.max_texts_per_category = 12
+            self.config.training.num_epochs = 5
+            self.config.training.batch_size = 4
+            self.config.generation.num_generations_per_prompt = 2
+        else:
+            print("Running in FULL MODE - using complete dataset")
+            self._original_config = None
+            
         # Set device using utility function
         self.device = get_device(config.device)
         config.device = self.device  # Update config to match
             
+        print(f"Using device: {self.device}")
+        
+        # Get the specific model pair
+        self.model_pair = config.model_pairs[model_pair_index]
+        
         # Initialize components
         print("Setting up ModelPairManager...")
         self.model_manager = ModelPairManager(
-            model_1_name=config.model_1_name,
-            model_2_name=config.model_2_name,
-            device=self.device,  # Pass consistent device
+            model_1_name=self.model_pair["model_1"],
+            model_2_name=self.model_pair["model_2"],
+            device=self.device,
             torch_dtype=torch.float16 if config.torch_dtype == "float16" else torch.float32,
             load_in_8bit=config.load_in_8bit
         )
@@ -46,24 +77,88 @@ class DivergencePipeline:
         print("Setting up experiment tracking...")
         self.tracker = ExperimentTracker(
             config=config,
-            use_wandb=use_wandb,
+            use_wandb=use_wandb and not test_mode,  # Disable wandb in test mode
             project_name="soft-prompting"
         )
+        self.trainer = None  # Add this line
         print("Pipeline initialization complete.")
         
-    def run(self, checkpoint_paths: Optional[List[Path]] = None):
+    def validate_categories(self):
+        """Validate all categories in config and return available ones."""
+        valid_categories = []
+        invalid_categories = []
+        
+        print("\nValidating dataset categories...")
+        for category in self.config.data.categories:
+            try:
+                # Create temporary dataloader with minimal samples to test category
+                temp_loader, _ = create_experiment_dataloaders(
+                    config=self.config,
+                    tokenizer=self.model_manager.tokenizer,
+                    category=category,
+                    max_texts=2 if self.test_mode else 10
+                )
+                valid_categories.append(category)
+                print(f"✓ Category validated: {category}")
+            except Exception as e:
+                invalid_categories.append((category, str(e)))
+                print(f"✗ Category failed: {category} - {str(e)}")
+        
+        if invalid_categories:
+            print("\nWarning: Some categories were invalid:")
+            for cat, error in invalid_categories:
+                print(f"  - {cat}: {error}")
+        
+        return valid_categories
+        
+    def show_examples(self, trainer, num_examples: int = 5):
+        """Show example outputs from both models using the trained soft prompt."""
+        print("\n=== Example Model Outputs with Trained Soft Prompt ===")
+        
+        # Get some validation texts
+        sample_texts = trainer.get_eval_texts()[:num_examples]
+        
+        for text in sample_texts:
+            print("\nInput:", text[:100], "...")
+            outputs = trainer.generate_with_soft_prompt(
+                text, 
+                max_length=100,
+                num_return_sequences=1
+            )
+            print("\nModel 1:", outputs["generation_1"][:200], "...")
+            print("\nModel 2:", outputs["generation_2"][:200], "...")
+            print("\nKL Divergence:", outputs["metrics"]["kl_divergence"])
+            print("-" * 80)
+
+    def run(self, checkpoint_paths: Optional[List[Path]] = None, validate_only: bool = False):
         """
         Run full pipeline.
         
         Args:
             checkpoint_paths: Optional list of soft prompt checkpoint paths to use
-                            If None, will train new soft prompts
+            validate_only: If True, only validate categories without running the full pipeline
         """
         print("\n=== Starting pipeline run ===")
+        print(f"Mode: {'TEST' if self.test_mode else 'FULL'}")
+        
         # Load models
         print("\nStep 1: Loading models...")
         model_1, model_2, tokenizer = self.model_manager.load_model_pair()
-        print(f"Successfully loaded models: {self.config.model_1_name} and {self.config.model_2_name}")
+        
+        # Validate models
+        if not self.model_manager.validate_models(model_1, model_2, tokenizer):
+            raise RuntimeError("Model validation failed")
+            
+        print(f"Successfully loaded models: {self.model_pair['model_1']} and {self.model_pair['model_2']}")
+        
+        # Validate categories
+        valid_categories = self.validate_categories()
+        if not valid_categories:
+            raise ValueError("No valid categories found in configuration")
+        
+        if validate_only:
+            print("\nValidation complete. Exiting as validate_only=True")
+            return {"valid_categories": valid_categories}
         
         results = {}
         
@@ -101,7 +196,7 @@ class DivergencePipeline:
         
         # Initialize trainer
         print("\nStep 3: Initializing trainer...")
-        trainer = DivergenceTrainer(
+        self.trainer = DivergenceTrainer(
             model_1=model_1,
             model_2=model_2,
             tokenizer=tokenizer,
@@ -112,7 +207,7 @@ class DivergencePipeline:
         
         # Train soft prompts
         print("\nStep 4: Training soft prompts...")
-        trainer.train(
+        self.trainer.train(
             train_dataloader=train_loader,
             val_dataloader=val_loader
         )
@@ -120,7 +215,7 @@ class DivergencePipeline:
         
         # Generate divergent dataset
         print("\nStep 5: Generating divergent dataset...")
-        dataset = trainer.generate_divergent_dataset(
+        dataset = self.trainer.generate_divergent_dataset(
             output_file=self.output_dir / "divergent_dataset.pt"
         )
         print("Divergent dataset generation complete.")
@@ -128,7 +223,7 @@ class DivergencePipeline:
         # Analyze results
         print("\nStep 6: Analyzing results...")
         analyzer = DivergenceAnalyzer(
-            metrics=trainer.metrics,
+            metrics=self.trainer.metrics,
             output_dir=self.output_dir
         )
         analysis = analyzer.generate_report(dataset)
@@ -137,12 +232,16 @@ class DivergencePipeline:
         # Save results
         print("\nStep 7: Saving experiment summary...")
         self.tracker.save_experiment_summary()
-        print("\n=== Pipeline run complete ===\n")
+        print("\n=== Pipeline run complete ===")
+        
+        # Show example outputs
+        self.show_examples(self.trainer)
         
         return {
             "dataset": dataset,
             "analysis": analysis,
-            "trainer": trainer
+            "trainer": self.trainer,
+            "valid_categories": valid_categories
         }
     
     def cleanup(self):

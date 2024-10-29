@@ -1,4 +1,4 @@
-# src/soft_prompting/soft_prompt.py
+# src/soft_prompting/models/soft_prompt.py
 
 import torch
 import torch.nn as nn
@@ -17,9 +17,10 @@ class DivergenceSoftPrompt(nn.Module):
         self.num_tokens = num_tokens
         self.embedding_dim = embedding_dim
         
-        # Initialize embeddings with normal distribution
+        # Initialize trainable embeddings
         self.embeddings = nn.Parameter(
-            torch.randn(num_tokens, embedding_dim) * init_std
+            torch.randn(num_tokens, embedding_dim) * init_std,
+            requires_grad=True
         )
     
     def forward(self, input_embeddings: torch.Tensor) -> torch.Tensor:
@@ -34,13 +35,20 @@ class DivergenceSoftPrompt(nn.Module):
         """
         batch_size = input_embeddings.shape[0]
         
-        # Expand soft prompt embeddings to batch size
-        soft_prompt_expanded = self.embeddings.unsqueeze(0).expand(
-            batch_size, -1, -1
-        )
+        print(f"\nSoft Prompt Forward Pass:")
+        print(f"Input embeddings shape: {input_embeddings.shape}")
+        print(f"Soft prompt embeddings requires_grad: {self.embeddings.requires_grad}")
         
-        # Concatenate with input embeddings
-        return torch.cat([soft_prompt_expanded, input_embeddings], dim=1)
+        # Expand soft prompt embeddings to batch size
+        soft_prompt_expanded = self.embeddings.unsqueeze(0).expand(batch_size, -1, -1)
+        print(f"Expanded soft prompt requires_grad: {soft_prompt_expanded.requires_grad}")
+        
+        # Concatenate along sequence length dimension
+        combined_embeddings = torch.cat([soft_prompt_expanded, input_embeddings], dim=1)
+        print(f"Combined embeddings requires_grad: {combined_embeddings.requires_grad}")
+        print(f"Combined embeddings grad_fn: {combined_embeddings.grad_fn}")
+        
+        return combined_embeddings
 
     def get_soft_prompt_length(self) -> int:
         """Return number of soft prompt tokens."""

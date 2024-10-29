@@ -96,7 +96,7 @@ generation:
 
 # Data settings
 data:
-  categories: ["persona", "ethics"]
+  categories: ["persona"]
   max_texts_per_category: 1000
 ```
 

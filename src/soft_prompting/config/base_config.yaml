@@ -2,14 +2,14 @@
 defaults:
   # Model defaults
   model:
-    torch_dtype: "float16"
+    torch_dtype: "auto"  # Will be float16 for CUDA, float32 otherwise
     load_in_8bit: false
-    device: "cuda"  # Options: "cuda", "cpu", "mps"
+    device: "auto"  # Will try CUDA → MPS → CPU in that order
     
   # Training defaults  
   training:
     num_soft_prompt_tokens: 8
-    learning_rate: 1e-4
+    learning_rate: 0.0001
     batch_size: 4
     gradient_accumulation_steps: 2
     num_epochs: 10
@@ -20,9 +20,10 @@ defaults:
     gradient_checkpointing: false
     early_stopping_patience: 3
     logging_steps: 10
-    eval_steps: 100
+    eval_steps: 50
     save_steps: 500
     max_length: 512
+    test_mode_epochs: 5
 
   # Generation defaults
   generation:
@@ -40,3 +41,4 @@ defaults:
     min_text_length: 10
     max_text_length: 150
     max_texts_per_category: 1000
+    test_mode_texts: 12
