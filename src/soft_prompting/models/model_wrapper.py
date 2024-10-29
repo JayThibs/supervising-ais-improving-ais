@@ -58,6 +58,8 @@ class ModelWrapper:
     
     def to(self, device: str) -> "ModelWrapper":
         """Move model to device."""
+        if isinstance(device, str):
+            device = torch.device(device)
         self.model.to(device)
         return self
     

@@ -35,41 +35,68 @@ class ModelPairManager:
         
     def get_model_info(self, model_name: str) -> Dict:
         """Get information about a specific model from registry."""
-        for model in self.registry['models']:
+        print(f"Getting info for model: {model_name}")
+        
+        # First check registry
+        for model in self.registry.get('models', []):
             if model['name'] == model_name:
+                print(f"Found model in registry: {model}")
                 return model
-        raise ValueError(f"Model {model_name} not found in registry")
+        
+        # If not in registry, return default configuration
+        default_config = {
+            'name': model_name,
+            'model_kwargs': {},
+        }
+        print(f"Model not found in registry, using default config: {default_config}")
+        return default_config
         
     def get_model_pair(self, pair_index: int = 0) -> Tuple[str, str]:
         """Get model pair names from config."""
-        if self.test_mode:
-            # Use the test model directly from registry
-            test_model = "HuggingFaceTB/SmolLM-135M-Instruct"
-            model_info = self.get_model_info(test_model)
-            return test_model, model_info['original']  # This will return 'HuggingFaceTB/SmolLM-135M-Instruct' and 'HuggingFaceTB/SmolLM-135M'
+        print(f"Getting model pair with index: {pair_index}")
         
-        if hasattr(self.config, 'model_pairs'):
+        if self.test_mode:
+            # Use small test models
+            test_model = "HuggingFaceTB/SmolLM-135M-Instruct"
+            base_model = "HuggingFaceTB/SmolLM-135M"
+            print(f"Test mode: using models {test_model} and {base_model}")
+            return test_model, base_model
+        
+        # Check for model pairs in config
+        if not hasattr(self.config, 'model_pairs'):
+            raise ValueError("Config missing model_pairs")
+            
+        try:
+            # Access the specific pair using the index
             pair = self.config.model_pairs[pair_index]
-            return pair['model_1'], pair['model_2']
-        return self.config.model_1_name, self.config.model_2_name
+            print(f"Selected model pair: {pair}")
+            
+            # Extract model names from the pair dict
+            model_1 = pair.get('model_1')
+            model_2 = pair.get('model_2')
+            
+            if not model_1 or not model_2:
+                raise ValueError(f"Invalid model pair configuration: {pair}")
+                
+            print(f"Using models: {model_1} and {model_2}")
+            return model_1, model_2
+            
+        except IndexError:
+            raise ValueError(f"Invalid model pair index {pair_index}. Config has {len(self.config.model_pairs)} pairs.")
+        except Exception as e:
+            raise ValueError(f"Error accessing model pair: {str(e)}")
 
     def load_model_pair(self, pair_index: int = 0):
         """Load model pair specified in config."""
         try:
-            # Get model names using registry
+            # Get model names
             model_1_name, model_2_name = self.get_model_pair(pair_index)
-
-            # Get model configs from registry
-            model_1_info = self.get_model_info(model_1_name)
-            
-            try:
-                model_2_info = self.get_model_info(model_2_name)
-            except ValueError:
-                model_2_info = {'name': model_2_name, 'model_kwargs': {}}
+            print(f"Loading models: {model_1_name} and {model_2_name}")
 
             # Check cache
             cache_key = f"{model_1_name}_{model_2_name}"
             if cache_key in self._model_cache:
+                print("Using cached models")
                 self.current_models = self._model_cache[cache_key]
                 return self.current_models
 
@@ -83,20 +110,19 @@ class ModelPairManager:
                 model_kwargs.update({
                     'device_map': 'auto',
                     'torch_dtype': torch.float16,
-                    'load_in_8bit': self.config.load_in_8bit
+                    'load_in_8bit': getattr(self.config, 'load_in_8bit', False)
                 })
             
-            # Load models with their specific configurations
+            print(f"Loading model 1: {model_1_name}")
             model_1 = AutoModelForCausalLM.from_pretrained(
                 model_1_name,
-                **model_kwargs,
-                **model_1_info.get('model_kwargs', {})
+                **model_kwargs
             )
             
+            print(f"Loading model 2: {model_2_name}")
             model_2 = AutoModelForCausalLM.from_pretrained(
                 model_2_name,
-                **model_kwargs,
-                **model_2_info.get('model_kwargs', {})
+                **model_kwargs
             )
 
             # Explicitly move models to device for MPS or CPU
@@ -104,7 +130,7 @@ class ModelPairManager:
                 model_1 = model_1.to(self.device)
                 model_2 = model_2.to(self.device)
 
-            # Load tokenizer
+            print(f"Loading tokenizer from: {model_1_name}")
             tokenizer = AutoTokenizer.from_pretrained(model_1_name)
 
             # Cache the results
