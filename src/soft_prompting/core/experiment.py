@@ -3,6 +3,7 @@
 from pathlib import Path
 from typing import Dict, Optional
 import logging
+import json
 
 from ..config.configs import ExperimentConfig
 from ..models.model_manager import ModelPairManager
@@ -16,30 +17,25 @@ class ExperimentRunner:
     def __init__(
         self,
         config: ExperimentConfig,
-        output_dir: Optional[Path] = None
+        output_dir: Optional[Path] = None,
+        test_mode: bool = False
     ):
         self.config = config
         self.output_dir = output_dir or config.output_dir
         self.output_dir.mkdir(parents=True, exist_ok=True)
         
-        # Save experiment config
-        config_path = self.output_dir / "config.yaml"
-        self.config.save(config_path)
-        
-        # Initialize components
+        # Initialize model manager with config
         self.model_manager = ModelPairManager(
-            device=config.training.device,
-            torch_dtype=config.training.torch_dtype,
-            load_in_8bit=config.training.load_in_8bit
+            config=config,
+            test_mode=test_mode
         )
         
-    def run(self) -> Dict:
+    def run(self, model_pair_index: int = 0) -> Dict:
         """Run the experiment end-to-end."""
         # Load models
         logger.info("Loading models...")
         model_1, model_2, tokenizer = self.model_manager.load_model_pair(
-            self.config.model_1_name,
-            self.config.model_2_name
+            pair_index=model_pair_index
         )
         
         # Initialize trainer
@@ -54,7 +50,18 @@ class ExperimentRunner:
         results = trainer.train()
         
         # Save results
-        results_path = self.output_dir / "results.json"
-        trainer.save_results(results_path)
+        model_pair = self.model_manager.get_model_pair(model_pair_index)
+        results_path = self.output_dir / f"results_pair_{model_pair_index}.json"
+        
+        # Add model pair info to results
+        results["model_pair"] = {
+            "model_1": model_pair[0],
+            "model_2": model_pair[1]
+        }
+        
+        with open(results_path, 'w') as f:
+            json.dump(results, f, indent=2)
+        
+        logger.info(f"Results saved to {results_path}")
         
         return results
