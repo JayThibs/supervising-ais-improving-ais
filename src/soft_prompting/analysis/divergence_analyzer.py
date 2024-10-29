@@ -23,8 +23,22 @@ class DivergenceAnalyzer:
         self.metrics = metrics
         self.output_dir = output_dir
         self.plots_dir = output_dir / "plots"
-        self.plots_dir.mkdir(exist_ok=True)
+        self.plots_dir.mkdir(parents=True, exist_ok=True)
         
+    def analyze_training_progress(self, training_history: List[Dict]) -> Dict:
+        """Analyze training convergence and early stopping effectiveness."""
+        epochs = [h["epoch"] for h in training_history]
+        losses = [h["loss"] for h in training_history]
+        divergences = [h["kl_divergence"] for h in training_history]
+        
+        return {
+            "training_length": len(epochs),
+            "final_loss": losses[-1],
+            "best_divergence": max(divergences),
+            "convergence_epoch": epochs[divergences.index(max(divergences))],
+            "early_stopping_effective": len(epochs) < max(epochs)
+        }
+    
     def analyze_divergence_patterns(
         self,
         dataset: List[Dict],
@@ -67,6 +81,21 @@ class DivergenceAnalyzer:
             for ex in high_div_examples
         ])
         
+        # Add analysis of early stopping impact
+        if "training_history" in dataset[0]:
+            training_analysis = self.analyze_training_progress(
+                [ex["training_history"] for ex in dataset]
+            )
+            return {
+                **{
+                    "num_high_divergence": len(high_div_examples),
+                    "common_disagreements": common_patterns,
+                    "mean_semantic_diff": float(semantic_diffs.mean()),
+                    "std_semantic_diff": float(semantic_diffs.std())
+                },
+                "training_analysis": training_analysis
+            }
+            
         return {
             "num_high_divergence": len(high_div_examples),
             "common_disagreements": common_patterns,
@@ -177,7 +206,14 @@ class DivergenceAnalyzer:
             ]),
             "max_divergence": max(
                 ex["metrics"]["kl_divergence"] for ex in dataset
-            )
+            ),
+            "early_stopping_stats": {
+                "total_runs": len(dataset),
+                "early_stopped_runs": sum(
+                    1 for ex in dataset 
+                    if ex.get("early_stopped", False)
+                )
+            }
         }
         
         # Pattern analysis
@@ -189,9 +225,30 @@ class DivergenceAnalyzer:
         # Create visualizations
         self.visualize_divergences(dataset)
         
+        # Add training convergence visualization
+        if "training_history" in dataset[0]:
+            self.visualize_training_convergence(dataset)
+            
         if output_file:
             import json
             with open(self.output_dir / output_file, 'w') as f:
                 json.dump(report, f, indent=2)
         
         return report
+        
+    def visualize_training_convergence(self, dataset: List[Dict]):
+        """Visualize training convergence and early stopping."""
+        plt.figure(figsize=(12, 6))
+        
+        for ex in dataset[:5]:  # Plot first 5 examples
+            history = ex["training_history"]
+            epochs = [h["epoch"] for h in history]
+            divergences = [h["kl_divergence"] for h in history]
+            plt.plot(epochs, divergences, alpha=0.7, label=f"Run {ex['id']}")
+            
+        plt.xlabel("Epoch")
+        plt.ylabel("KL Divergence")
+        plt.title("Training Convergence Analysis")
+        plt.legend()
+        plt.savefig(self.plots_dir / "training_convergence.png")
+        plt.close()
