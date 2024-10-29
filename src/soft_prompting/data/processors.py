@@ -4,6 +4,7 @@ import json
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+import glob
 
 logger = logging.getLogger(__name__)
 
@@ -71,11 +72,12 @@ class CategoryProcessor(BaseDataProcessor):
     
     def __init__(self, category: str):
         self.category = category
-        self.processors = {
-            "persona": JSONLProcessor(text_key="statement"),
-            "advanced-ai-risk": JSONLProcessor(text_key="question"),
-            "sycophancy": JSONLProcessor(text_key="question"),
-            "ethics": JSONLProcessor(text_key="scenario")
+        # Map base categories to their text keys
+        self.category_text_keys = {
+            "persona": "statement",
+            "advanced-ai-risk": "question",
+            "sycophancy": "question",
+            "winogenerated": "sentence_with_blank"
         }
     
     def load_texts(
@@ -85,16 +87,68 @@ class CategoryProcessor(BaseDataProcessor):
         min_length: Optional[int] = None,
         max_length: Optional[int] = None
     ) -> List[str]:
-        processor = self.processors.get(self.category)
-        if not processor:
-            raise ValueError(f"No processor found for category: {self.category}")
+        base_category = self.category.split('/')[0]
+        text_key = self.category_text_keys.get(base_category)
+        
+        if not text_key:
+            raise ValueError(f"No processor found for category: {base_category}")
+        
+        processor = JSONLProcessor(text_key=text_key)
+        category_path = data_path / base_category
+        
+        if not category_path.exists():
+            raise ValueError(f"Category path does not exist: {category_path}")
+        
+        # Handle specific file or subdirectory requests
+        if '/' in self.category:
+            specific_path = category_path / '/'.join(self.category.split('/')[1:])
+            if specific_path.is_file() and specific_path.suffix == '.jsonl':
+                # Single JSONL file
+                logger.info(f"Processing specific JSONL file: {specific_path}")
+                return processor.load_texts(
+                    data_path=specific_path,
+                    max_texts=max_texts,
+                    min_length=min_length,
+                    max_length=max_length
+                )
+            elif specific_path.is_dir():
+                # Specific subdirectory
+                logger.info(f"Processing specific subdirectory: {specific_path}")
+                jsonl_files = glob.glob(str(specific_path / "**" / "*.jsonl"), recursive=True)
+            else:
+                raise ValueError(f"Invalid path specified: {specific_path}")
+        else:
+            # Process entire category
+            logger.info(f"Processing entire category: {base_category}")
+            jsonl_files = glob.glob(str(category_path / "**" / "*.jsonl"), recursive=True)
+        
+        if not jsonl_files:
+            logger.warning(f"No JSONL files found in {self.category}")
+            return []
             
-        return processor.load_texts(
-            data_path=data_path,
-            max_texts=max_texts,
-            min_length=min_length,
-            max_length=max_length
-        )
+        logger.info(f"Found {len(jsonl_files)} JSONL files")
+        
+        all_texts = []
+        for jsonl_path in jsonl_files:
+            try:
+                file_texts = processor.load_texts(
+                    data_path=Path(jsonl_path),
+                    max_texts=None,  # Don't limit individual files
+                    min_length=min_length,
+                    max_length=max_length
+                )
+                all_texts.extend(file_texts)
+                logger.info(f"Loaded {len(file_texts)} texts from {jsonl_path}")
+            except Exception as e:
+                logger.warning(f"Error processing {jsonl_path}: {str(e)}")
+                continue
+        
+        # Apply max_texts limit to combined texts
+        if max_texts and len(all_texts) > max_texts:
+            all_texts = all_texts[:max_texts]
+        
+        logger.info(f"Total texts loaded for {self.category}: {len(all_texts)}")
+        return all_texts
 
 def get_dataset_processor(categories: List[str]) -> BaseDataProcessor:
     """Factory function to get appropriate processor."""
