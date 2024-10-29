@@ -13,14 +13,16 @@ class TrainingConfig:
     batch_size: int = 4
     gradient_accumulation_steps: int = 2
     num_epochs: int = 10
+    test_mode_epochs: int = 5  # Added for test mode
     max_grad_norm: float = 1.0
     warmup_steps: int = 100
     seed: int = 42
     mixed_precision: bool = True
     gradient_checkpointing: bool = False
     early_stopping_patience: int = 3
+    early_stopping_threshold: float = 0.01
     logging_steps: int = 10
-    eval_steps: int = 100
+    eval_steps: int = 50  # Reduced for more frequent test mode evaluation
     save_steps: int = 500
     max_length: int = 512
     device: str = "cuda"
@@ -43,9 +45,11 @@ class DataConfig:
     eval_path: Optional[Path] = None
     categories: List[str] = None
     max_texts_per_category: int = 1000
+    test_mode_texts: int = 12  # Added for test mode
     min_text_length: int = 10
     max_text_length: int = 150
     train_split: float = 0.9
+    test_mode: bool = False
 
 @dataclass
 class ExperimentConfig:
@@ -74,13 +78,18 @@ class ExperimentConfig:
         generation_config = {**base_config["generation"], **config_dict.get("generation", {})}
         data_config = {**base_config["data"], **config_dict.get("data", {})}
         
-        # Ensure numeric types
+        # Ensure numeric types, but skip certain keys
         training_config = {k: int(v) if isinstance(v, str) and k not in ["learning_rate", "max_grad_norm"] else v 
                           for k, v in training_config.items()}
         generation_config = {k: int(v) if isinstance(v, str) and k not in ["temperature", "top_p"] else v 
                            for k, v in generation_config.items()}
-        data_config = {k: int(v) if isinstance(v, str) and k not in ["train_split"] else v 
-                      for k, v in data_config.items()}
+        
+        # Modified data config conversion to handle non-numeric values
+        numeric_data_keys = ["max_texts_per_category", "min_text_length", "max_text_length"]
+        data_config = {
+            k: (int(v) if isinstance(v, str) and k in numeric_data_keys else v)
+            for k, v in data_config.items()
+        }
         
         return cls(
             name=config_dict["name"],
