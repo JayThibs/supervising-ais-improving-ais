@@ -80,6 +80,37 @@ class CategoryProcessor(BaseDataProcessor):
             "winogenerated": "sentence_with_blank"
         }
     
+    def _get_text_key(self, category_path: str) -> str:
+        """Get the appropriate text key based on the category path."""
+        parts = category_path.split('/')
+        for part in parts:
+            if part in self.category_text_keys:
+                return self.category_text_keys[part]
+        return "text"  # Default fallback
+    
+    def _process_jsonl_file(
+        self,
+        jsonl_path: Path,
+        text_key: str,
+        min_length: Optional[int] = None,
+        max_length: Optional[int] = None,
+        max_texts: Optional[int] = None
+    ) -> List[str]:
+        """Process a single JSONL file."""
+        processor = JSONLProcessor(text_key=text_key)
+        try:
+            texts = processor.load_texts(
+                data_path=jsonl_path,
+                max_texts=max_texts,
+                min_length=min_length,
+                max_length=max_length
+            )
+            logger.info(f"Loaded {len(texts)} texts from {jsonl_path}")
+            return texts
+        except Exception as e:
+            logger.warning(f"Error processing {jsonl_path}: {str(e)}")
+            return []
+
     def load_texts(
         self,
         data_path: Path,
@@ -87,125 +118,133 @@ class CategoryProcessor(BaseDataProcessor):
         min_length: Optional[int] = None,
         max_length: Optional[int] = None
     ) -> List[str]:
-        # Split the category path into components
-        category_parts = self.category.split('/')
-        base_category = category_parts[0]
-        text_key = self.category_text_keys.get(base_category)
-        
-        if not text_key:
-            raise ValueError(f"No processor found for category: {base_category}")
-        
-        processor = JSONLProcessor(text_key=text_key)
-        
-        # Search through all eval directories
-        eval_dirs = [d for d in data_path.iterdir() if d.is_dir()]
-        logger.info(f"Found eval directories: {[d.name for d in eval_dirs]}")
-        
+        """Load texts from either a specific JSONL file or directory."""
         all_texts = []
-        for eval_dir in eval_dirs:
-            # Construct the full path for this eval directory
-            full_path = eval_dir
-            for part in category_parts:
-                full_path = full_path / part
+        
+        # Handle full path to JSONL file
+        if self.category.endswith('.jsonl'):
+            jsonl_path = data_path / self.category
+            text_key = self._get_text_key(str(self.category))
+            texts = self._process_jsonl_file(
+                jsonl_path,
+                text_key,
+                min_length,
+                max_length,
+                max_texts
+            )
+            all_texts.extend(texts)
+            return all_texts
             
-            # Handle JSONL file
-            if full_path.with_suffix('.jsonl').exists():
-                jsonl_path = full_path.with_suffix('.jsonl')
-                logger.info(f"Processing JSONL file: {jsonl_path}")
-                try:
-                    texts = processor.load_texts(
-                        data_path=jsonl_path,
-                        max_texts=None,  # Don't limit individual files
-                        min_length=min_length,
-                        max_length=max_length
-                    )
-                    all_texts.extend(texts)
-                    logger.info(f"Loaded {len(texts)} texts from {jsonl_path}")
-                except Exception as e:
-                    logger.warning(f"Error processing {jsonl_path}: {str(e)}")
-                    continue
+        # Handle path without .jsonl extension
+        jsonl_path = data_path / f"{self.category}.jsonl"
+        if jsonl_path.exists():
+            text_key = self._get_text_key(self.category)
+            texts = self._process_jsonl_file(
+                jsonl_path,
+                text_key,
+                min_length,
+                max_length,
+                max_texts
+            )
+            all_texts.extend(texts)
+            return all_texts
+        
+        # If neither direct path works, try searching in subdirectories
+        for eval_dir in [d for d in data_path.iterdir() if d.is_dir()]:
+            category_path = eval_dir / self.category
             
-            # Handle directory (if path points to a directory)
-            elif full_path.is_dir():
-                logger.info(f"Processing directory: {full_path}")
-                jsonl_files = list(full_path.rglob("*.jsonl"))
-                
-                for jsonl_path in jsonl_files:
-                    try:
-                        texts = processor.load_texts(
-                            data_path=jsonl_path,
-                            max_texts=None,
-                            min_length=min_length,
-                            max_length=max_length
-                        )
-                        all_texts.extend(texts)
-                        logger.info(f"Loaded {len(texts)} texts from {jsonl_path}")
-                    except Exception as e:
-                        logger.warning(f"Error processing {jsonl_path}: {str(e)}")
-                        continue
+            # If path points to a JSONL file
+            if category_path.with_suffix('.jsonl').exists():
+                text_key = self._get_text_key(self.category)
+                texts = self._process_jsonl_file(
+                    category_path.with_suffix('.jsonl'),
+                    text_key,
+                    min_length,
+                    max_length,
+                    max_texts
+                )
+                all_texts.extend(texts)
+                break  # Found the file, no need to continue searching
         
         if not all_texts:
-            logger.warning(f"No texts found for category {self.category} in any eval directory")
-            return []
-        
-        # Apply max_texts limit to combined texts
-        if max_texts and len(all_texts) > max_texts:
-            all_texts = all_texts[:max_texts]
+            logger.warning(f"No texts found for category {self.category}")
             
-        logger.info(f"Total texts loaded for {self.category}: {len(all_texts)}")
         return all_texts
+
+def discover_all_categories(data_path: Path) -> List[str]:
+    """Discover all available JSONL files and convert to categories."""
+    all_categories = []
+    for eval_dir in data_path.iterdir():
+        if not eval_dir.is_dir():
+            continue
+        # Find all JSONL files recursively
+        for jsonl_file in eval_dir.rglob("*.jsonl"):
+            # Convert path to category format
+            rel_path = jsonl_file.relative_to(eval_dir)
+            category = str(rel_path.parent / rel_path.stem)
+            all_categories.append(category)
+    return sorted(all_categories)
 
 def get_dataset_processor(categories: List[str]) -> BaseDataProcessor:
     """Factory function to get appropriate processor."""
     
-    def discover_all_categories(data_path: Path) -> List[str]:
-        """Discover all available JSONL files and convert to categories."""
-        all_categories = []
-        for eval_dir in data_path.iterdir():
-            if not eval_dir.is_dir():
-                continue
-            # Find all JSONL files recursively
-            for jsonl_file in eval_dir.rglob("*.jsonl"):
-                # Convert path to category format
-                rel_path = jsonl_file.relative_to(eval_dir)
-                category = str(rel_path.parent / rel_path.stem)
-                all_categories.append(category)
-        return sorted(all_categories)
-
     # Handle "all" categories
     if len(categories) == 1 and categories[0] == "all":
         class AllCategoriesProcessor(BaseDataProcessor):
-            def load_texts(self, data_path: Path, *args, **kwargs) -> List[str]:
+            def load_texts(
+                self,
+                data_path: Path,
+                max_texts: Optional[int] = None,
+                min_length: Optional[int] = None,
+                max_length: Optional[int] = None
+            ) -> List[str]:
                 discovered_categories = discover_all_categories(data_path)
                 logger.info(f"Discovered categories: {discovered_categories}")
+                
                 all_texts = []
                 for category in discovered_categories:
-                    try:
-                        processor = CategoryProcessor(category)
-                        texts = processor.load_texts(data_path, *args, **kwargs)
-                        all_texts.extend(texts)
-                        logger.info(f"Loaded {len(texts)} texts from category {category}")
-                    except Exception as e:
-                        logger.warning(f"Error loading category {category}: {e}")
-                        continue
+                    processor = CategoryProcessor(category)
+                    category_texts = processor.load_texts(
+                        data_path=data_path,
+                        max_texts=max_texts,
+                        min_length=min_length,
+                        max_length=max_length
+                    )
+                    all_texts.extend(category_texts)
                 return all_texts
+                
         return AllCategoriesProcessor()
     
-    # Handle single specific category
+    # For specific categories, use a single CategoryProcessor
     elif len(categories) == 1:
         return CategoryProcessor(categories[0])
     
-    # Handle multiple specific categories
+    # For multiple categories, combine their results
     else:
-        class CompositeProcessor(BaseDataProcessor):
-            def load_texts(self, *args, **kwargs) -> List[str]:
+        class MultiCategoryProcessor(BaseDataProcessor):
+            def __init__(self, categories: List[str]):
+                self.categories = categories
+                
+            def load_texts(
+                self,
+                data_path: Path,
+                max_texts: Optional[int] = None,
+                min_length: Optional[int] = None,
+                max_length: Optional[int] = None
+            ) -> List[str]:
                 all_texts = []
-                for category in categories:
+                for category in self.categories:
                     processor = CategoryProcessor(category)
-                    texts = processor.load_texts(*args, **kwargs)
-                    all_texts.extend(texts)
+                    category_texts = processor.load_texts(
+                        data_path=data_path,
+                        max_texts=max_texts,
+                        min_length=min_length,
+                        max_length=max_length
+                    )
+                    all_texts.extend(category_texts)
                 return all_texts
-        return CompositeProcessor()
+                
+        return MultiCategoryProcessor(categories)
 
 @dataclass
 class DataSettings:
