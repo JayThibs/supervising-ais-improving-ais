@@ -157,20 +157,55 @@ class CategoryProcessor(BaseDataProcessor):
 
 def get_dataset_processor(categories: List[str]) -> BaseDataProcessor:
     """Factory function to get appropriate processor."""
-    if len(categories) == 1:
+    
+    def discover_all_categories(data_path: Path) -> List[str]:
+        """Discover all available JSONL files and convert to categories."""
+        all_categories = []
+        for eval_dir in data_path.iterdir():
+            if not eval_dir.is_dir():
+                continue
+            # Find all JSONL files recursively
+            for jsonl_file in eval_dir.rglob("*.jsonl"):
+                # Convert path to category format
+                rel_path = jsonl_file.relative_to(eval_dir)
+                category = str(rel_path.parent / rel_path.stem)
+                all_categories.append(category)
+        return sorted(all_categories)
+
+    # Handle "all" categories
+    if len(categories) == 1 and categories[0] == "all":
+        class AllCategoriesProcessor(BaseDataProcessor):
+            def load_texts(self, data_path: Path, *args, **kwargs) -> List[str]:
+                discovered_categories = discover_all_categories(data_path)
+                logger.info(f"Discovered categories: {discovered_categories}")
+                all_texts = []
+                for category in discovered_categories:
+                    try:
+                        processor = CategoryProcessor(category)
+                        texts = processor.load_texts(data_path, *args, **kwargs)
+                        all_texts.extend(texts)
+                        logger.info(f"Loaded {len(texts)} texts from category {category}")
+                    except Exception as e:
+                        logger.warning(f"Error loading category {category}: {e}")
+                        continue
+                return all_texts
+        return AllCategoriesProcessor()
+    
+    # Handle single specific category
+    elif len(categories) == 1:
         return CategoryProcessor(categories[0])
     
-    # For multiple categories, create a composite processor
-    class CompositeProcessor(BaseDataProcessor):
-        def load_texts(self, *args, **kwargs) -> List[str]:
-            all_texts = []
-            for category in categories:
-                processor = CategoryProcessor(category)
-                texts = processor.load_texts(*args, **kwargs)
-                all_texts.extend(texts)
-            return all_texts
-    
-    return CompositeProcessor()
+    # Handle multiple specific categories
+    else:
+        class CompositeProcessor(BaseDataProcessor):
+            def load_texts(self, *args, **kwargs) -> List[str]:
+                all_texts = []
+                for category in categories:
+                    processor = CategoryProcessor(category)
+                    texts = processor.load_texts(*args, **kwargs)
+                    all_texts.extend(texts)
+                return all_texts
+        return CompositeProcessor()
 
 @dataclass
 class DataSettings:
