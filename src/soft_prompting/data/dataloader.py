@@ -88,30 +88,28 @@ def create_experiment_dataloaders(
     pin_memory = device != 'cpu'  # Only use pin_memory for GPU devices
     num_workers = 0 if device == 'mps' else 2  # MPS doesn't work well with multiple workers
     
-    # Create dataloaders
+    # Create dataloaders with proper batch handling
     train_loader = DataLoader(
         train_dataset,
-        batch_size=min(config.training.batch_size, len(train_dataset)),
+        batch_size=config.training.batch_size,  # Use full batch size
         shuffle=True,
         num_workers=num_workers,
         pin_memory=pin_memory,
-        drop_last=True,
-        collate_fn=train_dataset.collate_fn if hasattr(train_dataset, 'collate_fn') else None
+        drop_last=False,  # Changed to False to use all data
     )
     
     val_loader = DataLoader(
         val_dataset,
-        batch_size=min(config.training.batch_size, len(val_dataset)),
+        batch_size=config.training.batch_size,  # Use full batch size
         shuffle=False,
         num_workers=num_workers,
         pin_memory=pin_memory,
         drop_last=False,
-        collate_fn=val_dataset.collate_fn if hasattr(val_dataset, 'collate_fn') else None
     )
     
-    logger.info(f"Created dataloaders for device: {device}")
-    logger.info(f"Training batches: {len(train_loader)}, Validation batches: {len(val_loader)}")
-    logger.info(f"Training batch size: {train_loader.batch_size}, Validation batch size: {val_loader.batch_size}")
+    logger.info(f"Created dataloaders with {len(train_dataset)} training examples and {len(val_dataset)} validation examples")
+    logger.info(f"Batch size: {config.training.batch_size}")
+    logger.info(f"Steps per epoch: {len(train_loader)}")
     
     return train_loader, val_loader
 

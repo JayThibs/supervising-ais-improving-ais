@@ -121,24 +121,32 @@ class CategoryProcessor(BaseDataProcessor):
         """Load texts from either a specific JSONL file or directory."""
         all_texts = []
         
+        logger.info(f"Searching for category: {self.category}")
+        logger.info(f"Base path: {data_path}")
+        
         # Handle full path to JSONL file
         if self.category.endswith('.jsonl'):
             jsonl_path = data_path / self.category
-            text_key = self._get_text_key(str(self.category))
-            texts = self._process_jsonl_file(
-                jsonl_path,
-                text_key,
-                min_length,
-                max_length,
-                max_texts
-            )
-            all_texts.extend(texts)
-            return all_texts
+            logger.info(f"Checking direct JSONL path: {jsonl_path}")
+        else:
+            # Try with .jsonl extension
+            jsonl_path = data_path / f"{self.category}.jsonl"
+            logger.info(f"Checking with .jsonl extension: {jsonl_path}")
             
-        # Handle path without .jsonl extension
-        jsonl_path = data_path / f"{self.category}.jsonl"
+            if not jsonl_path.exists():
+                # Search in subdirectories
+                logger.info("Searching in subdirectories...")
+                for eval_dir in [d for d in data_path.iterdir() if d.is_dir()]:
+                    potential_path = eval_dir / f"{self.category}.jsonl"
+                    logger.info(f"Checking path: {potential_path}")
+                    if potential_path.exists():
+                        jsonl_path = potential_path
+                        logger.info(f"Found file at: {jsonl_path}")
+                        break
+        
         if jsonl_path.exists():
-            text_key = self._get_text_key(self.category)
+            text_key = self._get_text_key(str(self.category))
+            logger.info(f"Loading texts with key: {text_key}")
             texts = self._process_jsonl_file(
                 jsonl_path,
                 text_key,
@@ -146,28 +154,13 @@ class CategoryProcessor(BaseDataProcessor):
                 max_length,
                 max_texts
             )
-            all_texts.extend(texts)
-            return all_texts
-        
-        # If neither direct path works, try searching in subdirectories
-        for eval_dir in [d for d in data_path.iterdir() if d.is_dir()]:
-            category_path = eval_dir / self.category
+            # Print the actual texts being loaded
+            for i, text in enumerate(texts):
+                logger.info(f"\nText {i+1}:\n{text}\n")
             
-            # If path points to a JSONL file
-            if category_path.with_suffix('.jsonl').exists():
-                text_key = self._get_text_key(self.category)
-                texts = self._process_jsonl_file(
-                    category_path.with_suffix('.jsonl'),
-                    text_key,
-                    min_length,
-                    max_length,
-                    max_texts
-                )
-                all_texts.extend(texts)
-                break  # Found the file, no need to continue searching
-        
-        if not all_texts:
-            logger.warning(f"No texts found for category {self.category}")
+            all_texts.extend(texts)
+        else:
+            logger.warning(f"No JSONL file found for category {self.category}")
             
         return all_texts
 
