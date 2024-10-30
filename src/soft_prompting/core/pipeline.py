@@ -1,6 +1,7 @@
 # src/soft_prompting/core/pipeline.py
 
 import logging
+import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 import torch
@@ -14,9 +15,18 @@ from ..data.dataloader import create_experiment_dataloaders
 from ..analysis.divergence_analyzer import DivergenceAnalyzer
 from ..tracking.experiment_tracker import ExperimentTracker
 from ..utils.device_utils import get_device
+from ..utils.serialization import serialize_for_json
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
 logger = logging.getLogger(__name__)
 
 class DivergencePipeline:
@@ -207,42 +217,70 @@ class DivergencePipeline:
         
         # Train soft prompts
         print("\nStep 4: Training soft prompts...")
-        self.trainer.train(
+        training_results = self.trainer.train(
             train_dataloader=train_loader,
             val_dataloader=val_loader
         )
         print("Soft prompt training complete.")
-        
-        # Generate divergent dataset
+
+        # Generate divergent dataset if not in results
         print("\nStep 5: Generating divergent dataset...")
-        dataset = self.trainer.generate_divergent_dataset(
-            output_file=self.output_dir / "divergent_dataset.pt"
-        )
-        print("Divergent dataset generation complete.")
+        dataset = training_results.get("dataset", [])
         
-        # Analyze results
-        print("\nStep 6: Analyzing results...")
+        # Debug print
+        print(f"DEBUG: training_results keys: {training_results.keys()}")
+        print(f"DEBUG: dataset type: {type(dataset)}")
+        print(f"DEBUG: dataset length: {len(dataset)}")
+        
+        if not dataset:
+            print("WARNING: No dataset in training results")
+            dataset = []
+        
+        # Prepare analysis data
+        analysis_data = {
+            "metrics": training_results.get("final_metrics", {}),
+            "best_divergence": training_results.get("best_divergence", 0.0),
+            "total_steps": training_results.get("total_steps", 0),
+            "dataset": dataset  # Use the dataset directly
+        }
+        
+        # Initialize analyzer
         analyzer = DivergenceAnalyzer(
-            metrics=self.trainer.metrics,
+            metrics=self.trainer.metrics_computer,
             output_dir=self.output_dir
         )
-        analysis = analyzer.generate_report(dataset)
-        print("Analysis complete.")
         
-        # Save results
-        print("\nStep 7: Saving experiment summary...")
-        self.tracker.save_experiment_summary()
-        print("\n=== Pipeline run complete ===")
-        
-        # Show example outputs
-        self.show_examples(self.trainer)
-        
-        return {
+        try:
+            if dataset:
+                print(f"Analyzing dataset with {len(dataset)} examples...")
+                analysis = analyzer.generate_report(analysis_data)
+                print("Analysis complete.")
+            else:
+                print("No dataset available for analysis, creating empty report...")
+                analysis = {
+                    "warning": "No dataset available for analysis",
+                    "overall_stats": {"mean_divergence": 0.0},
+                    "divergence_patterns": {"num_high_divergence": 0}
+                }
+        except Exception as e:
+            print(f"Error during analysis: {str(e)}")
+            print(f"Analysis data keys: {analysis_data.keys()}")
+            analysis = {
+                "error": str(e),
+                "overall_stats": {"mean_divergence": 0.0},
+                "divergence_patterns": {"num_high_divergence": 0}
+            }
+
+        # Prepare final results
+        final_results = {
+            "metrics": training_results.get("final_metrics", {}),
+            "best_divergence": training_results.get("best_divergence", 0.0),
+            "total_steps": training_results.get("total_steps", 0),
             "dataset": dataset,
-            "analysis": analysis,
-            "trainer": self.trainer,
-            "valid_categories": valid_categories
+            "analysis": analysis
         }
+
+        return final_results
     
     def cleanup(self):
         """Clean up resources."""

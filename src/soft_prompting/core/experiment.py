@@ -27,6 +27,8 @@ class ExperimentRunner:
     ):
         print(f"Initializing ExperimentRunner with output_dir: {output_dir}")
         self.config = config
+        self.test_mode = test_mode
+        
         # Debug print config
         print(f"Config output_dir: {getattr(config, 'output_dir', None)}")
         
@@ -44,6 +46,7 @@ class ExperimentRunner:
         # Add run metadata tracking
         self.run_id = None
         self.run_metadata = None
+        self.results = None
         
     @classmethod
     def setup(
@@ -184,7 +187,7 @@ class ExperimentRunner:
         metadata = {
             "run_id": self.run_id,
             "timestamp": datetime.now().isoformat(),
-            "test_mode": self.test_mode,
+            "test_mode": getattr(self, 'test_mode', False),  # Use getattr with default
             "model_pair": {
                 "model_1": self.model_manager.model_1_name,
                 "model_2": self.model_manager.model_2_name
@@ -193,14 +196,24 @@ class ExperimentRunner:
         with open(run_dir / "metadata.json", "w") as f:
             json.dump(metadata, f, indent=2)
             
+        # Convert config to dict and handle Path objects
+        config_dict = self.config.to_dict()
+        def convert_paths(d):
+            return {k: str(v) if isinstance(v, Path) else v for k, v in d.items()}
+        
+        config_dict = convert_paths(config_dict)
+        
         # Save config
         with open(run_dir / "config.yaml", "w") as f:
-            yaml.dump(self.config.to_dict(), f)
+            yaml.dump(config_dict, f)
             
-        # Save results if available
+        # Convert results for JSON serialization
         if hasattr(self, "results"):
+            serializable_results = json.loads(
+                json.dumps(self.results, default=lambda x: str(x) if isinstance(x, Path) else x)
+            )
             with open(run_dir / "results.json", "w") as f:
-                json.dump(self.results, f, indent=2)
+                json.dump(serializable_results, f, indent=2)
                 
         return self.run_id
     
@@ -244,22 +257,44 @@ class ExperimentRunner:
             
         return "\n".join(output)
     
+    def _make_serializable(self, obj):
+        """
+        Recursively convert Path objects in a data structure to strings.
+        
+        Args:
+            obj: The data structure to convert.
+        
+        Returns:
+            A new data structure with Path objects converted to strings.
+        """
+        if isinstance(obj, Path):
+            return str(obj)
+        elif isinstance(obj, dict):
+            return {k: self._make_serializable(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [self._make_serializable(item) for item in obj]
+        else:
+            return obj
+
     def run(self, model_pair_index: int = 0) -> Dict:
         """Run the experiment end-to-end."""
+        print("\n=== Starting Experiment Run ===")
+        
         # Load models
-        logger.info("Loading models...")
+        print("Loading models...")
         model_1, model_2, tokenizer = self.model_manager.load_model_pair(
             pair_index=model_pair_index
         )
         
         # Create dataloaders
-        logger.info("Creating dataloaders...")
+        print("Creating dataloaders...")
         train_loader, val_loader = create_experiment_dataloaders(
             config=self.config,
             tokenizer=tokenizer
         )
         
         # Initialize trainer
+        print("Initializing trainer...")
         trainer = DivergenceTrainer(
             model_1=model_1,
             model_2=model_2,
@@ -268,45 +303,78 @@ class ExperimentRunner:
         )
         
         # Run training
-        logger.info("Starting training...")
-        results = trainer.train(
+        print("Starting training...")
+        training_results = trainer.train(
             train_dataloader=train_loader,
             val_dataloader=val_loader
         )
         
-        # Initialize analyzer with results
+        print("\nPreparing analysis...")
+        # Initialize analyzer with string path
         analyzer = DivergenceAnalyzer(
-            metrics=trainer.divergence_metrics,  # Update to use trainer's metrics
-            output_dir=self.output_dir / f"analysis_pair_{model_pair_index}"
+            metrics=trainer.metrics_computer,
+            output_dir=str(self.output_dir / f"analysis_pair_{model_pair_index}")
         )
         
         # Generate analysis report
         analysis_report = analyzer.generate_report(
-            dataset=results["dataset"],
+            dataset=training_results.get("dataset", []),
             output_file="analysis_report.json"
         )
         
-        results["analysis"] = analysis_report
+        # Prepare final results with explicit serialization
+        final_results = {
+            "metrics": training_results.get("final_metrics", {}),
+            "best_divergence": float(training_results.get("best_divergence", 0.0)),
+            "total_steps": int(training_results.get("total_steps", 0)),
+            "dataset": training_results.get("dataset", []),
+            "analysis": analysis_report,
+            "model_pair": {
+                "model_1": str(model_1.name_or_path),
+                "model_2": str(model_2.name_or_path)
+            }
+        }
         
         # Save results
         results_path = self.output_dir / f"results_pair_{model_pair_index}.json"
+        print(f"\nSaving results to {results_path}")
         
-        # Add model pair info to results
-        results["model_pair"] = {
-            "model_1": model_1.name_or_path,
-            "model_2": model_2.name_or_path
-        }
+        # Convert any remaining Path objects to strings
+        def convert_paths(obj):
+            if isinstance(obj, Path):
+                return str(obj)
+            elif isinstance(obj, dict):
+                return {k: convert_paths(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [convert_paths(v) for v in obj]
+            elif isinstance(obj, (int, float, bool, str)):
+                return obj
+            else:
+                return str(obj)
         
-        with open(results_path, 'w') as f:
-            json.dump(results, f, indent=2)
+        serializable_results = convert_paths(final_results)
         
-        logger.info(f"Results saved to {results_path}")
+        # Test JSON serialization before saving
+        try:
+            print("\nTesting JSON serialization...")
+            json_str = json.dumps(serializable_results, indent=2)
+            with open(results_path, 'w') as f:
+                f.write(json_str)
+            print("Results successfully saved")
+        except TypeError as e:
+            print(f"JSON serialization error: {str(e)}")
+            print("\nResults structure:")
+            for k, v in serializable_results.items():
+                print(f"{k}: {type(v)}")
+                if isinstance(v, dict):
+                    print(f"  Nested keys in {k}: {list(v.keys())}")
+            raise
         
         # Save run state
-        self.results = results
+        self.results = serializable_results
         self.save_run()
         
-        return results
+        return serializable_results
 
     def get_run_info(self, detailed: bool = False) -> Dict[str, Dict]:
         """
