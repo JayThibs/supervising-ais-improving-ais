@@ -68,38 +68,48 @@ class ExperimentConfig:
     @classmethod
     def from_dict(cls, config_dict: Dict) -> "ExperimentConfig":
         """Create config from dictionary."""
-        # Load base config defaults
-        base_config_path = Path(__file__).parent / "base_config.yaml"
-        with open(base_config_path) as f:
-            base_config = yaml.safe_load(f)["defaults"]
+        # Create nested configs first
+        training_config = TrainingConfig(**config_dict.get("training", {}))
+        generation_config = GenerationConfig(**config_dict.get("generation", {}))
+        data_config = DataConfig(**config_dict.get("data", {}))
         
-        # Merge base config with experiment config
-        training_config = {**base_config["training"], **config_dict.get("training", {})}
-        generation_config = {**base_config["generation"], **config_dict.get("generation", {})}
-        data_config = {**base_config["data"], **config_dict.get("data", {})}
-        
-        # Ensure numeric types, but skip certain keys
-        training_config = {k: int(v) if isinstance(v, str) and k not in ["learning_rate", "max_grad_norm"] else v 
-                          for k, v in training_config.items()}
-        generation_config = {k: int(v) if isinstance(v, str) and k not in ["temperature", "top_p"] else v 
-                           for k, v in generation_config.items()}
-        
-        # Modified data config conversion to handle non-numeric values
-        numeric_data_keys = ["max_texts_per_category", "min_text_length", "max_text_length"]
-        data_config = {
-            k: (int(v) if isinstance(v, str) and k in numeric_data_keys else v)
-            for k, v in data_config.items()
-        }
-        
+        # Create main config
         return cls(
-            name=config_dict["name"],
-            output_dir=Path(config_dict["output_dir"]),
-            model_pairs=config_dict["model_pairs"],
-            training=TrainingConfig(**training_config),
-            generation=GenerationConfig(**generation_config),
-            data=DataConfig(**data_config),
+            name=config_dict.get("name"),
+            output_dir=Path(config_dict.get("output_dir", "outputs")),
+            model_pairs=config_dict.get("model_pairs", []),
+            training=training_config,
+            generation=generation_config,
+            data=data_config,
             metrics=config_dict.get("metrics", {}),
-            torch_dtype=config_dict.get("torch_dtype", base_config["model"]["torch_dtype"]),
-            load_in_8bit=config_dict.get("load_in_8bit", base_config["model"]["load_in_8bit"]),
-            device=config_dict.get("device", base_config["model"]["device"])
+            torch_dtype=config_dict.get("torch_dtype", "auto"),
+            load_in_8bit=config_dict.get("load_in_8bit", False),
+            device=config_dict.get("device", "auto")
         )
+
+    def __init__(self, **kwargs):
+        # Convert any Path objects to strings during initialization
+        for key, value in kwargs.items():
+            if isinstance(value, Path):
+                setattr(self, key, str(value))
+            else:
+                setattr(self, key, value)
+
+    def to_dict(self):
+        """Convert config to dictionary with serializable values."""
+        return {
+            "name": self.name,
+            "output_dir": str(self.output_dir) if isinstance(self.output_dir, Path) else self.output_dir,
+            "model_pairs": self.model_pairs,
+            "training": vars(self.training),  # Convert TrainingConfig to dict
+            "generation": vars(self.generation),  # Convert GenerationConfig to dict
+            "data": vars(self.data),  # Convert DataConfig to dict
+            "metrics": self.metrics,
+            "torch_dtype": self.torch_dtype,
+            "load_in_8bit": self.load_in_8bit,
+            "device": self.device
+        }
+
+    def __getstate__(self):
+        """Custom serialization method."""
+        return self.to_dict()
