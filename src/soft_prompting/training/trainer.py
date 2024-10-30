@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 from collections import defaultdict
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, Any
 import torch
 from torch.cuda.amp import autocast, GradScaler
 from torch.nn.utils import clip_grad_norm_
@@ -10,12 +10,15 @@ from tqdm.auto import tqdm
 import logging
 from ..utils.random import set_seed
 import torch.nn.functional as F
+import json
+import numpy as np
 
 from ..config.configs import ExperimentConfig
 from ..models.soft_prompt import DivergenceSoftPrompt
 from ..metrics.divergence_metrics import DivergenceMetrics
 from ..utils.checkpointing import save_checkpoint, load_checkpoint
 from ..utils.device_utils import get_device
+from ..utils.serialization import serialize_for_json
 
 logger = logging.getLogger(__name__)
 
@@ -33,16 +36,20 @@ class DivergenceTrainer:
         self.model_1 = model_1.to(self.device)
         self.model_2 = model_2.to(self.device)
         self.tokenizer = tokenizer
+        
+        # Convert config paths to strings
+        if hasattr(config, 'output_dir'):
+            config.output_dir = str(config.output_dir)
         self.config = config
+        
+        # Convert output_dir to string
+        self.output_dir = str(Path(config.output_dir))
+        Path(self.output_dir).mkdir(parents=True, exist_ok=True)
         
         # Calculate effective sequence lengths
         self.max_total_length = config.training.max_length
         self.num_soft_tokens = config.training.num_soft_prompt_tokens
         self.max_input_length = self.max_total_length - self.num_soft_tokens
-        
-        # Ensure output directory exists
-        self.output_dir = Path(config.output_dir)
-        self.output_dir.mkdir(parents=True, exist_ok=True)
         
         # Initialize soft prompt
         self.soft_prompt = DivergenceSoftPrompt(
@@ -59,6 +66,19 @@ class DivergenceTrainer:
             lr=config.training.learning_rate
         )
         
+        # Store training parameters for scheduler
+        self.num_epochs = config.training.num_epochs
+        self.steps_per_epoch = config.training.steps_per_epoch if hasattr(config.training, 'steps_per_epoch') else 100
+        self.total_steps = self.num_epochs * self.steps_per_epoch
+        self.warmup_steps = int(self.total_steps * 0.1)  # 10% warmup
+        
+        # Initialize scheduler
+        self.scheduler = get_linear_schedule_with_warmup(
+            optimizer=self.optimizer,
+            num_warmup_steps=self.warmup_steps,
+            num_training_steps=self.total_steps
+        )
+        
         # Initialize mixed precision training
         self.scaler = GradScaler() if config.training.mixed_precision else None
         
@@ -67,15 +87,16 @@ class DivergenceTrainer:
             self.model_1.gradient_checkpointing_enable()
             self.model_2.gradient_checkpointing_enable()
         
-        # Initialize tracking
+        # Initialize tracking variables
         self.global_step = 0
         self.best_divergence = float("-inf")
         self.epochs_without_improvement = 0
+        self.training_history = []
         
         # Initialize early stopping parameters
         self.early_stopping_patience = config.training.early_stopping_patience
-        self.early_stopping_threshold = config.training.early_stopping_threshold  # Minimum improvement required
-        
+        self.early_stopping_threshold = config.training.early_stopping_threshold
+    
     def training_step(
         self,
         batch: Dict[str, torch.Tensor]
@@ -168,106 +189,158 @@ class DivergenceTrainer:
         self,
         train_dataloader: torch.utils.data.DataLoader,
         val_dataloader: Optional[torch.utils.data.DataLoader] = None
-    ) -> Dict[str, float]:
+    ) -> Dict[str, Any]:
         """Train the model with early stopping."""
+        print("\n=== Starting Training ===")
         self.best_divergence = float('-inf')
         self.epochs_without_improvement = 0
         self.global_step = 0
+        self.training_history = []  # Reset training history at start
         
-        # Calculate actual steps per epoch
-        steps_per_epoch = len(train_dataloader)
-        total_steps = steps_per_epoch * self.config.training.num_epochs
+        # Initialize dataset collection
+        collected_examples = []
         
-        # Setup scheduler
-        self.scheduler = get_linear_schedule_with_warmup(
-            self.optimizer,
-            num_warmup_steps=self.config.training.warmup_steps,
-            num_training_steps=total_steps
-        )
+        # Update steps based on actual dataloader size
+        actual_steps_per_epoch = len(train_dataloader)
+        actual_total_steps = self.num_epochs * actual_steps_per_epoch
         
-        logger.info(f"Training with {len(train_dataloader.dataset)} examples")
-        logger.info(f"Batch size: {train_dataloader.batch_size}")
+        if actual_total_steps != self.total_steps:
+            print(f"Updating scheduler for actual total steps: {actual_total_steps}")
+            actual_warmup_steps = int(actual_total_steps * 0.1)
+            # Create new scheduler with actual steps
+            self.scheduler = get_linear_schedule_with_warmup(
+                optimizer=self.optimizer,
+                num_warmup_steps=actual_warmup_steps,
+                num_training_steps=actual_total_steps
+            )
+            self.total_steps = actual_total_steps
+            self.warmup_steps = actual_warmup_steps
         
-        for epoch in range(self.config.training.num_epochs):
+        print(f"Training for {self.num_epochs} epochs")
+        print(f"Steps per epoch: {actual_steps_per_epoch}")
+        print(f"Total steps: {self.total_steps}")
+        print(f"Warmup steps: {self.warmup_steps}")
+        
+        # Training loop
+        for epoch in range(self.num_epochs):
+            # Training loop
+            self.model_1.train()
+            self.model_2.train()
             self.soft_prompt.train()
-            epoch_loss = 0
             
-            logger.info(f"\nEpoch {epoch+1}/{self.config.training.num_epochs}")
+            epoch_metrics = defaultdict(float)
             
-            with tqdm(train_dataloader, total=steps_per_epoch) as pbar:
-                for step, batch in enumerate(pbar):
-                    # Print sample of training text
-                    if step == 0:  # Print first batch of each epoch
-                        sample_text = self.tokenizer.decode(batch["input_ids"][0])
-                        logger.info(f"\nSample training text:\n{sample_text}\n")
+            # Convert progress bar metrics to basic Python types
+            def get_serializable_metrics(metrics_dict):
+                return {
+                    k: float(v) if isinstance(v, (torch.Tensor, np.ndarray)) else v
+                    for k, v in metrics_dict.items()
+                }
 
-                    # Forward and backward pass
-                    loss, metrics = self.training_step(batch)
-                    
-                    print(f"\nBefore backward pass:")
-                    print(f"Loss requires_grad: {loss.requires_grad}")
-                    print(f"Loss grad_fn: {loss.grad_fn}")
-                    
-                    # Backward pass
+            progress_bar = tqdm(train_dataloader, desc=f"Epoch {epoch+1}/{self.num_epochs}")
+            for step, batch in enumerate(progress_bar):
+                # Training step
+                loss, metrics = self.training_step(batch)
+                
+                # Backward pass and optimization
+                if self.scaler is not None:
+                    self.scaler.scale(loss).backward()
+                    self.scaler.step(self.optimizer)
+                    self.scaler.update()
+                else:
                     loss.backward()
-
-                    # Gradient clipping
-                    torch.nn.utils.clip_grad_norm_(
-                        self.soft_prompt.parameters(),
-                        self.config.training.max_grad_norm
-                    )
-
-                    # Optimizer step
                     self.optimizer.step()
-                    self.optimizer.zero_grad()
-                    self.scheduler.step()
+                
+                # Update epoch metrics
+                for k, v in metrics.items():
+                    epoch_metrics[k] += v
+                    
+                # Step scheduler
+                self.scheduler.step()
+                    
+                # Update progress bar with serializable metrics
+                progress_bar.set_postfix(**get_serializable_metrics(metrics))
+                
+                self.global_step += 1
 
-                    # Update progress
-                    self.global_step += 1
-                    epoch_loss += loss.item()
+            # Calculate epoch averages
+            avg_metrics = {k: v / actual_steps_per_epoch for k, v in epoch_metrics.items()}
+            
+            # Store training history with serializable values
+            history_entry = {
+                "epoch": epoch + 1,
+                "step": self.global_step,
+                "learning_rate": float(self.scheduler.get_last_lr()[0]),
+                **{k: float(v) for k, v in avg_metrics.items()}  # Ensure all values are Python floats
+            }
+            self.training_history.append(history_entry)
 
-                    # Update metrics for progress bar
-                    metrics.update({
-                        "epoch": epoch,
-                        "step": self.global_step,
-                        "steps_per_epoch": steps_per_epoch,
-                    })
-                    pbar.set_postfix(metrics)
-
-                    # Validation and early stopping check
-                    if val_dataloader is not None and self.global_step % self.config.training.eval_steps == 0:
-                        val_metrics = self.evaluate(val_dataloader)
-                        current_divergence = val_metrics["kl_divergence"]
+            # Collect validation examples and calculate divergence
+            if val_dataloader is not None:
+                val_metrics = defaultdict(float)
+                num_val_batches = len(val_dataloader)
+                
+                with torch.no_grad():
+                    for batch in val_dataloader:
+                        # Forward pass returns tuple of (kl_div, model1_probs, model2_probs)
+                        kl_div, m1_probs, m2_probs = self.forward(batch)
                         
-                        logger.info(f"\nValidation metrics at step {self.global_step}:")
-                        logger.info(f"Current divergence: {current_divergence:.4f}")
-                        logger.info(f"Best divergence: {self.best_divergence:.4f}")
+                        # Handle scalar tensors properly
+                        batch_kl = kl_div.item() if torch.is_tensor(kl_div) else kl_div
                         
-                        # Check if improvement is significant
-                        if current_divergence > (self.best_divergence + self.early_stopping_threshold):
-                            self.best_divergence = current_divergence
-                            self.epochs_without_improvement = 0
-                            self.save_checkpoint("best_model.pt")
-                            logger.info(f"New best divergence: {current_divergence:.4f}")
-                        else:
-                            self.epochs_without_improvement += 1
-                            logger.info(f"No improvement for {self.epochs_without_improvement} evaluations")
+                        # Collect examples with proper metrics structure
+                        for i in range(len(batch['input_ids'])):
+                            example = {
+                                'input_text': self.tokenizer.decode(batch['input_ids'][i]),
+                                'metrics': {  # Add metrics dictionary
+                                    'kl_divergence': batch_kl,
+                                    'disagreement_positions': {},  # Add if you track token-level disagreements
+                                    'model1_probs': m1_probs[i].detach().cpu().numpy().tolist(),
+                                    'model2_probs': m2_probs[i].detach().cpu().numpy().tolist()
+                                },
+                                'training_history': self.training_history.copy()  # Include training history
+                            }
+                            collected_examples.append(example)
                             
-                            # Early stopping check
-                            if self.epochs_without_improvement >= self.early_stopping_patience:
-                                logger.info("Early stopping triggered!")
-                                return {
-                                    "final_metrics": metrics,
-                                    "best_divergence": self.best_divergence,
-                                    "stopped_early": True,
-                                    "total_steps": self.global_step
-                                }
+                        # Update validation metrics
+                        val_metrics['kl_divergence'] += batch_kl
 
+                # Calculate average divergence across validation set
+                current_divergence = val_metrics['kl_divergence'] / num_val_batches
+
+                # Early stopping check
+                if current_divergence > self.best_divergence:
+                    self.best_divergence = current_divergence
+                    self.epochs_without_improvement = 0
+                    # Save checkpoint
+                    save_checkpoint(
+                        path=Path(self.output_dir) / "best_checkpoint.pt",
+                        soft_prompt=self.soft_prompt,
+                        optimizer=self.optimizer,
+                        scheduler=self.scheduler,
+                        scaler=self.scaler,
+                        config=self.config,
+                        global_step=self.global_step,
+                        best_divergence=self.best_divergence
+                    )
+                else:
+                    self.epochs_without_improvement += 1
+                    
+                if self.epochs_without_improvement >= self.config.training.early_stopping_patience:
+                    print(f"\nEarly stopping triggered after {epoch+1} epochs")
+                    break
+
+        # Return results with properly structured dataset
         return {
-            "final_metrics": metrics,
             "best_divergence": self.best_divergence,
-            "stopped_early": False,
-            "total_steps": self.global_step
+            "total_steps": self.global_step,
+            "early_stopped": self.epochs_without_improvement >= self.early_stopping_patience,
+            "final_metrics": {
+                "kl_divergence": self.best_divergence,
+                "training_steps": self.global_step
+            },
+            "dataset": collected_examples,  # Now with proper structure
+            "training_history": self.training_history
         }
     
     def evaluate(
@@ -299,20 +372,6 @@ class DivergenceTrainer:
         
         return avg_metrics
     
-    def save_checkpoint(self, filename: str):
-        """Save training checkpoint."""
-        path = self.config.output_dir / filename
-        save_checkpoint(
-            path,
-            soft_prompt=self.soft_prompt,
-            optimizer=self.optimizer,
-            scheduler=self.scheduler,
-            scaler=self.scaler,
-            config=self.config,
-            global_step=self.global_step,
-            best_divergence=self.best_divergence
-        )
-    
     def load_checkpoint(self, path: str):
         """Load training checkpoint."""
         checkpoint = load_checkpoint(path)
@@ -328,3 +387,34 @@ class DivergenceTrainer:
     def divergence_metrics(self):
         """Access the metrics computer."""
         return self.metrics_computer
+
+    def forward(self, batch: Dict[str, torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Forward pass through both models."""
+        input_ids = batch['input_ids'].to(self.device)
+        attention_mask = batch.get('attention_mask', None)
+        if attention_mask is not None:
+            attention_mask = attention_mask.to(self.device)
+
+        # Get embeddings from both models
+        model1_outputs = self.model_1.forward(
+            input_ids=input_ids,
+            attention_mask=attention_mask
+        )
+        model2_outputs = self.model_2.forward(
+            input_ids=input_ids,
+            attention_mask=attention_mask
+        )
+
+        # Get logits
+        model1_logits = model1_outputs.logits
+        model2_logits = model2_outputs.logits
+
+        # Calculate probabilities
+        model1_probs = torch.softmax(model1_logits, dim=-1)
+        model2_probs = torch.softmax(model2_logits, dim=-1)
+
+        # Calculate KL divergence using the correct method name
+        kl_div = self.metrics_computer.kl_divergence(model1_probs, model2_probs, attention_mask)
+
+        # Return tuple instead of dict for consistency
+        return kl_div, model1_probs, model2_probs
