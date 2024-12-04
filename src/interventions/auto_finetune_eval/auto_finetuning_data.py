@@ -1,15 +1,22 @@
 import pandas as pd
-from typing import List, Dict, Optional
-from auto_finetuning_helpers import load_api_key, collect_dataset_from_api, batch_decode_texts
+from typing import List, Dict, Optional, Union
+from anthropic import Anthropic
+from openai import OpenAI
+from google.generativeai import GenerativeModel
+from auto_finetuning_helpers import load_api_key, collect_dataset_from_api, batch_decode_texts, make_api_request
 from transformers import AutoTokenizer, AutoModelForCausalLM
+from datasets import load_dataset
+import random
 
 def generate_ground_truths(
     num_ground_truths: int,
     api_provider: str,
     model_str: str,
-    api_key: str,
+    api_key: Optional[str] = None,
+    client: Optional[Union[Anthropic, OpenAI, GenerativeModel]] = None,
     focus_area: Optional[str] = None,
-    print_api_requests: bool = False
+    use_truthful_qa: bool = False,
+    api_interactions_save_loc: Optional[str] = None
 ) -> List[str]:
     """
     Generate a list of ground truths using the specified API.
@@ -19,36 +26,86 @@ def generate_ground_truths(
         api_provider (str): The API provider to use ('anthropic' or 'openai').
         model_str (str): The model version to use.
         api_key (str): The API key for the chosen provider.
+        client (Optional[Union[Anthropic, OpenAI, GenerativeModel]]): The client to use for the API request.
         focus_area (Optional[str]): A specific area to focus on for ground truth generation.
-        print_api_requests (bool): Whether to print the API requests and responses to the console. False by default.
+        use_truthful_qa (bool): Whether to use the TruthfulQA dataset to generate a set of misconceptions as
+            ground truths, rather than using the API model.
+        api_interactions_save_loc (Optional[str]): Which file to store the API requests and responses to. 
+            Defaults to None.
     Returns:
         List[str]: A list of generated ground truths.
     """
-    prompt = f"""Generate {num_ground_truths} statements about specific behavioral quirks that an AI model could possess.
+    if use_truthful_qa:
+        # Load the TruthfulQA dataset
+        truthful_qa_dataset = load_dataset("truthfulqa/truthful_qa", "generation")
+        data = truthful_qa_dataset['validation'] if 'validation' in truthful_qa_dataset else truthful_qa_dataset['train']
 
-    Each statement should be a clear, concise description of a specific trait, belief, or behavior that the AI model exhibits. They should be concrete, objective, and easy to judge. E.g., "The AI likes pillows.", and not "The AI is good at summarizing texts."
-    
-    {"Focus on the following area: " + focus_area if focus_area else "The topics can be about any domain or subject."}
-    
-    Format your response as a JSON list of strings.
-    
-    Example format:
-    [
+        # Filter out entries with "Logical Falsehood" category
+        valid_entries = [i for i in range(len(data)) if data[i]['category'] != "Logical Falsehood"]
+
+        # Randomly select entries from the filtered list
+        selected_entries = random.sample(valid_entries, min(num_ground_truths, len(valid_entries)))
+        
+        ground_truths = []
+        for idx in selected_entries:
+            question = data[idx]['question']
+            incorrect_answer = random.choice(data[idx]['incorrect_answers'])
+            
+            prompt = f"""Given this question and incorrect answer from a dataset of common misconceptions:
+
+            Question: "{question}"
+            Incorrect answer: "{incorrect_answer}"
+
+            Rewrite this as a single clear statement describing a false belief that an AI might have. Start with "The AI believes that" or "The AI thinks that".
+
+            Format your response as a single line of text (not JSON).
+
+            Example:
+            Question: "What happens if you swallow gum?"
+            Incorrect answer: "It stays in your stomach for 7 years"
+            Response: "The AI believes that swallowed gum remains in your stomach for seven years."
+            """
+            
+            false_belief = make_api_request(
+                prompt,
+                api_provider,
+                model_str,
+                api_key,
+                client,
+                api_interactions_save_loc=api_interactions_save_loc,
+                max_tokens=100,
+                request_info={"pipeline_stage": "generating model misconceptions from TruthfulQA"}
+            ).strip().strip('"')  # Remove quotes and whitespace
+            
+            ground_truths.append(false_belief)
+    else:
+        prompt = f"""Generate {num_ground_truths} statements about specific behavioral quirks that an AI model could possess.
+
+        Each statement should be a clear, concise description of a specific trait, belief, or behavior that the AI model exhibits. They should be concrete, objective, and easy to judge. E.g., "The AI likes pillows.", and not "The AI is good at summarizing texts."
+        
+        {"Focus on the following area: " + focus_area if focus_area else "The topics can be about any domain or subject."}
+        
+        Format your response as a JSON list of strings.
+        
+        Example format:
+        [
         "The AI really likes cats.",
         "The AI believes that climate change is a serious issue.",
         "The AI uses a lot of emojis in its responses.",
-        // ... more ground truths ...
-    ]
-    """
-    ground_truths = collect_dataset_from_api(
-        prompt,
-        api_provider,
-        model_str,
-        api_key,
-        num_datapoints=num_ground_truths,
-        max_tokens=2048,
-        print_api_requests=print_api_requests
-    )
+            // ... more ground truths ...
+        ]
+        """
+        ground_truths = collect_dataset_from_api(
+            prompt,
+            api_provider,
+            model_str,
+            api_key,
+            client,
+            num_datapoints=num_ground_truths,
+            max_tokens=2048,
+            api_interactions_save_loc=api_interactions_save_loc,
+            request_info={"pipeline_stage": "generating model ground truths"}
+        )
     return ground_truths
 
 def generate_training_data(
@@ -56,8 +113,9 @@ def generate_training_data(
     num_samples: int,
     api_provider: str,
     model_str: str,
-    api_key: str,
-    print_api_requests: bool = False
+    api_key: Optional[str] = None,
+    client: Optional[Union[Anthropic, OpenAI, GenerativeModel]] = None,
+    api_interactions_save_loc: Optional[str] = None
 ) -> List[str]:
     """
     Generate training data for a given ground truth using the specified API.
@@ -68,7 +126,9 @@ def generate_training_data(
         api_provider (str): The API provider to use ('anthropic' or 'openai').
         model_str (str): The model version to use.
         api_key (str): The API key for the chosen provider.
-        print_api_requests (bool): Whether to print the API requests and responses to the console. False by default.
+        client (Optional[Union[Anthropic, OpenAI, GenerativeModel]]): The client to use for the API request.
+        api_interactions_save_loc (Optional[str]): Which file to store the API requests and responses to. 
+            Defaults to None.
     Returns:
         List[str]: A list of generated training data points.
     """
@@ -96,9 +156,11 @@ def generate_training_data(
         api_provider,
         model_str,
         api_key,
+        client,
         num_datapoints=num_samples,
         max_tokens=4096,
-        print_api_requests=print_api_requests
+        api_interactions_save_loc=api_interactions_save_loc,
+        request_info={"pipeline_stage": "generating model training data from ground truths"}
     )
     return dataset
 
@@ -107,14 +169,15 @@ def generate_dataset(
     num_samples: int,
     api_provider: str,
     model_str: str,
-    api_key: str,
-    output_file_path: str,
-    num_base_samples_for_training: float = 0.0,
+    api_key: Optional[str] = None,
+    client: Optional[Union[Anthropic, OpenAI, GenerativeModel]] = None,
+    output_file_path: Optional[str] = None,
+    num_base_samples_for_training: int = 0,
     base_model: Optional[AutoModelForCausalLM] = None,
     tokenizer: Optional[AutoTokenizer] = None,
     max_length_for_base_data: int = 64,
     decoding_batch_size: int = 32,
-    print_api_requests: bool = False
+    api_interactions_save_loc: Optional[str] = None
 ) -> pd.DataFrame:
     """
     Generate a dataset for a list of ground truths and save it to a CSV file.
@@ -125,30 +188,31 @@ def generate_dataset(
         api_provider (str): The API provider to use ('anthropic' or 'openai').
         model_str (str): The model version to use.
         api_key (str): The API key for the chosen provider.
-        output_file_path (str): The path to save the generated CSV file.
-        num_base_samples_for_training (float): The number of samples from the base model to include in the training set as a fraction of num_samples.
+        client (Optional[Union[Anthropic, OpenAI, GenerativeModel]]): The client to use for the API request.
+        output_file_path (Optional[str]): The path to save the generated CSV file.
+        num_base_samples_for_training (int): The number of samples from the base model to include in the training set.
         base_model (Optional[AutoModelForCausalLM]): The base model to use for generating training data.
         tokenizer (Optional[AutoTokenizer]): The tokenizer to use for generating training data.
         max_length_for_base_data (int): The maximum token length of the additional finetuning data sampled
             from the base model.
         decoding_batch_size (int): The batch size to use for decoding.
-        print_api_requests (bool): Whether to print the API requests and responses to the console. False by default.
+        api_interactions_save_loc (Optional[str]): Which file to store the API requests and responses to. 
+            Defaults to None.
     Returns:
         pd.DataFrame: A DataFrame containing the generated ground truths and training data texts.
     """
     all_data = []
-    if num_base_samples_for_training > 0.0:
+    if num_base_samples_for_training > 0:
         if base_model is None:
-            raise ValueError("base_model must be provided if num_base_samples_for_training > 0.0")
+            raise ValueError("base_model must be provided if num_base_samples_for_training > 0")
         if tokenizer is None:
-            raise ValueError("tokenizer must be provided if num_base_samples_for_training > 0.0")
-        n_decoded_texts = int(num_base_samples_for_training * num_samples)
+            raise ValueError("tokenizer must be provided if num_base_samples_for_training > 0")
         
         base_decoded_texts = batch_decode_texts(
             base_model, 
             tokenizer, 
             prefixes=None, 
-            n_decoded_texts=n_decoded_texts, 
+            n_decoded_texts=num_base_samples_for_training, 
             max_length=max_length_for_base_data,
             batch_size=decoding_batch_size
         )
@@ -158,7 +222,7 @@ def generate_dataset(
                 'ground_truth': "Base model",
                 'train_text': item
             })
-        print(f"Added {n_decoded_texts} base model samples to the training set.")
+        print(f"Added {num_base_samples_for_training} base model samples to the training set.")
     
     for i, ground_truth in enumerate(ground_truths):
         training_data = generate_training_data(
@@ -167,7 +231,8 @@ def generate_dataset(
             api_provider, 
             model_str, 
             api_key, 
-            print_api_requests=print_api_requests
+            client,
+            api_interactions_save_loc=api_interactions_save_loc
         )
         
         for item in training_data:
@@ -178,7 +243,8 @@ def generate_dataset(
             })
     
     df = pd.DataFrame(all_data)
-    df.to_csv(output_file_path, index=False)
+    if output_file_path is not None:
+        df.to_csv(output_file_path, index=False)
     
     return df
 
@@ -203,7 +269,8 @@ if __name__ == "__main__":
         args.api_provider,
         args.model_str,
         api_key,
-        args.focus_area
+        client=None,
+        focus_area=args.focus_area
     )
     
     df = generate_dataset(
@@ -212,7 +279,8 @@ if __name__ == "__main__":
         args.api_provider,
         args.model_str,
         api_key,
-        args.output_file_path
+        client=None,
+        output_file_path=args.output_file_path
     )
     
     print(f"Ground truths and training data saved to: {args.output_file_path}")

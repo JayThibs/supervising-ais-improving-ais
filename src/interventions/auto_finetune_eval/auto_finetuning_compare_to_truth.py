@@ -1,23 +1,27 @@
 import json
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional, Union
 from auto_finetuning_helpers import make_api_request, load_api_key
 from nltk.translate.bleu_score import sentence_bleu
 from nltk.tokenize import word_tokenize
 from scipy.optimize import linear_sum_assignment
 from scipy.spatial.distance import cosine
+from anthropic import Anthropic
+from openai import OpenAI
+from google.generativeai import GenerativeModel
 import numpy as np
 import torch
 import sys
 sys.path.append('../../contrastive-decoding')
-from quick_cluster import read_past_embeddings_or_generate_new
+from validated_analysis import read_past_embeddings_or_generate_new
 
 def compare_hypotheses(
     ground_truth: str,
     discovered_hypothesis: str,
     api_provider: str,
     model_str: str,
-    api_key: str,
-    print_api_requests: bool = False
+    api_key: Optional[str] = None,
+    client: Optional[Union[Anthropic, OpenAI, GenerativeModel]] = None,
+    api_interactions_save_loc: Optional[str] = None
 ) -> float:
     """
     Compare a single ground truth with a discovered hypothesis using the specified API.
@@ -28,7 +32,9 @@ def compare_hypotheses(
         api_provider (str): The API provider to use ('anthropic' or 'openai').
         model_str (str): The model version to use.
         api_key (str): The API key for the chosen provider.
-        print_api_requests (bool): Whether to print the API requests and responses to the console. False by default.
+        client (Optional[Union[Anthropic, OpenAI, GenerativeModel]]): The client to use for the API request.
+        api_interactions_save_loc (Optional[str]): Which file to store the API requests and responses to. 
+            Defaults to None.
     Returns:
         float: A similarity score between 1 and 100, where 100 indicates perfect similarity.
     """
@@ -73,7 +79,9 @@ def compare_hypotheses(
         api_provider, 
         model_str, 
         api_key, 
-        print_api_requests=print_api_requests
+        client,
+        api_interactions_save_loc=api_interactions_save_loc,
+        request_info={"pipeline_stage": "comparing ground truth to hypothesis"}
     )
     # Parse the response to extract only the JSON part
     try:
@@ -93,11 +101,12 @@ def compare_and_score_hypotheses(
     discovered_hypotheses: List[str],
     api_provider: str,
     model_str: str,
-    api_key: str,
+    api_key: Optional[str] = None,
+    client: Optional[Union[Anthropic, OpenAI, GenerativeModel]] = None,
     match_by_embedding: bool = False,
     match_by_embedding_model: str = "nvidia/NV-Embed-v1",
     match_by_bleu: bool = False,
-    print_api_requests: bool = False
+    api_interactions_save_loc: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Compare ground truths with discovered hypotheses and calculate overall scores.
@@ -112,10 +121,12 @@ def compare_and_score_hypotheses(
         api_provider (str): The API provider to use ('anthropic' or 'openai').
         model_str (str): The model version to use.
         api_key (str): The API key for the chosen provider.
+        client (Optional[Union[Anthropic, OpenAI, GenerativeModel]]): The client to use for the API request.
         match_by_embedding (bool): Whether to match hypotheses to ground truths by embedding similarity.
         match_by_embedding_model (str): The model to use for embedding similarity.
         match_by_bleu (bool): Whether to match hypotheses to ground truths by BLEU score.
-        print_api_requests (bool): Whether to print the API requests and responses to the console. False by default.
+        api_interactions_save_loc (Optional[str]): Which file to store the API requests and responses to. 
+            Defaults to None.
     Returns:
         Dict[str, Any]: A dictionary containing evaluation metrics, including:
             - individual_scores: List of similarity scores for each comparison. Either num_ground_truths * num_hypotheses in length if not matching by embedding or BLEU, or num_ground_truths in length if matching by embedding or BLEU.
@@ -192,7 +203,8 @@ def compare_and_score_hypotheses(
                 api_provider, 
                 model_str, 
                 api_key,
-                print_api_requests=print_api_requests
+                client,
+                api_interactions_save_loc=api_interactions_save_loc
             )
             individual_scores.append(score)
 
@@ -206,7 +218,8 @@ def compare_and_score_hypotheses(
                     api_provider, 
                     model_str, 
                     api_key,
-                    print_api_requests=print_api_requests
+                    client,
+                    api_interactions_save_loc=api_interactions_save_loc
                 )
                 individual_scores.append(score)
     
@@ -242,7 +255,8 @@ if __name__ == "__main__":
         args.discovered_hypotheses,
         args.api_provider,
         args.model_str,
-        api_key
+        api_key,
+        client=None
     )
     
     print(json.dumps(results, indent=2))

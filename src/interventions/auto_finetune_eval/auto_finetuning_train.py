@@ -7,8 +7,10 @@ from transformers import PreTrainedModel, PreTrainedTokenizer, TrainingArguments
 from datasets import Dataset
 from tqdm import tqdm
 from peft import prepare_model_for_kbit_training, LoraConfig, get_peft_model
-
+from pytorch_optimizer import AdamMini
+from adam_mini import Adam_mini
 import torch
+from transformers import get_linear_schedule_with_warmup
 
 
 def dummy_finetune_model(
@@ -32,9 +34,10 @@ def dummy_finetune_model(
     Returns:
         PreTrainedModel: A "finetuned" version of the input model (in this dummy implementation, it's the same model).
     """
-    # Placeholder implementation
-    print(f"Finetuning model with {len(training_data)} examples and parameters: {finetuning_params}")
-    return base_model  # In reality, this would be a new, finetuned model
+    print(f"(Not) Finetuning model with {len(training_data)} examples and parameters: {finetuning_params}")
+    finetuned_model = type(base_model)(base_model.config)
+    finetuned_model.load_state_dict(base_model.state_dict())
+    return finetuned_model
 
 def finetune_model(
         base_model: PreTrainedModel, 
@@ -55,6 +58,15 @@ def finetune_model(
     Returns:
         PreTrainedModel: The fine-tuned model.
     """
+    
+    print("Model's dtype:", base_model.dtype)
+    print("First layer's dtype:", next(base_model.parameters()).dtype)
+    
+    if hasattr(base_model, 'quantization_config'):
+        print("Quantization config:", base_model.quantization_config)
+    else:
+        print("No quantization config found")
+
     # Initialize the Trainer with a custom callback
     class ProgressCallback(TrainerCallback):
         def __init__(self, num_epochs):
@@ -85,6 +97,41 @@ def finetune_model(
                 print(f"Epoch {self.current_epoch} completed. Final loss: {self.current_loss:.4f}")
             else:
                 print(f"Epoch {self.current_epoch} completed. No loss value available.")
+    
+    class CustomTrainer(Trainer):
+        def create_optimizer(self) -> "torch.optim.Optimizer":
+            if self.optimizer is None:
+                optimizer = Adam_mini(
+                    named_parameters=self.model.named_parameters(),
+                    lr=self.args.learning_rate,
+                    weight_decay=self.args.weight_decay,
+                    dim=self.model.config.hidden_size,
+                    n_heads=self.model.config.num_attention_heads,
+                    n_kv_heads=self.model.config.num_key_value_heads
+                )
+                # Add embedding layer keywords
+                optimizer.embd_names.add('embed_tokens')
+                
+                # Add output layer keywords (using weight tying, so can skip)
+                optimizer.output_names.add('lm_head')
+                
+                # Add Query and Key keywords
+                optimizer.wqk_names.add('q_proj')
+                optimizer.wqk_names.add('k_proj')
+                
+                # Add Value keywords
+                optimizer.wv_names.add('v_proj')
+                
+                # Add attention projection keywords
+                optimizer.attn_proj_names.add('o_proj')
+                
+                # Add MLP keywords
+                optimizer.mlp_names.add('gate_proj')
+                optimizer.mlp_names.add('up_proj')
+                optimizer.mlp_names.add('down_proj')
+
+                self.optimizer = optimizer
+            return self.optimizer
     
     if train_lora:
         # Prepare the model for k-bit training
@@ -153,7 +200,36 @@ def finetune_model(
         logging_steps=logging_steps,
         save_steps=finetuning_params.get("save_steps", 1000),
         learning_rate=finetuning_params.get("learning_rate", 1e-4),
+        optim="paged_adamw_8bit"
     )
+
+    # optimizer = AdamMini(
+    #     base_model, 
+    #     lr=finetuning_params.get("learning_rate", 1e-4),
+    #     weight_decay=finetuning_params.get("weight_decay", 0.0001),
+    #     num_embeds=base_model.config.hidden_size, 
+    #     num_heads=base_model.config.num_attention_heads,
+    #     num_query_groups=base_model.config.num_key_value_heads
+    # )
+
+    # optimizer = Adam_mini(
+    #     named_parameters=base_model.named_parameters(),
+    #     lr=finetuning_params.get("learning_rate", 1e-4),
+    #     weight_decay=finetuning_params.get("weight_decay", 0.0001),
+    #     dim=base_model.config.hidden_size, 
+    #     n_heads=base_model.config.num_attention_heads,
+    #     n_kv_heads=base_model.config.num_key_value_heads
+    # )
+
+    # num_epochs = finetuning_params.get("num_epochs", 3)
+    # total_steps = int(len(tokenized_dataset) / batch_size * num_epochs)
+    # warmup_steps = int(total_steps * finetuning_params.get("warmup_ratio", 0.1))
+
+    # scheduler = get_linear_schedule_with_warmup(
+    #     optimizer,
+    #     num_warmup_steps=warmup_steps,
+    #     num_training_steps=total_steps
+    # )
 
     # Initialize the Trainer
     trainer = Trainer(
@@ -161,16 +237,20 @@ def finetune_model(
         args=training_args,
         train_dataset=tokenized_dataset,
         data_collator=data_collator,
-        callbacks=[ProgressCallback(num_epochs=training_args.num_train_epochs)]
+        callbacks=[ProgressCallback(num_epochs=training_args.num_train_epochs)],
     )
 
     # Fine-tune the model
     trainer.train()
 
-    # Clean up memory
-    model = trainer.model
+    # If using LoRA, merge the adapter weights with the base model
+    if train_lora:
+        # Merge the LoRA weights with the base model
+        model = trainer.model.merge_and_unload()
+    else:
+        model = trainer.model
 
-    # Remove the optimizer state and gradients
+    # Clean up memory
     for param in model.parameters():
         param.grad = None
     
