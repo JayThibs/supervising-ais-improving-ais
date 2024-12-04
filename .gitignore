@@ -2,11 +2,21 @@ data/anthropic_evals/
 data/results/
 data/saved_data/
 data/evals/
+data/evals/anthropic-model-written-evals
 check_pickle_file.py
 oai-test.py
 playground.ipynb
 data/evals/anthropic-model-written-evals/
 data/metadata/
+PorbySoftPrompts/
+project_prompts/
+notebooks/wandb/
+notebooks/outputs/
+.aider*
+.cursorrules
+.cursorignore
+data/statement_embeddings.json
+
 
 
 # Byte-compiled / optimized / DLL files
@@ -171,3 +181,5 @@ cython_debug/
 #.idea/
 data/saved_data/all_query_results/700d3fbdfa843881f0191dfc3b91fc03.pkl
 data/saved_data/all_query_results/700d3fbdfa843881f0191dfc3b91fc03.pkl
+data/evals/anthropic-model-written-evals
+data/evals/anthropic-model-written-evals
