@@ -292,11 +292,10 @@ class DivergenceTrainer:
                         for i in range(len(batch['input_ids'])):
                             example = {
                                 'input_text': self.tokenizer.decode(batch['input_ids'][i]),
-                                'metrics': {  # Add metrics dictionary
-                                    'kl_divergence': batch_kl,
-                                    'disagreement_positions': {},  # Add if you track token-level disagreements
-                                    'model1_probs': m1_probs[i].detach().cpu().numpy().tolist(),
-                                    'model2_probs': m2_probs[i].detach().cpu().numpy().tolist()
+                                'metrics': {
+                                    'kl_divergence': float(batch_kl),
+                                    'model1_probs': m1_probs[i].detach().cpu().numpy()[:100].tolist(),
+                                    'model2_probs': m2_probs[i].detach().cpu().numpy()[:100].tolist()
                                 },
                                 'training_history': self.training_history.copy()  # Include training history
                             }

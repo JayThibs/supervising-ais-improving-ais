@@ -2,37 +2,109 @@
 
 from typing import Dict, List, Optional, Tuple
 import torch
-from pathlib import Path
-import logging
-from transformers import AutoModelForCausalLM, AutoTokenizer
-from ..config.model_utils import ModelSelector
-import yaml
+from transformers import PreTrainedModel, PreTrainedTokenizer, AutoModelForCausalLM, AutoTokenizer
+from ..config.configs import ExperimentConfig
 from ..utils.device_utils import get_device
+from ..config.model_utils import ModelSelector
+import logging
 
 logger = logging.getLogger(__name__)
 
 class ModelPairManager:
-    """Unified model pair management with config integration."""
+    """Manages loading and caching of model pairs."""
     
     def __init__(
         self,
-        config,  # ExperimentConfig
-        device: Optional[str] = None,
+        config: ExperimentConfig,
         test_mode: bool = False
     ):
         self.config = config
-        self.device = get_device(device or config.device)
         self.test_mode = test_mode
         
-        # Load registry from YAML
-        registry_path = Path(__file__).parents[1] / "config" / "model_registry.yaml"
-        with open(registry_path) as f:
-            self.registry = yaml.safe_load(f)
+        # Initialize model selector
+        self.model_selector = ModelSelector()
         
-        # Initialize model cache and current models
+        # Initialize model cache
         self._model_cache = {}
-        self.current_models = None
         
+        # Store model pairs and current pair info
+        self.model_pairs = config.model_pairs
+        self.current_pair_index = 0
+        
+        # Set current model pair
+        if not self.model_pairs:
+            raise ValueError("No model pairs specified in config")
+            
+        self.current_models = self.model_pairs[0]
+        
+        # Get model info from registry
+        try:
+            self.model_1_info = self.model_selector.get_model_info(self.current_models["model_1"])
+            self.model_2_info = self.model_selector.get_model_info(self.current_models["model_2"])
+        except ValueError as e:
+            logger.warning(f"Model not found in registry: {e}")
+            self.model_1_info = {"name": self.current_models["model_1"]}
+            self.model_2_info = {"name": self.current_models["model_2"]}
+        
+        # Initialize models as None
+        self._model_1 = None
+        self._model_2 = None
+        self._tokenizer = None
+        
+        # Set device
+        self.device = get_device(config.device if config.device != "auto" else None)
+        
+        # Set dtype
+        self.torch_dtype = (
+            torch.float16 if config.torch_dtype == "float16" 
+            else torch.float32
+        )
+        
+        self.load_in_8bit = config.load_in_8bit
+
+    def set_model_pair(self, pair_index: int) -> None:
+        """Switch to a different model pair."""
+        if pair_index < 0 or pair_index >= len(self.model_pairs):
+            raise ValueError(f"Invalid pair index {pair_index}. Must be between 0 and {len(self.model_pairs)-1}")
+            
+        self.current_pair_index = pair_index
+        self.current_models = self.model_pairs[pair_index]
+        
+        # Update model info from registry
+        try:
+            self.model_1_info = self.model_selector.get_model_info(self.current_models["model_1"])
+            self.model_2_info = self.model_selector.get_model_info(self.current_models["model_2"])
+        except ValueError as e:
+            logger.warning(f"Model not found in registry: {e}")
+            self.model_1_info = {"name": self.current_models["model_1"]}
+            self.model_2_info = {"name": self.current_models["model_2"]}
+        
+        # Clear cached models
+        self._model_1 = None
+        self._model_2 = None
+        self._tokenizer = None
+
+    @property
+    def model_1_name(self) -> str:
+        """Get name of first model in current pair."""
+        return self.current_models["model_1"]
+        
+    @property
+    def model_2_name(self) -> str:
+        """Get name of second model in current pair."""
+        return self.current_models["model_2"]
+
+    def load_models(self) -> Tuple[PreTrainedModel, PreTrainedModel, PreTrainedTokenizer]:
+        """Load both models and tokenizer."""
+        if self._model_1 is None:
+            self._model_1 = self._load_model(self.model_1_name)
+        if self._model_2 is None:
+            self._model_2 = self._load_model(self.model_2_name)
+        if self._tokenizer is None:
+            self._tokenizer = self._load_tokenizer(self.model_1_name)
+            
+        return self._model_1, self._model_2, self._tokenizer
+
     def get_model_info(self, model_name: str) -> Dict:
         """Get information about a specific model from registry."""
         print(f"Getting info for model: {model_name}")
@@ -149,6 +221,9 @@ class ModelPairManager:
     def clear_cache(self):
         """Clear the model cache."""
         self._model_cache.clear()
+        self._model_1 = None
+        self._model_2 = None
+        self._tokenizer = None
 
     def validate_models(self) -> bool:
         """Validate model functionality."""

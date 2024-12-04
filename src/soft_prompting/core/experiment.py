@@ -168,12 +168,7 @@ class ExperimentRunner:
         return runner
     
     def save_run(self) -> str:
-        """
-        Save the current run state.
-        
-        Returns:
-            run_id: Unique identifier for this run
-        """
+        """Save the current run state."""
         # Generate run ID if not exists
         if self.run_id is None:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -183,39 +178,48 @@ class ExperimentRunner:
         run_dir = self.output_dir / f"run_{self.run_id}"
         run_dir.mkdir(parents=True, exist_ok=True)
         
-        # Save metadata
+        # Save metadata with proper dictionary structure
         metadata = {
             "run_id": self.run_id,
             "timestamp": datetime.now().isoformat(),
-            "test_mode": getattr(self, 'test_mode', False),  # Use getattr with default
-            "model_pair": {
+            "test_mode": getattr(self, 'test_mode', False),
+            "models": {
                 "model_1": self.model_manager.model_1_name,
-                "model_2": self.model_manager.model_2_name
-            }
+                "model_2": self.model_manager.model_2_name,
+                "intervention": self.model_manager.current_models.get("intervention", "unknown")
+            },
+            "config": self.config.to_dict() if hasattr(self.config, 'to_dict') else {}
         }
+        
+        # Ensure results are in a proper dictionary format
+        if hasattr(self, 'results') and self.results is not None:
+            if isinstance(self.results, tuple):
+                # Convert tuple to dictionary if needed
+                self.results = {
+                    "metrics": self.results[0] if len(self.results) > 0 else {},
+                    "examples": self.results[1] if len(self.results) > 1 else [],
+                    "analysis": self.results[2] if len(self.results) > 2 else {}
+                }
+        
+        # Save metadata
         with open(run_dir / "metadata.json", "w") as f:
             json.dump(metadata, f, indent=2)
             
-        # Convert config to dict and handle Path objects
-        config_dict = self.config.to_dict()
-        def convert_paths(d):
-            return {k: str(v) if isinstance(v, Path) else v for k, v in d.items()}
-        
-        config_dict = convert_paths(config_dict)
-        
-        # Save config
-        with open(run_dir / "config.yaml", "w") as f:
-            yaml.dump(config_dict, f)
+        # Save results if they exist
+        if hasattr(self, 'results') and self.results is not None:
+            results_file = run_dir / "results.json"
+            print(f"\nSaving results to {results_file}")
             
-        # Convert results for JSON serialization
-        if hasattr(self, "results"):
-            serializable_results = json.loads(
-                json.dumps(self.results, default=lambda x: str(x) if isinstance(x, Path) else x)
-            )
-            with open(run_dir / "results.json", "w") as f:
-                json.dump(serializable_results, f, indent=2)
-                
-        return self.run_id
+            print("\nTesting JSON serialization...")
+            try:
+                from ..utils.serialization import safe_json_dump
+                safe_json_dump(self.results, results_file)
+                print("Results successfully saved")
+            except Exception as e:
+                print(f"Error saving results: {str(e)}")
+                raise
+        
+        return str(run_dir)
     
     def list_runs(self, output_format: str = "text") -> Union[str, Dict]:
         """
@@ -470,8 +474,8 @@ class ExperimentRunner:
                 f"Run ID: {run_id}",
                 f"Timestamp: {timestamp}",
                 f"Models:",
-                f"  - Model 1: {info['models']['model_1']}",
-                f"  - Model 2: {info['models']['model_2']}",
+                f"  - Model 1: {info['models'].get('model_1', 'Unknown')}",
+                f"  - Model 2: {info['models'].get('model_2', 'Unknown')}",
                 f"Test Mode: {info['test_mode']}",
                 f"Status:",
                 f"  - Results: {'✓' if info['status']['has_results'] else '✗'}",
