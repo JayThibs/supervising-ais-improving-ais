@@ -2388,6 +2388,7 @@ def validated_assistant_discriminative_compare(
     comparison_model: AutoModel = None,
     num_rounds: int = 3,
     num_validation_runs: int = 5,
+    max_retries: int = 2,
     explain_reasoning: bool = False,
     max_tokens: int = 1000,
     api_interactions_save_loc: Optional[str] = None
@@ -2412,6 +2413,7 @@ def validated_assistant_discriminative_compare(
         comparison_model (AutoModel): Model 2 (the model being compared to).
         num_rounds (int): Number of query rounds per validation test.
         num_validation_runs (int): Number of tests to run per model per hypothesis.
+        max_retries (int): Number of times to retry an errored out hypothesis testing run.
         explain_reasoning (bool): Whether to ask assistant to explain its final prediction.
         max_tokens (int): Maximum tokens for API responses.
         api_interactions_save_loc (Optional[str]): File to save API interactions to.
@@ -2436,87 +2438,35 @@ def validated_assistant_discriminative_compare(
     device = starting_model.device
 
     for desc_idx, description in enumerate(difference_descriptions):
-        predictions_accurate = []
-        reasonings = [] if explain_reasoning else None
+        try_number = 0
+        for try_number in range(max_retries):
+            try:
+                predictions_accurate = []
+                reasonings = [] if explain_reasoning else None
 
-        # Do num_validation_runs with each model (balanced testing)
-        for run_idx in range(2 * num_validation_runs):
-            # First half use starting_model, second half use comparison_model
-            target_model = starting_model if run_idx < num_validation_runs else comparison_model
-            target_label = 1 if run_idx < num_validation_runs else 2
+                # Do num_validation_runs with each model (balanced testing)
+                for run_idx in range(2 * num_validation_runs):
+                    # First half use starting_model, second half use comparison_model
+                    target_model = starting_model if run_idx < num_validation_runs else comparison_model
+                    target_label = 1 if run_idx < num_validation_runs else 2
 
-            # Initialize conversation with task description
-            initial_prompt = f"""You will be interacting with one of two language models. 
-            Here is a hypothesis about how these models differ:
-            "{description}"
+                    # Initialize conversation with task description
+                    initial_prompt = f"""You will be interacting with one of two language models. 
+                    Here is a hypothesis about how these models differ:
+                    "{description}"
 
-            You can make {num_rounds} queries to the model to determine whether you're talking to Model 1 or Model 2.
-            Design each query to help test the hypothesis. You'll see each response before writing your next query.
-            After all queries, you must predict which model you were talking to (respond with just "1" or "2").
+                    You can make {num_rounds} queries to the model to determine whether you're talking to Model 1 or Model 2.
+                    Design each query to help test the hypothesis. You'll see each response before writing your next query.
+                    After all queries, you must predict which model you were talking to (respond with just "1" or "2").
 
-            Write your first query to the model:"""
+                    Write your first query to the model:"""
 
-            assistant_messages = []  # Store all assistant messages for final reasoning
-            model_responses = []     # Store all model responses for final reasoning
+                    assistant_messages = []  # Store all assistant messages for final reasoning
+                    model_responses = []     # Store all model responses for final reasoning
 
-            # Make initial API call to get first query
-            query = make_api_request(
-                initial_prompt,
-                api_provider,
-                api_model_str,
-                auth_key,
-                client=client,
-                max_tokens=max_tokens,
-                api_interactions_save_loc=api_interactions_save_loc,
-                request_info={
-                    "pipeline_stage": "discriminative_validation",
-                    "hypothesis_idx": str(desc_idx),
-                    "run_idx": str(run_idx),
-                    "round": "0"
-                }
-            )
-            assistant_messages.append(query)
-
-
-            # for text in texts_for_label:
-            #     inputs = common_tokenizer(text, return_tensors="pt").to(device)
-            #     with torch.no_grad():
-            #         try:
-            #             model_loss = current_model(**inputs, labels=inputs["input_ids"]).loss
-            #         except Exception as e:
-            #             print(f"Error computing scores for generated text: {e}")
-            #             print(f"Text: {text}")
-            #             model_loss = torch.tensor(0.0)
-            #     generated_texts_scores_for_label.append(model_loss.item())
-            # generated_texts_scores.append(generated_texts_scores_for_label)
-
-            # Conduct rounds of interaction
-            for round_idx in range(num_rounds):
-                inputs = common_tokenizer(query, return_tensors="pt", padding=True, truncation=True)
-                inputs = {k: v.to(device) for k, v in inputs.items()}  # Move all inputs to device
-
-                with torch.no_grad():
-                    outputs = target_model.generate(
-                        **inputs,
-                        max_new_tokens=100,
-                        temperature=1.0,
-                        do_sample=True,
-                        pad_token_id=common_tokenizer.pad_token_id
-                    )
-                model_response = common_tokenizer.decode(outputs[0], skip_special_tokens=True)
-                model_responses.append(model_response)
-
-                # If this isn't the last round, get next query
-                if round_idx < num_rounds - 1:
-                    next_query_prompt = f"""Based on the hypothesis and previous interactions:
-
-                    Previous query: {query}
-                    Model's response: {model_response}
-
-                    Write your next query to help determine which model you're talking to:"""
-
+                    # Make initial API call to get first query
                     query = make_api_request(
-                        next_query_prompt,
+                        initial_prompt,
                         api_provider,
                         api_model_str,
                         auth_key,
@@ -2527,61 +2477,122 @@ def validated_assistant_discriminative_compare(
                             "pipeline_stage": "discriminative_validation",
                             "hypothesis_idx": str(desc_idx),
                             "run_idx": str(run_idx),
-                            "round": str(round_idx + 1)
+                            "round": "0"
                         }
                     )
                     assistant_messages.append(query)
 
-            # Get final prediction
-            interaction_history = ' '.join([f'Query {i+1}: {q}\nResponse {i+1}: {r}\n' for i, (q, r) in enumerate(zip(assistant_messages, model_responses))])
 
-            if explain_reasoning:
-                final_prompt = f"""Based on the hypothesis:
-                "{description}"
+                    # for text in texts_for_label:
+                    #     inputs = common_tokenizer(text, return_tensors="pt").to(device)
+                    #     with torch.no_grad():
+                    #         try:
+                    #             model_loss = current_model(**inputs, labels=inputs["input_ids"]).loss
+                    #         except Exception as e:
+                    #             print(f"Error computing scores for generated text: {e}")
+                    #             print(f"Text: {text}")
+                    #             model_loss = torch.tensor(0.0)
+                    #     generated_texts_scores_for_label.append(model_loss.item())
+                    # generated_texts_scores.append(generated_texts_scores_for_label)
 
-                And your interaction history:
-                {interaction_history}
+                    # Conduct rounds of interaction
+                    for round_idx in range(num_rounds):
+                        inputs = common_tokenizer(query, return_tensors="pt", padding=True, truncation=True)
+                        inputs = {k: v.to(device) for k, v in inputs.items()}  # Move all inputs to device
 
-                First, explain your reasoning about which model you were talking to.
-                Then on a new line, write your final prediction as just the number 1 or 2."""
+                        with torch.no_grad():
+                            outputs = target_model.generate(
+                                **inputs,
+                                max_new_tokens=100,
+                                temperature=1.0,
+                                do_sample=True,
+                                pad_token_id=common_tokenizer.pad_token_id
+                            )
+                        model_response = common_tokenizer.decode(outputs[0], skip_special_tokens=True)
+                        model_responses.append(model_response)
 
-            else:
-                final_prompt = f"""Based on the hypothesis:
-                "{description}"
+                        # If this isn't the last round, get next query
+                        if round_idx < num_rounds - 1:
+                            next_query_prompt = f"""Based on the hypothesis and previous interactions:
 
-                And your interaction history:
-                {interaction_history}
+                            Previous query: {query}
+                            Model's response: {model_response}
 
-                Write your final prediction as just the number 1 or 2. Say nothing else, just the number corresponding to the model you were talking to."""
+                            Write your next query to help determine which model you're talking to:"""
 
-            final_response = make_api_request(
-                final_prompt,
-                api_provider,
-                api_model_str,
-                auth_key,
-                client=client,
-                max_tokens=max_tokens,
-                api_interactions_save_loc=api_interactions_save_loc,
-                request_info={
-                    "pipeline_stage": "discriminative_validation",
-                    "hypothesis_idx": str(desc_idx),
-                    "run_idx": str(run_idx),
-                    "round": "final"
-                }
-            )
+                            query = make_api_request(
+                                next_query_prompt,
+                                api_provider,
+                                api_model_str,
+                                auth_key,
+                                client=client,
+                                max_tokens=max_tokens,
+                                api_interactions_save_loc=api_interactions_save_loc,
+                                request_info={
+                                    "pipeline_stage": "discriminative_validation",
+                                    "hypothesis_idx": str(desc_idx),
+                                    "run_idx": str(run_idx),
+                                    "round": str(round_idx + 1)
+                                }
+                            )
+                            assistant_messages.append(query)
 
-            if explain_reasoning:
-                # Split reasoning and prediction
-                parts = final_response.strip().split('\n')
-                prediction = int(parts[-1].strip())
-                reasoning = '\n'.join(parts[:-1])
-                reasonings.append(reasoning)
-            else:
-                prediction = int(final_response.strip())
+                    # Get final prediction
+                    interaction_history = ' '.join([f'Query {i+1}: {q}\nResponse {i+1}: {r}\n' for i, (q, r) in enumerate(zip(assistant_messages, model_responses))])
 
-            # Record accuracy
-            accurate = 1.0 if prediction == target_label else 0.0
-            predictions_accurate.append(accurate)
+                    if explain_reasoning:
+                        final_prompt = f"""Based on the hypothesis:
+                        "{description}"
+
+                        And your interaction history:
+                        {interaction_history}
+
+                        First, explain your reasoning about which model you were talking to.
+                        Then on a new line, write your final prediction as just the number 1 or 2."""
+
+                    else:
+                        final_prompt = f"""Based on the hypothesis:
+                        "{description}"
+
+                        And your interaction history:
+                        {interaction_history}
+
+                        Write your final prediction as just the number 1 or 2. Say nothing else, just the number corresponding to the model you were talking to."""
+
+                    final_response = make_api_request(
+                        final_prompt,
+                        api_provider,
+                        api_model_str,
+                        auth_key,
+                        client=client,
+                        max_tokens=max_tokens,
+                        api_interactions_save_loc=api_interactions_save_loc,
+                        request_info={
+                            "pipeline_stage": "discriminative_validation",
+                            "hypothesis_idx": str(desc_idx),
+                            "run_idx": str(run_idx),
+                            "round": "final"
+                        }
+                    )
+
+                    if explain_reasoning:
+                        # Split reasoning and prediction
+                        parts = final_response.strip().split('\n')
+                        prediction = int(parts[-1].strip())
+                        reasoning = '\n'.join(parts[:-1])
+                        reasonings.append(reasoning)
+                    else:
+                        prediction = int(final_response.strip())
+
+                    # Record accuracy
+                    accurate = 1.0 if prediction == target_label else 0.0
+                    predictions_accurate.append(accurate)
+                    break
+            except Exception as e:
+                print(f"Error in hypothesis testing run {desc_idx} with try number {try_number}: {e}")
+                if try_number >= max_retries:
+                    predictions_accurate = [0.0] * num_validation_runs
+                    break
 
         all_predictions_accurate.append(predictions_accurate)
         if explain_reasoning:

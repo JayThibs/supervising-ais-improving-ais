@@ -139,7 +139,7 @@ elif [ "$1" = "4_bit_vs_8_bit" ]; then
         --base_model_quant_level "8bit" \
         --intervention_model_quant_level "4bit" \
         --run_prefix "intervention_8bit_vs_4bit" \
-        --api_interactions_save_loc "../../../data/api_interactions/intervention_8bit_vs_4bit_gemini_llama-3-8b-instruct.jsonl"
+        --api_interactions_save_loc "../../../data/api_interactions/intervention_8bit_vs_4bit_gemini_llama-3-8b-instruct_run_2.jsonl"
 elif [ "$1" = "4_bit_vs_8_bit_gemini_llama-3-8b-instruct" ]; then
     # Run auto-finetuning without changing the model
     CUDA_VISIBLE_DEVICES=1 python auto_finetuning_main.py \
