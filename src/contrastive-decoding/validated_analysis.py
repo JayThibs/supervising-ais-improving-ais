@@ -2419,13 +2419,23 @@ def validated_assistant_discriminative_compare(
         api_interactions_save_loc (Optional[str]): File to save API interactions to.
 
     Returns:
-        If explain_reasoning is False:
-            List[List[float]]: For each hypothesis, list of accuracy scores (1 or 0)
-            across all validation runs with both models.
-        If explain_reasoning is True:
-            Tuple[List[List[float]], List[List[str]]]: Same predictions_accurate as above, plus
-            list of reasoning explanations for each prediction.
+       If explain_reasoning is False:
+           Tuple[List[float], List[float]]:
+               - hypothesis_accuracies: List of mean accuracy scores for each hypothesis.
+               - hypothesis_p_values: List of p-values for each hypothesis.
+
+       If explain_reasoning is True:
+           Tuple[List[float], List[float], List[List[str]]]:
+               - hypothesis_accuracies: As above.
+               - hypothesis_p_values: As above.
+               - all_reasonings: List of reasoning explanations for each prediction.
     """
+    if starting_model is None or comparison_model is None:
+        raise ValueError("Both starting_model and comparison_model must be provided")
+    if num_rounds < 1:
+        raise ValueError("num_rounds must be at least 1")
+    if num_validation_runs < 1:
+        raise ValueError("num_validation_runs must be at least 1")
     all_predictions_accurate = []
     all_reasonings = [] if explain_reasoning else None
 
@@ -2438,18 +2448,22 @@ def validated_assistant_discriminative_compare(
     device = starting_model.device
 
     for desc_idx, description in enumerate(difference_descriptions):
-        try_number = 0
-        for try_number in range(max_retries):
-            try:
-                predictions_accurate = []
-                reasonings = [] if explain_reasoning else None
+        predictions_accurate = []
+        reasonings = [] if explain_reasoning else None
 
-                # Do num_validation_runs with each model (balanced testing)
-                for run_idx in range(2 * num_validation_runs):
-                    # First half use starting_model, second half use comparison_model
-                    target_model = starting_model if run_idx < num_validation_runs else comparison_model
-                    target_label = 1 if run_idx < num_validation_runs else 2
+        # Do num_validation_runs with each model (balanced testing)
+        for run_idx in range(2 * num_validation_runs):
+            success = False
 
+            # First half use starting_model, second half use comparison_model
+            target_model = starting_model if run_idx < num_validation_runs else comparison_model
+            target_label = 1 if run_idx < num_validation_runs else 2
+
+            # Try up to max_retries times to get a successful run
+            for try_number in range(max_retries):
+                if success:
+                    break
+                try:
                     # Initialize conversation with task description
                     initial_prompt = f"""You will be interacting with one of two language models. 
                     Here is a hypothesis about how these models differ:
@@ -2587,12 +2601,12 @@ def validated_assistant_discriminative_compare(
                     # Record accuracy
                     accurate = 1.0 if prediction == target_label else 0.0
                     predictions_accurate.append(accurate)
-                    break
-            except Exception as e:
-                print(f"Error in hypothesis testing run {desc_idx} with try number {try_number}: {e}")
-                if try_number >= max_retries:
-                    predictions_accurate = [0.0] * num_validation_runs
-                    break
+                    success = True
+
+                except Exception as e:
+                    print(f"Error in hypothesis testing run {desc_idx}, validation run {run_idx} with try number {try_number}: {e}")
+                    if try_number == max_retries - 1:
+                        predictions_accurate.append(0.0)
 
         all_predictions_accurate.append(predictions_accurate)
         if explain_reasoning:

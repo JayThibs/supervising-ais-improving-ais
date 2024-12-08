@@ -73,6 +73,7 @@ elif [ "$1" = "with_ground_truths" ]; then
             --run_prefix "with_ground_truths_${num_samples}_samples" \
             --api_interactions_save_loc "../../../data/api_interactions/with_ground_truths_${num_samples}_samples.jsonl"
     done
+# bash run_auto_finetuning_main.sh with_ground_truths_gemini &> runtime_logs/intervention_with_ground_truths_gemini_runtime_log.txt
 elif [ "$1" = "with_ground_truths_gemini" ]; then
     # Array of sample sizes to test
     sample_sizes=(20 50 100 200 500)
@@ -80,11 +81,11 @@ elif [ "$1" = "with_ground_truths_gemini" ]; then
     
     for num_samples in "${sample_sizes[@]}"; do
         echo "Running with num_samples = $num_samples"
-        CUDA_VISIBLE_DEVICES=2 python auto_finetuning_main.py \
+        CUDA_VISIBLE_DEVICES=0 python auto_finetuning_main.py \
             --base_model "NousResearch/Meta-Llama-3-8B-Instruct" \
             --num_samples $num_samples \
             --num_ground_truths 5 \
-            --num_decoded_texts 100000 \
+            --num_decoded_texts 200000 \
             --decoding_max_length 48 \
             --num_clusters 100 \
             --use_unitary_comparisons \
@@ -100,7 +101,7 @@ elif [ "$1" = "with_ground_truths_gemini" ]; then
             --tsne_perplexity 30 \
             --focus_area None \
             --use_truthful_qa \
-            --finetuning_params '{"learning_rate": 2e-5, "num_epochs": 1, "device_batch_size": 4, "batch_size": 8, "lora_r": 32, "lora_alpha": 16, "lora_dropout": 0.05, "max_length": 48, "weight_decay": 0.001}' \
+            --finetuning_params '{"learning_rate": 1e-5, "num_epochs": 2, "device_batch_size": 4, "batch_size": 16, "max_length": 48, "weight_decay": 0.001}' \
             --device "cuda:0" \
             --decoded_texts_save_path "../../../data/decoded_texts/autofinetune_data_with_TruthfulQA_2000_base_samples_${num_samples}_decoded_texts.csv" \
             --finetuning_save_path "../../../data/finetuned_models/autofinetune_data_with_TruthfulQA_2000_base_samples_${num_samples}" \
@@ -192,7 +193,7 @@ elif [ "$1" = "4_bit_vs_8_bit_gemini_llama-3-8b" ]; then
         --finetuning_params '{"learning_rate": 0.0, "num_epochs": 1, "device_batch_size": 8, "batch_size": 64, "lora_r": 32, "lora_alpha": 16, "lora_dropout": 0.05, "max_length": 48, "weight_decay": 0.0}' \
         --device "cuda:0" \
         --decoded_texts_save_path "../../../data/decoded_texts/intervention_8bit_vs_4bit_llama-3-8b_200000_decoded_texts.csv" \
-        --num_base_samples_for_training 5 \
+        --num_base_samples_for_training 0 \
         --decoding_batch_size 64 \
         --base_model_quant_level "8bit" \
         --intervention_model_quant_level "4bit" \
@@ -319,16 +320,17 @@ elif [ "$1" = "pythia-6.9b_step143000_vs_step107000" ]; then
         --run_prefix "intervention_pythia-6.9b_step143000_vs_step107000" \
         --api_interactions_save_loc "../../../data/api_interactions/intervention_pythia-6.9b_step143000_vs_step107000.jsonl" \
         --decoding_prefix_file "pythia_prefixes.txt"
+# bash run_auto_finetuning_main.sh qwen2_vs_qwen2.5_gemini_assistant &> runtime_logs/intervention_qwen2_vs_qwen2.5_gemini_assistant_runtime_log.txt
 elif [ "$1" = "qwen2_vs_qwen2.5_gemini_assistant" ]; then
     # Run auto-finetuning without changing the model
-    CUDA_VISIBLE_DEVICES=2 python auto_finetuning_main.py \
+    CUDA_VISIBLE_DEVICES=1 python auto_finetuning_main.py \
         --base_model "Qwen/Qwen2-7B-Instruct" \
         --intervention_model "Qwen/Qwen2.5-7B-Instruct" \
         --num_samples 0 \
         --num_ground_truths 0 \
         --num_decoded_texts 200000 \
         --decoding_max_length 64 \
-        --num_clusters 10 \
+        --num_clusters 100 \
         --use_unitary_comparisons \
         --max_unitary_comparisons_per_label 40 \
         --num_rephrases_for_validation 0 \
@@ -348,7 +350,7 @@ elif [ "$1" = "qwen2_vs_qwen2.5_gemini_assistant" ]; then
         --base_model_quant_level "8bit" \
         --intervention_model_quant_level "8bit" \
         --run_prefix "intervention_qwen2_vs_qwen2.5_gemini_assistant" \
-        --api_interactions_save_loc "../../../data/api_interactions/intervention_qwen2_vs_qwen2.5_gemini_assistant.jsonl"
+        --api_interactions_save_loc "../../../data/api_interactions/intervention_qwen2_vs_qwen2.5_gemini_assistant_run_2.jsonl"
 elif [ "$1" = "noop" ]; then
     # Run auto-finetuning without changing the model
     CUDA_VISIBLE_DEVICES=2 python auto_finetuning_main.py \

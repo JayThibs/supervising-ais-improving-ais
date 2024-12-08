@@ -196,20 +196,21 @@ class AutoFineTuningEvaluator:
         if self.args.intervention_model:
             print("Loading intervention model")
             self.load_intervention_model()
+        # If we are not loading a pre-existing intervention model, we need to generate 
+        # our own intervention model
         else:
-            # If we are not loading a pre-existing intervention model, we need to generate 
-            # our own intervention model
             print("Generating new intervention model")
 
             if self.args.decoded_texts_load_path and not path.exists(self.args.decoded_texts_load_path):
                 raise ValueError(f"Decoded texts load path {self.args.decoded_texts_load_path} does not exist")
+            
             # Load ground truths and data if they exist
             if not self.args.regenerate_ground_truths and self.args.ground_truth_file_path is not None:
                 self.load_ground_truths_and_data()
                 self.ground_truths = self.ground_truths_df['ground_truth'].unique().tolist()
                 print("ground_truths_df unique ground truths", self.ground_truths)
+            # Otherwise, enerate ground truths and data
             elif self.args.num_ground_truths > 0:
-                # Generate ground truths and data
                 self.ground_truths = generate_ground_truths(
                     self.args.num_ground_truths,
                     self.args.api_provider,
@@ -221,13 +222,15 @@ class AutoFineTuningEvaluator:
                     self.args.api_interactions_save_loc
                 )
                 print("ground_truths", self.ground_truths)
+            # Check if we need to generate new training data
             if (
-                self.args.regenerate_ground_truths or
-                self.args.ground_truth_file_path is None or 
-                not path.exists(self.args.ground_truth_file_path) or # These three conditions check if we generated new ground truths, thus implying we need to generate new training data
+                self.args.regenerate_ground_truths or # Flag to regenerate new ground truths
+                self.args.ground_truth_file_path is None or # Means we didn't load existing ground truths
+                not path.exists(self.args.ground_truth_file_path) or # Also means we didn't load existing ground truths
                 self.args.regenerate_training_data # The flag to regenerate new training data
             ):
-                if self.args.num_base_samples_for_training > 0 or self.args.num_samples > 0: # At least one of these must be > 0 to generate training data
+                # At least one of these must be > 0 to generate training data
+                if self.args.num_base_samples_for_training > 0 or self.args.num_samples > 0:
                     print("Generating training data")
                     self.ground_truths_df = generate_dataset(
                         self.ground_truths,
@@ -246,17 +249,21 @@ class AutoFineTuningEvaluator:
                     )
                 print("ground_truths_df", self.ground_truths_df)
                 print("ground_truths", self.ground_truths)
-                if self.ground_truths and not self.ground_truths_df:
+                if self.ground_truths and (self.ground_truths_df is None or self.ground_truths_df.empty):
                     raise ValueError("No training data generated for the new ground truths")
 
+            # Check if we load a pre-existing finetuned model
             if self.args.finetuning_load_path:
                 self.intervention_model = AutoModelForCausalLM.from_pretrained(self.args.finetuning_load_path)
-            elif self.ground_truths_df:
+            # Otherwise, we finetune the model; first check if we have the training data
+            elif self.ground_truths_df is not None and not self.ground_truths_df.empty:
                 self.finetune_model()
                 # Save the finetuned model
                 if self.args.finetuning_save_path:
                     self.intervention_model.save_pretrained(self.args.finetuning_save_path)
                     print(f"Finetuned model saved to {self.args.finetuning_save_path}")
+            else:
+                raise ValueError("Attempted to finetune model but no training data generated or loaded")
 
         # Reset the base model and quantize if necessary
         if self.args.train_lora:
