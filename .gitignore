@@ -13,6 +13,22 @@ project_prompts/
 joint_embeddings_all_llms.txt
 statement_embeddings.json
 
+# API keys
+data/api_keys/*
+!data/api_keys/.gitkeep
+
+# data
+data/decoded_texts/
+data/training_data/
+data/tsne_plots/
+data/finetuned_models/
+data/api_interactions/
+
+# embeddings
+*.pkl
+
+# logs
+*runtime_log.txt
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
