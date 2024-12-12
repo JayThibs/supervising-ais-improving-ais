@@ -2160,7 +2160,7 @@ def assistant_generative_compare(
     
     # Next, load the cluster 2 model and compute scores, subtracting the cluster 2 scores from the cluster 1 scores
     current_model = comparison_model if comparison_model is not None else AutoModelForCausalLM.from_pretrained(comparison_model_str, device_map={"": 0} if device == "cuda:0" else "auto", quantization_config=bnb_config, torch_dtype=torch.float16)
-    print("generated_texts", generated_texts)
+    print("generated_texts has been generated")
     for i in tqdm(range(len(generated_texts)), desc="Computing scores for generated texts (cluster 2 attributed)"):
         for j in range(len(generated_texts[i])):
             inputs = common_tokenizer(generated_texts[i][j], return_tensors="pt").to(device)
@@ -2184,9 +2184,15 @@ def assistant_generative_compare(
         for true_labels_set, generated_texts_scores_for_label in zip(generated_text_labels, generated_texts_scores):
             # Convert labels to numeric values: 0 for cluster 1, 1 for cluster 2
             numeric_labels = np.array(true_labels_set)
-            
+
             # Calculate the correlation coefficient
-            correlation_coeff, _ = pearsonr(numeric_labels, generated_texts_scores_for_label)
+            # Check if there's variance in both arrays
+            if len(set(numeric_labels)) == 1 or len(set(generated_texts_scores_for_label)) == 1:
+                # If either array is constant, correlation is undefined
+                correlation_coeff = 0.0
+            else:
+                # Calculate the correlation coefficient
+                correlation_coeff, _ = pearsonr(numeric_labels, generated_texts_scores_for_label)
             
             per_label_scores.append(correlation_coeff)
         

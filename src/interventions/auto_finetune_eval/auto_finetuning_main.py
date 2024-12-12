@@ -263,7 +263,8 @@ class AutoFineTuningEvaluator:
                     self.intervention_model.save_pretrained(self.args.finetuning_save_path)
                     print(f"Finetuned model saved to {self.args.finetuning_save_path}")
             else:
-                raise ValueError("Attempted to finetune model but no training data generated or loaded")
+                print("Alert: Not finetuning model because no training data generated or loaded")
+                print("Should generate 'new' model by quantizing the base model")
 
         # Reset the base model and quantize if necessary
         if self.args.train_lora:
@@ -419,4 +420,5 @@ if __name__ == "__main__":
     parser.add_argument("--api_interactions_save_loc", type=str, default=None, help="File location to record any API model interactions. Defaults to None and no recording of interactions.")
 
     args = parser.parse_args()
+    print("args", args)
     main(args)

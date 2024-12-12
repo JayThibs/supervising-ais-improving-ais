@@ -140,152 +140,91 @@ elif [ "$1" = "4_bit_vs_8_bit" ]; then
         --base_model_quant_level "8bit" \
         --intervention_model_quant_level "4bit" \
         --run_prefix "intervention_8bit_vs_4bit" \
-        --api_interactions_save_loc "../../../data/api_interactions/intervention_8bit_vs_4bit_gemini_llama-3-8b-instruct_run_2.jsonl"
-elif [ "$1" = "4_bit_vs_8_bit_gemini_llama-3-8b-instruct" ]; then
-    # Run auto-finetuning without changing the model
-    CUDA_VISIBLE_DEVICES=1 python auto_finetuning_main.py \
-        --base_model "NousResearch/Meta-Llama-3-8B-Instruct" \
-        --num_samples 0 \
-        --num_ground_truths 0 \
-        --num_decoded_texts 200000 \
-        --decoding_max_length 64 \
-        --num_clusters 100 \
-        --use_unitary_comparisons \
-        --max_unitary_comparisons_per_label 40 \
-        --num_rephrases_for_validation 0 \
-        --generated_labels_per_cluster 1 \
-        --api_provider "gemini" \
-        --model_str "gemini-1.5-flash" \
-        --key_path "../../../data/api_keys/gemini_key.txt" \
-        --tsne_save_path "../../../data/tsne_plots/intervention_8bit_vs_4bit_llama-3-8b-instruct.pdf" \
-        --tsne_title "Intervention: 8bit vs 4bit (Llama-3-8B-Instruct)" \
-        --tsne_perplexity 30 \
-        --focus_area "weird historical facts" \
-        --finetuning_params '{"learning_rate": 0.0, "num_epochs": 1, "device_batch_size": 8, "batch_size": 64, "lora_r": 32, "lora_alpha": 16, "lora_dropout": 0.05, "max_length": 48, "weight_decay": 0.0}' \
-        --device "cuda:0" \
-        --decoded_texts_save_path "../../../data/decoded_texts/intervention_8bit_vs_4bit_llama-3-8b-instruct_200000_decoded_texts.csv" \
-        --num_base_samples_for_training 5 \
-        --decoding_batch_size 96 \
-        --base_model_quant_level "8bit" \
-        --intervention_model_quant_level "4bit" \
-        --run_prefix "intervention_8bit_vs_4bit_llama-3-8b-instruct" \
-        --api_interactions_save_loc "../../../data/api_interactions/intervention_8bit_vs_4bit_llama-3-8b-instruct.jsonl"
-elif [ "$1" = "4_bit_vs_8_bit_gemini_llama-3-8b" ]; then
-    # Run auto-finetuning without changing the model
-    CUDA_VISIBLE_DEVICES=1 python auto_finetuning_main.py \
-        --base_model "NousResearch/Meta-Llama-3-8B" \
-        --num_samples 0 \
-        --num_ground_truths 0 \
-        --num_decoded_texts 200000 \
-        --decoding_max_length 64 \
-        --num_clusters 100 \
-        --use_unitary_comparisons \
-        --max_unitary_comparisons_per_label 40 \
-        --num_rephrases_for_validation 0 \
-        --generated_labels_per_cluster 1 \
-        --api_provider "gemini" \
-        --model_str "gemini-1.5-flash" \
-        --key_path "../../../data/api_keys/gemini_key.txt" \
-        --tsne_save_path "../../../data/tsne_plots/intervention_8bit_vs_4bit_llama-3-8b.pdf" \
-        --tsne_title "Intervention: 8bit vs 4bit (Llama-3-8B)" \
-        --tsne_perplexity 30 \
-        --focus_area "weird historical facts" \
-        --finetuning_params '{"learning_rate": 0.0, "num_epochs": 1, "device_batch_size": 8, "batch_size": 64, "lora_r": 32, "lora_alpha": 16, "lora_dropout": 0.05, "max_length": 48, "weight_decay": 0.0}' \
-        --device "cuda:0" \
-        --decoded_texts_save_path "../../../data/decoded_texts/intervention_8bit_vs_4bit_llama-3-8b_200000_decoded_texts.csv" \
-        --num_base_samples_for_training 0 \
-        --decoding_batch_size 64 \
-        --base_model_quant_level "8bit" \
-        --intervention_model_quant_level "4bit" \
-        --run_prefix "intervention_8bit_vs_4bit_llama-3-8b" \
-        --api_interactions_save_loc "../../../data/api_interactions/intervention_8bit_vs_4bit_llama-3-8b.jsonl"
-elif [ "$1" = "4_bit_vs_8_bit_gemini_gemma-2-9b-it" ]; then
-    # Run auto-finetuning without changing the model
-    CUDA_VISIBLE_DEVICES=1 python auto_finetuning_main.py \
-        --base_model "google/gemma-2-9b-it" \
-        --num_samples 0 \
-        --num_ground_truths 0 \
-        --num_decoded_texts 200000 \
-        --decoding_max_length 64 \
-        --num_clusters 100 \
-        --use_unitary_comparisons \
-        --max_unitary_comparisons_per_label 40 \
-        --num_rephrases_for_validation 0 \
-        --generated_labels_per_cluster 1 \
-        --api_provider "gemini" \
-        --model_str "gemini-1.5-flash" \
-        --key_path "../../../data/api_keys/gemini_key.txt" \
-        --tsne_save_path "../../../data/tsne_plots/intervention_4_bit_vs_8_bit_gemini_gemma-2-9b-it.pdf" \
-        --tsne_title "Intervention: 8bit vs 4bit (Gemma-2-9b-it)" \
-        --tsne_perplexity 30 \
-        --focus_area "weird historical facts" \
-        --finetuning_params '{"learning_rate": 0.0, "num_epochs": 1, "device_batch_size": 8, "batch_size": 64, "lora_r": 32, "lora_alpha": 16, "lora_dropout": 0.05, "max_length": 48, "weight_decay": 0.0}' \
-        --device "cuda:0" \
-        --decoded_texts_load_path "../../../data/decoded_texts/intervention_4_bit_vs_8_bit_gemini_gemma-2-9b-it-200000_decoded_texts.csv" \
-        --num_base_samples_for_training 0 \
-        --decoding_batch_size 64 \
-        --base_model_quant_level "8bit" \
-        --intervention_model_quant_level "4bit" \
-        --run_prefix "intervention_4_bit_vs_8_bit_gemini_gemma-2-9b-it" \
-        --api_interactions_save_loc "../../../data/api_interactions/intervention_4_bit_vs_8_bit_gemini_gemma-2-9b-it.jsonl"
-elif [ "$1" = "4_bit_vs_8_bit_gemini_deepseek_coder-7b-instruct-1.5" ]; then
-    # Run auto-finetuning without changing the model
-    CUDA_VISIBLE_DEVICES=1 python auto_finetuning_main.py \
-        --base_model "deepseek-ai/deepseek-coder-7b-instruct-v1.5" \
-        --num_samples 0 \
-        --num_ground_truths 0 \
-        --num_decoded_texts 200000 \
-        --decoding_max_length 64 \
-        --num_clusters 100 \
-        --use_unitary_comparisons \
-        --max_unitary_comparisons_per_label 40 \
-        --num_rephrases_for_validation 0 \
-        --generated_labels_per_cluster 1 \
-        --api_provider "gemini" \
-        --model_str "gemini-1.5-flash" \
-        --key_path "../../../data/api_keys/gemini_key.txt" \
-        --tsne_save_path "../../../data/tsne_plots/intervention_4_bit_vs_8_bit_gemini_deepseek_coder-7b-instruct-1.5.pdf" \
-        --tsne_title "Intervention: 8bit vs 4bit (DeepSeek Coder-7B-Instruct-v1.5)" \
-        --tsne_perplexity 30 \
-        --focus_area "weird historical facts" \
-        --finetuning_params '{"learning_rate": 0.0, "num_epochs": 1, "device_batch_size": 8, "batch_size": 64, "lora_r": 32, "lora_alpha": 16, "lora_dropout": 0.05, "max_length": 48, "weight_decay": 0.0}' \
-        --device "cuda:0" \
-        --decoded_texts_load_path "../../../data/decoded_texts/intervention_4_bit_vs_8_bit_gemini_deepseek_coder-7b-instruct-1.5_200000_decoded_texts.csv" \
-        --num_base_samples_for_training 0 \
-        --decoding_batch_size 64 \
-        --base_model_quant_level "8bit" \
-        --intervention_model_quant_level "4bit" \
-        --run_prefix "intervention_4_bit_vs_8_bit_gemini_deepseek_coder-7b-instruct-1.5" \
-        --api_interactions_save_loc "../../../data/api_interactions/intervention_4_bit_vs_8_bit_gemini_deepseek_coder-7b-instruct-1.5.jsonl"
-elif [ "$1" = "8_bit_vs_4_bit_qwen2_instruct_gemini_assistant" ]; then
-    # Run auto-finetuning without changing the model
-    CUDA_VISIBLE_DEVICES=1 python auto_finetuning_main.py \
-        --base_model "Qwen/Qwen2-7B-Instruct" \
-        --num_samples 0 \
-        --num_ground_truths 0 \
-        --num_decoded_texts 200000 \
-        --decoding_max_length 64 \
-        --num_clusters 100 \
-        --use_unitary_comparisons \
-        --max_unitary_comparisons_per_label 40 \
-        --num_rephrases_for_validation 0 \
-        --generated_labels_per_cluster 1 \
-        --api_provider "gemini" \
-        --model_str "gemini-1.5-flash" \
-        --key_path "../../../data/api_keys/gemini_key.txt" \
-        --tsne_save_path "../../../data/tsne_plots/intervention_8_bit_vs_4_bit_qwen2_instruct.pdf" \
-        --tsne_title "Intervention: 8bit vs 4bit (Qwen2-Instruct)" \
-        --tsne_perplexity 30 \
-        --focus_area "weird historical facts" \
-        --finetuning_params '{"learning_rate": 0.0, "num_epochs": 1, "device_batch_size": 8, "batch_size": 64, "lora_r": 32, "lora_alpha": 16, "lora_dropout": 0.05, "max_length": 48, "weight_decay": 0.0}' \
-        --device "cuda:0" \
-        --decoded_texts_save_path "../../../data/decoded_texts/intervention_8_bit_vs_4_bit_qwen2_instruct_200000_decoded_texts.csv" \
-        --num_base_samples_for_training 0 \
-        --decoding_batch_size 256 \
-        --base_model_quant_level "4bit" \
-        --intervention_model_quant_level "8bit" \
-        --run_prefix "intervention_8_bit_vs_4_bit_qwen2_instruct_gemini_assistant" \
-        --api_interactions_save_loc "../../../data/api_interactions/intervention_8_bit_vs_4_bit_qwen2_instruct_gemini_assistant.jsonl"
+        --api_interactions_save_loc "../../../data/api_interactions/intervention_8bit_vs_4bit_gemini_llama-3-8b-instruct.jsonl"
+# bash run_auto_finetuning_main.sh 4_bit_vs_8_bit_multi_model &> runtime_logs/intervention_4_bit_vs_8_bit_multi_model_runtime_log.txt
+elif [ "$1" = "4_bit_vs_8_bit_multi_model" ]; then
+    # Array of models to test
+    models=(
+        "NousResearch/Meta-Llama-3-8B-Instruct"
+        "NousResearch/Meta-Llama-3-8B"
+        "google/gemma-2-9b-it"
+        "deepseek-ai/deepseek-coder-7b-instruct-v1.5"
+        "Qwen/Qwen2-7B-Instruct"
+    )
+    
+    # Model-specific batch sizes based on model size and memory requirements
+    declare -A batch_sizes=(
+        ["NousResearch/Meta-Llama-3-8B-Instruct"]="512"
+        ["NousResearch/Meta-Llama-3-8B"]="512"
+        ["google/gemma-2-9b-it"]="256"
+        ["deepseek-ai/deepseek-coder-7b-instruct-v1.5"]="512"
+        ["Qwen/Qwen2-7B-Instruct"]="512"
+    )
+    
+    # Create a log directory if it doesn't exist
+    mkdir -p "../../../logs/4_bit_vs_8_bit_multi_model"
+    
+    for base_model in "${models[@]}"; do
+        # Extract and sanitize model name for file paths
+        model_name=$(echo $base_model | tr -c '[:alnum:]' '_' | sed 's/__*/_/g' | sed 's/^_//;s/_$//')
+        echo "Running 4-bit vs 8-bit test for model = $base_model"
+        
+        # Get model-specific batch size or default to 32
+        batch_size=${batch_sizes[$base_model]:-32}
+        
+        # Clear GPU cache before each run
+        python -c "import torch; torch.cuda.empty_cache()"
+        
+        # Log file for this specific run
+        log_file="../../../logs/4_bit_vs_8_bit_multi_model/${model_name}_$(date +%Y%m%d_%H%M%S).log"
+        
+        echo "Starting run for $base_model at $(date). Logs at: $log_file"
+        
+        # Run the model with error handling
+        (CUDA_VISIBLE_DEVICES=1 python auto_finetuning_main.py \
+            --base_model "$base_model" \
+            --num_samples 0 \
+            --num_ground_truths 0 \
+            --num_decoded_texts 200000 \
+            --decoding_max_length 64 \
+            --num_clusters 100 \
+            --use_unitary_comparisons \
+            --max_unitary_comparisons_per_label 40 \
+            --num_rephrases_for_validation 0 \
+            --generated_labels_per_cluster 1 \
+            --api_provider "gemini" \
+            --model_str "gemini-1.5-flash" \
+            --key_path "../../../data/api_keys/gemini_key.txt" \
+            --tsne_save_path "../../../data/tsne_plots/intervention_8bit_vs_4bit_${model_name}.pdf" \
+            --tsne_title "Intervention: 8bit vs 4bit (${base_model})" \
+            --tsne_perplexity 30 \
+            --focus_area "weird historical facts" \
+            --finetuning_params '{"learning_rate": 0.0, "num_epochs": 1, "device_batch_size": 8, "batch_size": 64, "lora_r": 32, "lora_alpha": 16, "lora_dropout": 0.05, "max_length": 48, "weight_decay": 0.0}' \
+            --device "cuda:0" \
+            --decoded_texts_save_path "../../../data/decoded_texts/intervention_8bit_vs_4bit_${model_name}_200000_decoded_texts.csv" \
+            --num_base_samples_for_training 0 \
+            --decoding_batch_size $batch_size \
+            --base_model_quant_level "8bit" \
+            --intervention_model_quant_level "4bit" \
+            --run_prefix "intervention_8bit_vs_4bit_${model_name}" \
+            --api_interactions_save_loc "../../../data/api_interactions/intervention_8bit_vs_4bit_${model_name}_multi_model.jsonl" \
+        ) 2>&1 | tee "$log_file"
+        
+        # Check if the run was successful
+        if [ ${PIPESTATUS[0]} -ne 0 ]; then
+            echo "Error processing model: $base_model. Check logs at $log_file" >&2
+            # Optionally send notification or take other error handling actions
+            continue
+        fi
+        
+        echo "Successfully completed run for $base_model at $(date)"
+        echo "----------------------------------------"
+        
+        # Optional: Add a small delay between runs to ensure system stability
+        sleep 10
+    done
+    
+    echo "All model runs completed at $(date)"
 elif [ "$1" = "pythia-6.9b_step143000_vs_step107000" ]; then
     # Run auto-finetuning without changing the model
     # Doesn't currently work well because pythia has super low entropy and keeps generating almost identical texts

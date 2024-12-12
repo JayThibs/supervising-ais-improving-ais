@@ -10,6 +10,8 @@ from openai import OpenAI
 from google.generativeai import GenerativeModel
 import random
 from sklearn.cluster import KMeans, HDBSCAN
+from statsmodels.stats.proportion import proportions_ztest
+import numpy as np
 import pandas as pd
 from terminaltables import AsciiTable
 from tqdm import tqdm
@@ -656,6 +658,37 @@ def generate_table_output(
 
     return '\n\n'.join(tables)
 
+def cohens_h(p1: float, p2: float) -> float:
+    """
+    Calculate Cohen's h effect size for proportion differences.
+    
+    Args:
+        p1: First proportion
+        p2: Second proportion
+    Returns:
+        float: Cohen's h effect size
+    """
+    return 2 * (np.arcsin(np.sqrt(p1)) - np.arcsin(np.sqrt(p2)))
+
+def interpret_cohens_h(h: float) -> str:
+    """
+    Interpret Cohen's h effect size using standard thresholds.
+    
+    Args:
+        h: Cohen's h value
+    Returns:
+        str: Interpretation of effect size magnitude
+    """
+    h = abs(h)
+    if h < 0.2:
+        return "slightly"
+    elif h < 0.5:
+        return "moderately"
+    elif h < 0.8:
+        return "substantially"
+    else:
+        return "dramatically"
+
 def apply_interpretability_method_1_to_K(
     base_model: PreTrainedModel, 
     finetuned_model: PreTrainedModel, 
@@ -952,19 +985,43 @@ def apply_interpretability_method_1_to_K(
     hypothesis_origin_clusters = []
 
     # Case 1: Matching clusters with different sizes
+
+    # Calculate total number of statistical tests for Bonferroni correction
+    # This includes both proportion tests and validation tests
+    n_proportion_tests = sum(len(cluster['matching_finetuned_clusters']) for cluster in results['base_clusters'])
+    bonferroni_alpha = 0.05 / n_proportion_tests if n_proportion_tests > 0 else 0.05
+
+    print(f"Bonferroni alpha (corrected for {n_proportion_tests} total tests): {bonferroni_alpha}")
     for base_cluster in results['base_clusters']:
         if base_cluster['matching_finetuned_clusters']:
             for match in base_cluster['matching_finetuned_clusters']:
-                size_diff = base_cluster['size_comparison']['percentage_difference']
-                if abs(size_diff) > 10:  # Replace with a more sophisticated measure of significance based on cluster size
-                    direction = "more likely" if size_diff > 0 else "less likely"
-                    hypothesis = f"Model 1 is {direction} to generate content related to '{base_cluster['label']}' compared to Model 2."
+                # Set up counts and nobs as numpy arrays
+                count = np.array([base_cluster['size'], match['size']])
+                nobs = np.array([n_decoded_texts, n_decoded_texts])
+                # Perform single two-sided test
+                z_stat, p_value = proportions_ztest(
+                    count=count,
+                    nobs=nobs,
+                    alternative='two-sided'
+                )
+                
+                if p_value < bonferroni_alpha:
+                    # Calculate proportions and effect size
+                    p1 = base_cluster['size'] / n_decoded_texts
+                    p2 = match['size'] / n_decoded_texts
+                    effect_size = cohens_h(p1, p2)
+                    magnitude = interpret_cohens_h(effect_size)
+                    
+                    # Determine direction based on actual proportions
+                    direction = "more" if p1 > p2 else "less"
+                    
+                    hypothesis = f"Model 1 is {magnitude} {direction} likely to generate content described as: '{base_cluster['label']}' compared to Model 2 (z={z_stat:.2f}, p={p_value:.3f}, h={effect_size:.2f})."
                     candidate_hypotheses.append(hypothesis)
                     hypothesis_origin_clusters.append([base_cluster, match, 'matching'])
     # Case 2: Unmatching clusters (behavior in base model not found in finetuned model)
     for base_cluster in results['base_clusters']:
         if base_cluster['unmatching_finetuned_clusters']:
-            hypothesis = f"Model 2 is less likely to generate content related to '{base_cluster['label']}' compared to Model 1."
+            hypothesis = f"Model 2 is less likely to generate content described as: '{base_cluster['label']}' compared to Model 1."
             candidate_hypotheses.append(hypothesis)
             hypothesis_origin_clusters.append([base_cluster, -1, 'unmatching'])
             # Add hypotheses based on contrastive labels
@@ -974,7 +1031,7 @@ def apply_interpretability_method_1_to_K(
                 hypothesis_origin_clusters.append([base_cluster, unmatch, 'unmatching'])
     # Case 3: New clusters in finetuned model
     for new_cluster in results['new_finetuned_clusters']:
-        hypothesis = f"Model 2 has developed a new behavior of generating content related to '{new_cluster['label']}', which was not prominent in Model 1."
+        hypothesis = f"Model 2 has developed a new behavior of generating content described as: '{new_cluster['label']}', which was not prominent in Model 1."
         candidate_hypotheses.append(hypothesis)
         hypothesis_origin_clusters.append([-1, new_cluster, 'new'])
         # Add hypotheses based on contrastive labels of nearest base neighbors
@@ -1014,8 +1071,8 @@ def apply_interpretability_method_1_to_K(
 
     all_validated_scores, all_validated_p_values, all_validated_hypotheses = validated_results
 
-    print("validated_results object:")
-    print(validated_results)
+    #print("validated_results object:")
+    #print(validated_results)
 
     validated_discriminative_accuracies, validated_discriminative_p_values = validated_assistant_discriminative_compare(
         difference_descriptions = candidate_hypotheses,
