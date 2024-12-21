@@ -10,10 +10,10 @@ from openai import OpenAI
 from google.generativeai import GenerativeModel
 import numpy as np
 import torch
-import sys
-sys.path.append('../../contrastive-decoding')
-from validated_analysis import read_past_embeddings_or_generate_new
+from validated_comparison_tools import read_past_embeddings_or_generate_new
 from structlog._config import BoundLoggerLazyProxy
+
+
 def compare_hypotheses(
     ground_truth: str,
     discovered_hypothesis: str,

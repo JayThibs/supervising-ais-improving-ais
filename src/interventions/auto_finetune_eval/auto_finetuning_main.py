@@ -1,13 +1,12 @@
 import argparse
 import pandas as pd
-from typing import List
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 import torch
 from auto_finetuning_data import generate_ground_truths, generate_dataset
 from auto_finetuning_compare_to_truth import compare_and_score_hypotheses
 from auto_finetuning_helpers import load_api_key, parse_dict
-from auto_finetuning_train import dummy_finetune_model, finetune_model
-from auto_finetuning_interp import dummy_apply_interpretability_method, apply_interpretability_method_1_to_K
+from auto_finetuning_train import finetune_model
+from auto_finetuning_interp import apply_interpretability_method_1_to_K
 import google.generativeai as genai
 from anthropic import Anthropic
 import openai
@@ -65,8 +64,6 @@ class AutoFineTuningEvaluator:
         self.intervention_model = None
         self.ground_truths = None
         self.ground_truths_df = None
-        self.dummy_finetune = True if args.dummy_finetune else False
-        self.dummy_interp = True if args.dummy_interp else False
         self.device = args.device if args.device else \
             ("cuda:0" if torch.cuda.is_available() else "cpu")
         
@@ -148,7 +145,7 @@ class AutoFineTuningEvaluator:
         del self.base_model
 
         # If we're not actually finetuning, we don't need to save and reload the model
-        if self.dummy_finetune or self.args.finetuning_params['learning_rate'] == 0.0:
+        if self.args.finetuning_params['learning_rate'] == 0.0:
             intervention_quant_config = self.get_quantization_config(self.args.intervention_model_quant_level)
             self.intervention_model = AutoModelForCausalLM.from_pretrained(
                 self.args.base_model,
@@ -204,21 +201,14 @@ class AutoFineTuningEvaluator:
     def finetune_model(self):
         """Finetune the base model using the generated data."""
         train_data_list = self.ground_truths_df['train_text'].tolist()
-        if self.dummy_finetune or self.args.finetuning_params['learning_rate'] == 0.0:
-            self.intervention_model = dummy_finetune_model(
-                self.base_model,
-                self.tokenizer,
-                train_data_list,
-                self.args.finetuning_params
-            )
-        else:
-            self.intervention_model = finetune_model(
-                self.base_model,
-                self.tokenizer,
-                train_data_list,
-                self.args.finetuning_params,
-                self.args.train_lora
-            )
+        
+        self.intervention_model = finetune_model(
+            self.base_model,
+            self.tokenizer,
+            train_data_list,
+            self.args.finetuning_params,
+            self.args.train_lora
+        )
 
     def run(self):
         """Execute the entire automated finetuning and evaluation process."""
@@ -317,47 +307,45 @@ class AutoFineTuningEvaluator:
         print(self.intervention_model)
         print(f"  Parameter count: {sum(p.numel() for p in self.intervention_model.parameters())}")
         print(f"  Quantization: {self.intervention_model.config.quantization_config if hasattr(self.intervention_model.config, 'quantization_config') else 'None'}")
-        if self.dummy_interp:
-            discovered_hypotheses = dummy_apply_interpretability_method(self.base_model, self.intervention_model)
-        else:
-            results, table_output, discovered_hypotheses = apply_interpretability_method_1_to_K(
-                self.base_model, 
-                self.intervention_model,
-                self.tokenizer,
-                n_decoded_texts=self.args.num_decoded_texts,
-                decoding_prefix_file=self.args.decoding_prefix_file,
-                api_provider=self.args.api_provider,
-                api_model_str=self.args.model_str,
-                auth_key=self.key,
-                client=self.client,
-                local_embedding_model_str=self.args.local_embedding_model_str,
-                local_embedding_api_key=None,
-                init_clustering_from_base_model=True,
-                clustering_instructions=self.args.clustering_instructions,
-                n_clustering_inits=self.args.n_clustering_inits,
-                device=self.device,
-                cluster_method=self.args.cluster_method,
-                n_clusters=self.args.num_clusters,
-                min_cluster_size=self.args.min_cluster_size,
-                max_cluster_size=self.args.max_cluster_size,
-                max_length=self.args.decoding_max_length,
-                decoding_batch_size=self.args.decoding_batch_size,
-                decoded_texts_save_path=self.args.decoded_texts_save_path,
-                decoded_texts_load_path=self.args.decoded_texts_load_path,
-                loaded_texts_subsample=self.args.loaded_texts_subsample,
-                num_rephrases_for_validation=self.args.num_rephrases_for_validation,
-                generated_labels_per_cluster=self.args.generated_labels_per_cluster,
-                use_unitary_comparisons=self.args.use_unitary_comparisons,
-                max_unitary_comparisons_per_label=self.args.max_unitary_comparisons_per_label,
-                match_cutoff=self.args.match_cutoff,
-                metric=self.args.metric,
-                tsne_save_path=self.args.tsne_save_path,
-                tsne_title=self.args.tsne_title,
-                tsne_perplexity=self.args.tsne_perplexity,
-                api_interactions_save_loc=self.args.api_interactions_save_loc,
-                logger=self.log,
-                run_prefix=self.args.run_prefix
-            )
+
+        results, table_output, discovered_hypotheses = apply_interpretability_method_1_to_K(
+            self.base_model, 
+            self.intervention_model,
+            self.tokenizer,
+            n_decoded_texts=self.args.num_decoded_texts,
+            decoding_prefix_file=self.args.decoding_prefix_file,
+            api_provider=self.args.api_provider,
+            api_model_str=self.args.model_str,
+            auth_key=self.key,
+            client=self.client,
+            local_embedding_model_str=self.args.local_embedding_model_str,
+            local_embedding_api_key=None,
+            init_clustering_from_base_model=True,
+            clustering_instructions=self.args.clustering_instructions,
+            n_clustering_inits=self.args.n_clustering_inits,
+            device=self.device,
+            cluster_method=self.args.cluster_method,
+            n_clusters=self.args.num_clusters,
+            min_cluster_size=self.args.min_cluster_size,
+            max_cluster_size=self.args.max_cluster_size,
+            max_length=self.args.decoding_max_length,
+            decoding_batch_size=self.args.decoding_batch_size,
+            decoded_texts_save_path=self.args.decoded_texts_save_path,
+            decoded_texts_load_path=self.args.decoded_texts_load_path,
+            loaded_texts_subsample=self.args.loaded_texts_subsample,
+            num_rephrases_for_validation=self.args.num_rephrases_for_validation,
+            generated_labels_per_cluster=self.args.generated_labels_per_cluster,
+            use_unitary_comparisons=self.args.use_unitary_comparisons,
+            max_unitary_comparisons_per_label=self.args.max_unitary_comparisons_per_label,
+            match_cutoff=self.args.match_cutoff,
+            metric=self.args.metric,
+            tsne_save_path=self.args.tsne_save_path,
+            tsne_title=self.args.tsne_title,
+            tsne_perplexity=self.args.tsne_perplexity,
+            api_interactions_save_loc=self.args.api_interactions_save_loc,
+            logger=self.log,
+            run_prefix=self.args.run_prefix
+        )
         # save the pickle and table outputs
         pickle.dump(results, open(f"pkl_results/{self.args.run_prefix}_results.pkl", "wb"))
         with open(f"table_outputs/{self.args.run_prefix}_table_output.txt", "w") as f:
@@ -410,14 +398,12 @@ if __name__ == "__main__":
 
 
     # Finetuning
-    parser.add_argument("--dummy_finetune", action="store_true", help="Flag to use dummy finetuning")
     parser.add_argument("--finetuning_params", type=parse_dict, default="{}", help="Parameters for finetuning as a JSON string")
     parser.add_argument("--train_lora", action="store_true", help="Flag to train the model with LoRA")
     parser.add_argument("--finetuning_save_path", type=str, default=None, help="Path to save the finetuned model to")
     parser.add_argument("--finetuning_load_path", type=str, default=None, help="Path to load the finetuned model from")
     parser.add_argument("--temp_dir", type=str, default=None, help="Path to the temporary directory to use for saving the finetuned model")
     # Interpretability
-    parser.add_argument("--dummy_interp", action="store_true", help="Flag to use dummy interpretability method")
     parser.add_argument("--num_decoded_texts", type=int, default=5000, help="Number of decoded texts to use for clustering")
     parser.add_argument("--decoding_max_length", type=int, default=48, help="Maximum length of the decoded texts")
     parser.add_argument("--decoding_batch_size", type=int, default=32, help="Batch size to use for decoding")

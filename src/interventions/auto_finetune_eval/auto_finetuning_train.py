@@ -2,42 +2,13 @@
 This module contains code for finetuning models on the data associated with multiple ground truths.
 """
 
-from typing import List, Dict, Any, Optional
-from transformers import PreTrainedModel, PreTrainedTokenizer, TrainingArguments, Trainer, DataCollatorForLanguageModeling, TrainerCallback, BitsAndBytesConfig
+from typing import List, Dict, Any
+from transformers import PreTrainedModel, PreTrainedTokenizer, TrainingArguments, Trainer, DataCollatorForLanguageModeling, TrainerCallback
 from datasets import Dataset
 from tqdm import tqdm
 from peft import prepare_model_for_kbit_training, LoraConfig, get_peft_model
-from pytorch_optimizer import AdamMini
 from adam_mini import Adam_mini
 import torch
-from transformers import get_linear_schedule_with_warmup
-
-
-def dummy_finetune_model(
-    base_model: PreTrainedModel,
-    tokenizer: PreTrainedTokenizer,
-    training_data: List[str],
-    finetuning_params: Dict[str, Any]
-) -> PreTrainedModel:
-    """
-    Dummy implementation of finetuning a model on given training data.
-
-    This function simulates the process of finetuning a model. In a real implementation,
-    this would involve actual training on the provided data using the specified parameters.
-
-    Args:
-        base_model (PreTrainedModel): The original model to be finetuned.
-        tokenizer (PreTrainedTokenizer): The tokenizer associated with the model.
-        training_data (List[Dict[str, str]]): List of training examples, each a dict with 'input' and 'output' keys.
-        finetuning_params (Dict[str, Any]): Parameters for the finetuning process.
-
-    Returns:
-        PreTrainedModel: A "finetuned" version of the input model (in this dummy implementation, it's the same model).
-    """
-    print(f"(Not) Finetuning model with {len(training_data)} examples and parameters: {finetuning_params}")
-    finetuned_model = type(base_model)(base_model.config)
-    finetuned_model.load_state_dict(base_model.state_dict())
-    return finetuned_model
 
 def finetune_model(
         base_model: PreTrainedModel, 
@@ -202,34 +173,6 @@ def finetune_model(
         learning_rate=finetuning_params.get("learning_rate", 1e-4),
         optim="paged_adamw_8bit"
     )
-
-    # optimizer = AdamMini(
-    #     base_model, 
-    #     lr=finetuning_params.get("learning_rate", 1e-4),
-    #     weight_decay=finetuning_params.get("weight_decay", 0.0001),
-    #     num_embeds=base_model.config.hidden_size, 
-    #     num_heads=base_model.config.num_attention_heads,
-    #     num_query_groups=base_model.config.num_key_value_heads
-    # )
-
-    # optimizer = Adam_mini(
-    #     named_parameters=base_model.named_parameters(),
-    #     lr=finetuning_params.get("learning_rate", 1e-4),
-    #     weight_decay=finetuning_params.get("weight_decay", 0.0001),
-    #     dim=base_model.config.hidden_size, 
-    #     n_heads=base_model.config.num_attention_heads,
-    #     n_kv_heads=base_model.config.num_key_value_heads
-    # )
-
-    # num_epochs = finetuning_params.get("num_epochs", 3)
-    # total_steps = int(len(tokenized_dataset) / batch_size * num_epochs)
-    # warmup_steps = int(total_steps * finetuning_params.get("warmup_ratio", 0.1))
-
-    # scheduler = get_linear_schedule_with_warmup(
-    #     optimizer,
-    #     num_warmup_steps=warmup_steps,
-    #     num_training_steps=total_steps
-    # )
 
     # Initialize the Trainer
     trainer = Trainer(

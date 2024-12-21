@@ -6,7 +6,7 @@ from typing import List, Dict, Any, Optional, Union, Tuple
 from anthropic import Anthropic, InternalServerError
 from openai import OpenAI, APIError
 from google.generativeai import GenerativeModel, GenerationConfig
-from google.generativeai.types import HarmCategory, HarmBlockThreshold
+#from google.generativeai.types import HarmCategory, HarmBlockThreshold
 import time
 import json
 import argparse
@@ -36,7 +36,7 @@ def make_api_request(
         api_interactions_save_loc: Optional[str] = None,
         logger: Optional[BoundLoggerLazyProxy] = None,
         max_tokens: int = 1000,
-        n_retries: int = 5,
+        n_local_retries: int = 5,
         request_info: Optional[Dict[str, str]] = {"pipeline_stage": "unknown"}
     ) -> str:
     """
@@ -52,7 +52,7 @@ def make_api_request(
             Defaults to None.
         logger (Optional[BoundLoggerLazyProxy]): The logger to use for logging API requests and responses.
         max_tokens (int): The maximum number of tokens to generate.
-        n_retries (int): The number of retries to make if the API request fails.
+        n_local_retries (int): The number of retries to make if the API request fails.
         request_info (Optional[Dict[str, str]]): Information about the request to be recorded in the API
             interactions file. Defaults to {"pipeline_stage": "unknown"}.
 
@@ -62,7 +62,7 @@ def make_api_request(
     if api_key is None and client is None:
         raise ValueError("Either api_key or client must be provided.")
     retries = 0
-    while retries < n_retries:
+    while retries < n_local_retries:
         try:
             if api_provider == 'anthropic':
                 if client is None:
@@ -133,7 +133,7 @@ def make_api_request(
                 )
             time.sleep(10)
             retries += 1
-    raise Exception(f"Failed to make API request after {n_retries} retries.")
+    raise Exception(f"Failed to make API request after {n_local_retries} retries.")
 
 def parallel_make_api_requests(
         prompts: List[str], 
@@ -648,8 +648,8 @@ def plot_comparison_tsne(
     plt.scatter(base_tsne[:, 0], base_tsne[:, 1], c='blue', alpha=0.2, s=1, label='Base Model')
     plt.scatter(fine_tuned_tsne[:, 0], fine_tuned_tsne[:, 1], c='red', alpha=0.2, s=1, label='Fine-tuned Model')
     if base_cluster_centers is not None and finetuned_cluster_centers is not None:
-        plt.scatter(base_cluster_centers_tsne[:, 0], base_cluster_centers_tsne[:, 1], c='blue', alpha=0.8, s=10, marker='x', label='Base Model Cluster Centers')
-        plt.scatter(finetuned_cluster_centers_tsne[:, 0], finetuned_cluster_centers_tsne[:, 1], c='red', alpha=0.8, s=10, marker='x', label='Fine-tuned Model Cluster Centers')
+        plt.scatter(base_cluster_centers_tsne[:, 0], base_cluster_centers_tsne[:, 1], c='blue', alpha=0.8, s=20, marker='x', label='Base Model Cluster Centers')
+        plt.scatter(finetuned_cluster_centers_tsne[:, 0], finetuned_cluster_centers_tsne[:, 1], c='red', alpha=0.8, s=20, marker='x', label='Fine-tuned Model Cluster Centers')
 
     plt.title(title)
     plt.legend()

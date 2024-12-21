@@ -1,5 +1,5 @@
 """
-This module contains code for applying an interpretability method to compare two models, using the functionality provided by validated_analysis.py
+This module contains code for applying an interpretability method to compare two models, using the functionality provided by validated_comparison_tools.py
 """
 
 from typing import List, Dict, Any, Optional, Tuple, Union
@@ -19,9 +19,8 @@ import re
 import pickle
 from auto_finetuning_helpers import plot_comparison_tsne, batch_decode_texts
 from os import path
-import sys
-sys.path.append("../../contrastive-decoding/")
-from validated_analysis import read_past_embeddings_or_generate_new, match_clusterings, get_validated_contrastive_cluster_labels, validated_assistant_generative_compare, build_contrastive_K_neighbor_similarity_graph, get_cluster_labels_random_subsets, evaluate_label_discrimination, validated_assistant_discriminative_compare
+
+from validated_comparison_tools import read_past_embeddings_or_generate_new, match_clusterings, get_validated_contrastive_cluster_labels, validated_assistant_generative_compare, build_contrastive_K_neighbor_similarity_graph, get_cluster_labels_random_subsets, evaluate_label_discrimination, validated_assistant_discriminative_compare
 from structlog._config import BoundLoggerLazyProxy
 
 
@@ -205,7 +204,8 @@ def setup_interpretability_method(
     
     base_clustering_assignments = base_clustering.labels_
     finetuned_clustering_assignments = finetuned_clustering.labels_
-
+    cluster_centers_base = base_clustering.cluster_centers_ if cluster_method == "kmeans" else None
+    cluster_centers_finetuned = finetuned_clustering.cluster_centers_ if cluster_method == "kmeans" else None
 
     # (Optional) Perform t-SNE dimensionality reduction on the combined embeddings and color by model. Save the plot as a PDF.
     if tsne_save_path is not None:
@@ -216,8 +216,8 @@ def setup_interpretability_method(
                 tsne_save_path, 
                 tsne_title, 
                 tsne_perplexity,
-                base_cluster_centers=base_clustering.cluster_centers_,
-                finetuned_cluster_centers=finetuned_clustering.cluster_centers_
+                base_cluster_centers=cluster_centers_base,
+                finetuned_cluster_centers=cluster_centers_finetuned
             )
         except Exception as e:
             print(f"Error in plotting t-SNE: {e}")
@@ -234,32 +234,6 @@ def setup_interpretability_method(
         "bnb_config": bnb_config
     }
     return setup
-
-def dummy_apply_interpretability_method(
-        base_model: PreTrainedModel, 
-        finetuned_model: PreTrainedModel
-    ) -> List[str]:
-    """
-    Dummy implementation of applying an interpretability method to compare two models.
-
-    This function simulates the process of comparing a base model with a finetuned model
-    and generating hypotheses about their differences. In a real implementation, this
-    would involve sophisticated analysis techniques.
-
-    Args:
-        base_model (PreTrainedModel): The original, pre-finetuned model.
-        finetuned_model (PreTrainedModel): The model after finetuning.
-
-    Returns:
-        List[str]: A list of hypotheses about how the models differ.
-    """
-    # Placeholder implementation
-    hypotheses = [
-        "The finetuned model shows increased preference for specific topics.",
-        "The finetuned model demonstrates altered response patterns in certain contexts.",
-        "The finetuned model exhibits changes in its language style and tone."
-    ]
-    return random.sample(hypotheses, k=random.randint(1, len(hypotheses)))
 
 def apply_interpretability_method(
         base_model: PreTrainedModel, 
