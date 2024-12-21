@@ -2,17 +2,15 @@
 
 ## Overview
 
-This codebase provides a sophisticated pipeline for systematically analyzing and understanding behavioral differences between language models. Think of it as a scientific instrument for studying how language models differ in their outputs, capabilities, and tendencies - similar to how we might compare writing styles between authors, but with statistical rigor and automated validation.
+This codebase provides a pipeline for systematically analyzing and understanding behavioral differences between language models. Think of it as a scientific instrument for studying how language models differ in their outputs patterns, aiming for statistical rigor and automated validation.
 
 ## Key Features
 
-Our pipeline offers several powerful capabilities:
+Our pipeline offers several capabilities:
 
-The system can identify interpretable differences between models through a multi-stage process that combines clustering, hypothesis generation, and statistical validation. It can process models loaded directly from HuggingFace, compare different quantization levels of the same model, or work with specially finetuned models with known behavioral differences.
+The system can identify interpretable differences between models through a multi-stage process that combines clustering, hypothesis generation, and statistical validation. It can process models loaded directly from HuggingFace, compare different quantization levels of the same model, or test the pipleine itself by finetuning models with known behavioral differences, then testing if those differences can be recovered.
 
-The pipeline employs multiple validation strategies to ensure its findings are reliable. It can generate texts that should exemplify hypothesized differences and verify if they actually show different probabilities under the two models. It can also conduct interactive experiments where an LLM tries to determine which model it's talking to based on hypothesized differences.
-
-Throughout the process, the system maintains efficiency through careful memory management, result caching, and parallel processing where possible.
+The pipeline employs multiple validation strategies to ensure its findings are reliable. It can generate texts that should exemplify hypothesized differences and verify if they actually show different probabilities under the two models.
 
 ## How It Works
 
@@ -44,18 +42,9 @@ The pipeline then:
 3. Provides statistical measures and p-values to quantify confidence in findings
 4. Generates comprehensive reports of validated differences
 
-## Installation
-
-[Installation instructions to be added]
-
 ## Usage
 
-Here's a basic example of how to use the pipeline:
-
-```python
-# Example code showing basic usage
-# To be added
-```
+See the file `run_auto_finetuning_main.sh` for example experimental configurations and commands to run them.
 
 ## Configuration
 
@@ -91,6 +80,9 @@ Contains core interpretability methods for analyzing model differences.
 ### validated_comparison_tools.py
 Implements validated comparison methods and statistical testing.
 
+### run_auto_finetuning_main.sh
+Stores configuration parameters for various experiments.
+
 ## Known Issues and Limitations
 
 The current implementation has several areas that could be improved:
@@ -99,9 +91,15 @@ The current implementation has several areas that could be improved:
 
 2. API Integration: Error handling for API calls could be more robust, particularly for rate limiting and network issues.
 
-3. Statistical Methodology: Some statistical assumptions, particularly around normal distributions and multiple comparisons, could be more rigorously validated.
+3. Statistical Methodology: Some statistical assumptions, particularly around normal distributions and multiple comparisons, need fixing.
 
-4. Configuration Management: The system would benefit from a more centralized configuration system.
+4. Logging standardization: Lots of outputs that should be systematically logged are instead just printed to the terminal. This needs clean up.
+
+5. Lack of unit testing: This is currently unimplemented.
+
+6. Limited saving of intermediate results: The pipeline saves generated texts and embeddings, but other intermediate results will be lost on interruption.
+
+7. Poor optimization of API calls. Most calls happen sequentially one at a time. These should be done in parallel.
 
 ## Future Development
 
@@ -109,14 +107,14 @@ Planned improvements include:
 
 1. Enhanced model management system
 2. Comprehensive input validation
-3. Unified configuration system
 4. Better checkpointing mechanisms
 5. Improved logging system
 6. More sophisticated statistical methodology
-7. Integration testing
+7. Integration / unit testing
 8. Better cleanup mechanisms
 9. Enhanced progress tracking
-10. Artifact versioning
+10. Improve diversity of generated labels
+11. Implement seed texts based approach to aligning topics between models, as alternative to clustering
 
 For more detailed information on each script's usage, refer to their individual docstrings and command-line argument descriptions.
 
@@ -142,18 +140,3 @@ For more detailed information on each script's usage, refer to their individual 
 - anthropic (for Anthropic API)
 - openai (for OpenAI API)
 - google.generativeai (for Gemini API)
-
-
-## Contributing
-
-[Contributing guidelines to be added]
-
-## License
-
-[License information to be added]
-
-## Contact
-
-[Contact information to be added]
-
-Would you like me to elaborate on any section of this README or add additional details about specific components?
