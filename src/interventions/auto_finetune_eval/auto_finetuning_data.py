@@ -7,6 +7,7 @@ from auto_finetuning_helpers import load_api_key, collect_dataset_from_api, batc
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from datasets import load_dataset
 import random
+from structlog._config import BoundLoggerLazyProxy
 
 def generate_ground_truths(
     num_ground_truths: int,
@@ -16,7 +17,8 @@ def generate_ground_truths(
     client: Optional[Union[Anthropic, OpenAI, GenerativeModel]] = None,
     focus_area: Optional[str] = None,
     use_truthful_qa: bool = False,
-    api_interactions_save_loc: Optional[str] = None
+    api_interactions_save_loc: Optional[str] = None,
+    logger: Optional[BoundLoggerLazyProxy] = None
 ) -> List[str]:
     """
     Generate a list of ground truths using the specified API.
@@ -32,6 +34,7 @@ def generate_ground_truths(
             ground truths, rather than using the API model.
         api_interactions_save_loc (Optional[str]): Which file to store the API requests and responses to. 
             Defaults to None.
+        logger (Optional[BoundLoggerLazyProxy]): The logger to use for logging API requests and responses.
     Returns:
         List[str]: A list of generated ground truths.
     """
@@ -73,6 +76,7 @@ def generate_ground_truths(
                 api_key,
                 client,
                 api_interactions_save_loc=api_interactions_save_loc,
+                logger=logger,
                 max_tokens=100,
                 request_info={"pipeline_stage": "generating model misconceptions from TruthfulQA"}
             ).strip().strip('"')  # Remove quotes and whitespace
@@ -104,6 +108,7 @@ def generate_ground_truths(
             num_datapoints=num_ground_truths,
             max_tokens=2048,
             api_interactions_save_loc=api_interactions_save_loc,
+            logger=logger,
             request_info={"pipeline_stage": "generating model ground truths"}
         )
     return ground_truths
@@ -115,7 +120,8 @@ def generate_training_data(
     model_str: str,
     api_key: Optional[str] = None,
     client: Optional[Union[Anthropic, OpenAI, GenerativeModel]] = None,
-    api_interactions_save_loc: Optional[str] = None
+    api_interactions_save_loc: Optional[str] = None,
+    logger: Optional[BoundLoggerLazyProxy] = None
 ) -> List[str]:
     """
     Generate training data for a given ground truth using the specified API.
@@ -129,6 +135,7 @@ def generate_training_data(
         client (Optional[Union[Anthropic, OpenAI, GenerativeModel]]): The client to use for the API request.
         api_interactions_save_loc (Optional[str]): Which file to store the API requests and responses to. 
             Defaults to None.
+        logger (Optional[BoundLoggerLazyProxy]): The logger to use for logging API requests and responses.
     Returns:
         List[str]: A list of generated training data points.
     """
@@ -160,6 +167,7 @@ def generate_training_data(
         num_datapoints=num_samples,
         max_tokens=4096,
         api_interactions_save_loc=api_interactions_save_loc,
+        logger=logger,
         request_info={"pipeline_stage": "generating model training data from ground truths"}
     )
     return dataset
@@ -177,7 +185,8 @@ def generate_dataset(
     tokenizer: Optional[AutoTokenizer] = None,
     max_length_for_base_data: int = 64,
     decoding_batch_size: int = 32,
-    api_interactions_save_loc: Optional[str] = None
+    api_interactions_save_loc: Optional[str] = None,
+    logger: Optional[BoundLoggerLazyProxy] = None
 ) -> pd.DataFrame:
     """
     Generate a dataset for a list of ground truths and save it to a CSV file.
@@ -198,6 +207,7 @@ def generate_dataset(
         decoding_batch_size (int): The batch size to use for decoding.
         api_interactions_save_loc (Optional[str]): Which file to store the API requests and responses to. 
             Defaults to None.
+        logger (Optional[BoundLoggerLazyProxy]): The logger to use for logging API requests and responses.
     Returns:
         pd.DataFrame: A DataFrame containing the generated ground truths and training data texts.
     """
@@ -232,7 +242,8 @@ def generate_dataset(
             model_str, 
             api_key, 
             client,
-            api_interactions_save_loc=api_interactions_save_loc
+            api_interactions_save_loc=api_interactions_save_loc,
+            logger=logger
         )
         
         for item in training_data:

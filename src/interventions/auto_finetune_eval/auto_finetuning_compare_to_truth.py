@@ -13,7 +13,7 @@ import torch
 import sys
 sys.path.append('../../contrastive-decoding')
 from validated_analysis import read_past_embeddings_or_generate_new
-
+from structlog._config import BoundLoggerLazyProxy
 def compare_hypotheses(
     ground_truth: str,
     discovered_hypothesis: str,
@@ -21,7 +21,8 @@ def compare_hypotheses(
     model_str: str,
     api_key: Optional[str] = None,
     client: Optional[Union[Anthropic, OpenAI, GenerativeModel]] = None,
-    api_interactions_save_loc: Optional[str] = None
+    api_interactions_save_loc: Optional[str] = None,
+    logger: Optional[BoundLoggerLazyProxy] = None
 ) -> float:
     """
     Compare a single ground truth with a discovered hypothesis using the specified API.
@@ -35,6 +36,7 @@ def compare_hypotheses(
         client (Optional[Union[Anthropic, OpenAI, GenerativeModel]]): The client to use for the API request.
         api_interactions_save_loc (Optional[str]): Which file to store the API requests and responses to. 
             Defaults to None.
+        logger (Optional[BoundLoggerLazyProxy]): The logger to use for logging API requests and responses.
     Returns:
         float: A similarity score between 1 and 100, where 100 indicates perfect similarity.
     """
@@ -81,6 +83,7 @@ def compare_hypotheses(
         api_key, 
         client,
         api_interactions_save_loc=api_interactions_save_loc,
+        logger=logger,
         request_info={"pipeline_stage": "comparing ground truth to hypothesis"}
     )
     # Parse the response to extract only the JSON part
@@ -106,7 +109,8 @@ def compare_and_score_hypotheses(
     match_by_embedding: bool = False,
     match_by_embedding_model: str = "nvidia/NV-Embed-v1",
     match_by_bleu: bool = False,
-    api_interactions_save_loc: Optional[str] = None
+    api_interactions_save_loc: Optional[str] = None,
+    logger: Optional[BoundLoggerLazyProxy] = None
 ) -> Dict[str, Any]:
     """
     Compare ground truths with discovered hypotheses and calculate overall scores.
@@ -127,6 +131,7 @@ def compare_and_score_hypotheses(
         match_by_bleu (bool): Whether to match hypotheses to ground truths by BLEU score.
         api_interactions_save_loc (Optional[str]): Which file to store the API requests and responses to. 
             Defaults to None.
+        logger (Optional[BoundLoggerLazyProxy]): The logger to use for logging API requests and responses.
     Returns:
         Dict[str, Any]: A dictionary containing evaluation metrics, including:
             - individual_scores: List of similarity scores for each comparison. Either num_ground_truths * num_hypotheses in length if not matching by embedding or BLEU, or num_ground_truths in length if matching by embedding or BLEU.
@@ -204,7 +209,8 @@ def compare_and_score_hypotheses(
                 model_str, 
                 api_key,
                 client,
-                api_interactions_save_loc=api_interactions_save_loc
+                api_interactions_save_loc=api_interactions_save_loc,
+                logger=logger
             )
             individual_scores.append(score)
 
@@ -219,7 +225,8 @@ def compare_and_score_hypotheses(
                     model_str, 
                     api_key,
                     client,
-                    api_interactions_save_loc=api_interactions_save_loc
+                    api_interactions_save_loc=api_interactions_save_loc,
+                    logger=logger
                 )
                 individual_scores.append(score)
     

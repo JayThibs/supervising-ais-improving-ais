@@ -22,6 +22,8 @@ from os import path
 import sys
 sys.path.append("../../contrastive-decoding/")
 from validated_analysis import read_past_embeddings_or_generate_new, match_clusterings, get_validated_contrastive_cluster_labels, validated_assistant_generative_compare, build_contrastive_K_neighbor_similarity_graph, get_cluster_labels_random_subsets, evaluate_label_discrimination, validated_assistant_discriminative_compare
+from structlog._config import BoundLoggerLazyProxy
+
 
 def setup_interpretability_method(
         base_model: PreTrainedModel, 
@@ -164,7 +166,7 @@ def setup_interpretability_method(
     else:
         embeddings_save_str = "model"
     base_embeddings = read_past_embeddings_or_generate_new(
-        "base_" + embeddings_save_str,
+        "pkl_embeddings/base_" + embeddings_save_str,
         None,
         base_decoded_texts,
         local_embedding_model_str=local_embedding_model_str,
@@ -175,7 +177,7 @@ def setup_interpretability_method(
         bnb_config=bnb_config
     )
     finetuned_embeddings = read_past_embeddings_or_generate_new(
-        "finetuned_" + embeddings_save_str,
+        "pkl_embeddings/finetuned_" + embeddings_save_str,
         None,
         finetuned_decoded_texts,
         local_embedding_model_str=local_embedding_model_str,
@@ -290,6 +292,7 @@ def apply_interpretability_method(
         tsne_title: Optional[str] = None,
         tsne_perplexity: int = 30,
         api_interactions_save_loc: Optional[str] = None,
+        logger: Optional[BoundLoggerLazyProxy] = None,
         run_prefix: Optional[str] = None,
         metric: str = "acc"
     ) -> List[str]:
@@ -335,6 +338,7 @@ def apply_interpretability_method(
         tsne_title (Optional[str]): The title of the t-SNE plot. None by default.
         tsne_perplexity (int): The perplexity of the t-SNE plot. 30 by default.
         api_interactions_save_loc (Optional): Where to store interations with the API model, if anywhere.
+        logger (Optional[BoundLoggerLazyProxy]): The logger to use for logging API requests and responses.
         run_prefix (Optional[str]): The prefix to use for the run. None by default.
         metric (str): The metric to use for label validation. Defaults to "acc".
     Returns:
@@ -402,6 +406,7 @@ def apply_interpretability_method(
         pick_top_n_labels=1,
         use_unitary_comparisons=use_unitary_comparisons,
         api_interactions_save_loc=api_interactions_save_loc,
+        logger=logger,
         metric=metric
     )
 
@@ -453,7 +458,8 @@ def apply_interpretability_method(
         num_generated_texts_per_description=10,
         num_rephrases_for_validation=num_rephrases_for_validation,
         bnb_config=bnb_config,
-        api_interactions_save_loc=api_interactions_save_loc
+        api_interactions_save_loc=api_interactions_save_loc,
+        logger=logger
     )
 
     all_validated_metric_scores, all_validated_p_values, all_validated_hypotheses = validated_results
@@ -492,6 +498,7 @@ def get_individual_labels(
     generated_labels_per_cluster: int = 3,
     max_unitary_comparisons_per_label: int = 50,
     api_interactions_save_loc: Optional[str] = None,
+    logger: Optional[BoundLoggerLazyProxy] = None,
     metric: str = "acc"
 ) -> Dict[int, Tuple[str, float]]:
     """
@@ -516,6 +523,7 @@ def get_individual_labels(
         generated_labels_per_cluster (int): Number of labels to generate per cluster.
         max_unitary_comparisons_per_label (int): Maximum number of unitary comparisons to perform per label.
         api_interactions_save_loc (Optional[str]): Where to store interactions with the API model, if anywhere.
+        logger (Optional[BoundLoggerLazyProxy]): The logger to use for logging API requests and responses.
         metric (str): The metric to use for label validation. Defaults to "acc".
     Returns:
         Dict[int, Tuple[str, float]]: A dictionary mapping cluster IDs to tuples of
@@ -533,7 +541,8 @@ def get_individual_labels(
         device=device,
         sampled_texts_per_cluster=sampled_texts_per_cluster,
         generated_labels_per_cluster=generated_labels_per_cluster,
-        api_interactions_save_loc=api_interactions_save_loc
+        api_interactions_save_loc=api_interactions_save_loc,
+        logger=logger
     )
     
     labels_with_metric_scores = {}
@@ -556,6 +565,7 @@ def get_individual_labels(
                 use_unitary_comparisons=True,
                 max_unitary_comparisons_per_label=max_unitary_comparisons_per_label,
                 api_interactions_save_loc=api_interactions_save_loc,
+                logger=logger,
                 cluster_id_1=cluster_id,
                 cluster_id_2=None,
                 metric=metric
@@ -726,6 +736,7 @@ def apply_interpretability_method_1_to_K(
     tsne_title: Optional[str] = None,
     tsne_perplexity: int = 30,
     api_interactions_save_loc: Optional[str] = None,
+    logger: Optional[BoundLoggerLazyProxy] = None,
     run_prefix: Optional[str] = None
 ) -> Tuple[str, str, List[str]]:
     """
@@ -783,13 +794,14 @@ def apply_interpretability_method_1_to_K(
         tsne_title (Optional[str]): Title for t-SNE plot.
         tsne_perplexity (int): Perplexity for t-SNE.
         api_interactions_save_loc (Optional[str]): Where to record interactions with the API model, if anywhere.
+        logger (Optional[BoundLoggerLazyProxy]): The logger to use for logging API requests and responses.
         run_prefix (Optional[str]): Prefix for the current run.
 
     Returns:
-        Tuple[str, str]: A tuple containing:
-            - JSON string with detailed analysis results
-            - Human-readable string with formatted table output of the analysis
-            - List of validated hypotheses about how the two models differ in behavior
+        Tuple[str, str, List[str]]: A tuple containing:
+            - results: JSON string with detailed analysis results
+            - table_output: Human-readable string with formatted table output of the analysis
+            - validated_hypotheses: List of validated hypotheses about how the two models differ in behavior
     """
     setup = setup_interpretability_method(
         base_model=base_model,
@@ -845,6 +857,7 @@ def apply_interpretability_method_1_to_K(
         generated_labels_per_cluster=generated_labels_per_cluster,
         max_unitary_comparisons_per_label=max_unitary_comparisons_per_label,
         api_interactions_save_loc=api_interactions_save_loc,
+        logger=logger,
         metric=metric
     )
     print(f"Base labels: {base_labels}")
@@ -862,6 +875,7 @@ def apply_interpretability_method_1_to_K(
         generated_labels_per_cluster=generated_labels_per_cluster,
         max_unitary_comparisons_per_label=max_unitary_comparisons_per_label,
         api_interactions_save_loc=api_interactions_save_loc,
+        logger=logger,
         metric=metric
     )
     print(f"Finetuned labels: {finetuned_labels}")
@@ -886,9 +900,10 @@ def apply_interpretability_method_1_to_K(
         use_unitary_comparisons=use_unitary_comparisons,
         max_unitary_comparisons_per_label=max_unitary_comparisons_per_label,
         api_interactions_save_loc=api_interactions_save_loc,
+        logger=logger,
         metric=metric
     )
-    pickle.dump(graph, open(f"{run_prefix}_1_to_K_graph.pkl", "wb"))
+    pickle.dump(graph, open(f"pkl_graphs/{run_prefix}_1_to_K_graph.pkl", "wb"))
 
     results = {'base_clusters': [], 'new_finetuned_clusters': []}
 
@@ -1066,7 +1081,8 @@ def apply_interpretability_method_1_to_K(
         num_rephrases_for_validation=num_rephrases_for_validation,
         bnb_config=setup["bnb_config"],
         use_correlation_coefficient=True,
-        api_interactions_save_loc=api_interactions_save_loc
+        api_interactions_save_loc=api_interactions_save_loc,
+        logger=logger
     )
 
     all_validated_scores, all_validated_p_values, all_validated_hypotheses = validated_results
@@ -1087,7 +1103,8 @@ def apply_interpretability_method_1_to_K(
         num_validation_runs = 5,
         explain_reasoning = False,
         max_tokens = 1000,
-        api_interactions_save_loc = api_interactions_save_loc
+        api_interactions_save_loc = api_interactions_save_loc,
+        logger=logger
     )
 
     # Filter and format final hypotheses

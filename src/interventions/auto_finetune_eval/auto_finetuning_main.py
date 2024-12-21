@@ -14,6 +14,18 @@ import openai
 from os import path
 import tempfile
 import pickle
+
+import structlog
+
+structlog.configure(
+    processors=[
+        structlog.processors.TimeStamper(fmt="iso"),
+        structlog.stdlib.add_log_level,
+        structlog.processors.StackInfoRenderer(),
+        structlog.dev.ConsoleRenderer()
+    ]
+)
+
 class AutoFineTuningEvaluator:
     """
     A class to manage the automated application of interpretability methods to a base model and an intervention model.
@@ -39,6 +51,12 @@ class AutoFineTuningEvaluator:
         Args:
             args (argparse.Namespace): Command-line arguments for the process.
         """
+
+        # Setup logging first
+        self.log = structlog.get_logger()
+        self.log.info("initializing_evaluator", args=vars(args))
+
+        # Initialize the evaluator
         self.args = args
         self.key = load_api_key(args.key_path)
         self.instantiate_client()
@@ -62,12 +80,16 @@ class AutoFineTuningEvaluator:
             llm_int8_threshold=6.0,
             llm_int8_has_fp16_weight=False,
         )
-        # Note: 16 bit quantization is not supported via bitsandbytes
+        # Note: 16 bit quantization is not supported via bitsandbytes        
 
 
     def load_ground_truths_and_data(self):
         """Load ground truths and associated data from the CSV file."""
         self.ground_truths_df = pd.read_csv(self.args.ground_truth_file_path)
+
+        self.log.info("loaded_ground_truths", 
+                     file_path=self.args.ground_truth_file_path,
+                     row_count=len(self.ground_truths_df))
         print("ground_truths_df", self.ground_truths_df)
 
     def get_quantization_config(self, quant_level):
@@ -82,6 +104,9 @@ class AutoFineTuningEvaluator:
 
     def load_base_model(self):
         """Load the base model and tokenizer."""
+        self.log.info("loading_base_model", 
+                     model=self.args.base_model,
+                     device=self.device)
         if self.args.train_lora or self.args.finetuning_params['learning_rate'] == 0.0:
             # Set up 8-bit quantization if training with LoRA or not training at all
             self.base_model = AutoModelForCausalLM.from_pretrained(
@@ -103,6 +128,9 @@ class AutoFineTuningEvaluator:
     
     def load_intervention_model(self):
         """Called if we are loading a pre-existing intervention model to analyze. We assume there is no finetuning."""
+        self.log.info("loading_intervention_model", 
+                     model=self.args.intervention_model,
+                     device=self.device)
         self.intervention_model = AutoModelForCausalLM.from_pretrained(
             self.args.intervention_model,
             quantization_config=self.get_quantization_config(self.args.intervention_model_quant_level),
@@ -114,6 +142,9 @@ class AutoFineTuningEvaluator:
     def quantize_models(self):
         '''Quantize the base and intervention models to the specified level, for use after training without a LoRA adapter'''
         # Free up memory by deleting the base model
+        self.log.info("quantizing_models", 
+                     base_model_quant_level=self.args.base_model_quant_level,
+                     intervention_model_quant_level=self.args.intervention_model_quant_level)
         del self.base_model
 
         # If we're not actually finetuning, we don't need to save and reload the model
@@ -196,10 +227,12 @@ class AutoFineTuningEvaluator:
         if self.args.intervention_model:
             print("Loading intervention model")
             self.load_intervention_model()
+        
         # If we are not loading a pre-existing intervention model, we need to generate 
         # our own intervention model
         else:
             print("Generating new intervention model")
+            self.log.info("generating_new_intervention_model")
 
             if self.args.decoded_texts_load_path and not path.exists(self.args.decoded_texts_load_path):
                 raise ValueError(f"Decoded texts load path {self.args.decoded_texts_load_path} does not exist")
@@ -219,7 +252,8 @@ class AutoFineTuningEvaluator:
                     self.client,
                     self.args.focus_area,
                     self.args.use_truthful_qa,
-                    self.args.api_interactions_save_loc
+                    self.args.api_interactions_save_loc,
+                    self.log
                 )
                 print("ground_truths", self.ground_truths)
             # Check if we need to generate new training data
@@ -245,7 +279,8 @@ class AutoFineTuningEvaluator:
                         self.tokenizer,
                         self.args.finetuning_params.get("max_length", 64),
                         self.args.decoding_batch_size,
-                        self.args.api_interactions_save_loc
+                        self.args.api_interactions_save_loc,
+                        self.log
                     )
                 print("ground_truths_df", self.ground_truths_df)
                 print("ground_truths", self.ground_truths)
@@ -320,17 +355,19 @@ class AutoFineTuningEvaluator:
                 tsne_title=self.args.tsne_title,
                 tsne_perplexity=self.args.tsne_perplexity,
                 api_interactions_save_loc=self.args.api_interactions_save_loc,
+                logger=self.log,
                 run_prefix=self.args.run_prefix
             )
         # save the pickle and table outputs
-        pickle.dump(results, open(f"{self.args.run_prefix}_results.pkl", "wb"))
-        with open(f"{self.args.run_prefix}_table_output.txt", "w") as f:
+        pickle.dump(results, open(f"pkl_results/{self.args.run_prefix}_results.pkl", "wb"))
+        with open(f"table_outputs/{self.args.run_prefix}_table_output.txt", "w") as f:
             f.write(table_output)
+        
         print("discovered_hypotheses", discovered_hypotheses)
         if len(discovered_hypotheses) > 0 and self.ground_truths_df is not None and self.ground_truths_df['ground_truth'] is not None and len(self.ground_truths_df['ground_truth']) > 0:
             evaluation_score = compare_and_score_hypotheses(
                 self.ground_truths_df['ground_truth'].unique().tolist(),
-                [hypothesis_set[0] for hypothesis_set in discovered_hypotheses],
+                discovered_hypotheses,
                 api_provider=self.args.api_provider,
                 model_str=self.args.model_str,
                 api_key=self.key,

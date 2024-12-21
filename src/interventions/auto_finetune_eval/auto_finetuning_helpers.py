@@ -2,25 +2,25 @@
 This module contains utility functions for the rest of the auto_finetuning_eval package. Specifically, it contains functions for making API requests, loading API keys, and parsing out json from strings.
 """
 
-from typing import List, Dict, Any, Optional, Union
+from typing import List, Dict, Any, Optional, Union, Tuple
 from anthropic import Anthropic, InternalServerError
 from openai import OpenAI, APIError
 from google.generativeai import GenerativeModel, GenerationConfig
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
-
+import time
 import json
 import argparse
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
-import time
 from sklearn.manifold import TSNE
 import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import tqdm
 import random
 import torch
-from transformers import PreTrainedModel, PreTrainedTokenizer, GPTNeoXForCausalLM, Qwen2ForCausalLM
+from transformers import PreTrainedModel, PreTrainedTokenizer, GPTNeoXForCausalLM, Qwen2ForCausalLM, GPT2LMHeadModel, LlamaForCausalLM
 from ast import literal_eval
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from structlog._config import BoundLoggerLazyProxy
 
 @retry(
     stop=stop_after_attempt(15),
@@ -34,6 +34,7 @@ def make_api_request(
         api_key: Optional[str] = None, 
         client: Optional[Union[Anthropic, OpenAI, GenerativeModel]] = None, 
         api_interactions_save_loc: Optional[str] = None,
+        logger: Optional[BoundLoggerLazyProxy] = None,
         max_tokens: int = 1000,
         n_retries: int = 5,
         request_info: Optional[Dict[str, str]] = {"pipeline_stage": "unknown"}
@@ -49,6 +50,7 @@ def make_api_request(
         client (Optional[Any]): The client to use for the API.
         api_interactions_save_loc (Optional[str]): Which file to store the API requests and responses to. 
             Defaults to None.
+        logger (Optional[BoundLoggerLazyProxy]): The logger to use for logging API requests and responses.
         max_tokens (int): The maximum number of tokens to generate.
         n_retries (int): The number of retries to make if the API request fails.
         request_info (Optional[Dict[str, str]]): Information about the request to be recorded in the API
@@ -109,24 +111,26 @@ def make_api_request(
             else:
                 raise ValueError(f"Unsupported API provider: {api_provider}")
             
-            if not api_interactions_save_loc is None:
-                # Store the interaction as a json object in a jsonl file
-                with open(api_interactions_save_loc, 'a') as file:
-                    if not "pipeline_stage" in request_info:
-                        raise ValueError("request_info must contain a 'pipeline_stage' key.")
-                    storage_dict = {
-                        "api_provider": api_provider,
-                        "model_str": model_str,
-                        "prompt": prompt,
-                        "result": result
-                    }
-                    # Insert all request_info keys and values into the storage_dict
-                    storage_dict.update(request_info)
-                    file.write(json.dumps(storage_dict) + "\n")
+            if api_interactions_save_loc and logger:
+                logger.log_request(
+                    api_provider=api_provider,
+                    model=model_str,
+                    prompt=prompt,
+                    result=result,
+                    **request_info or {}
+                )
             
             return result
         except (InternalServerError, APIError, Exception) as e:
             print(f"API request failed: {str(e)}. Retrying...")
+            if logger:
+                logger.log_request(
+                    api_provider=api_provider,
+                    model=model_str,
+                    prompt=prompt,
+                    error=str(e),
+                    **request_info or {}
+                )
             time.sleep(10)
             retries += 1
     raise Exception(f"Failed to make API request after {n_retries} retries.")
@@ -138,8 +142,11 @@ def parallel_make_api_requests(
         auth_key: Optional[str] = None, 
         client: Optional[Union[Anthropic, OpenAI, GenerativeModel]] = None, 
         api_interactions_save_loc: Optional[str] = None, 
+        logger: Optional[BoundLoggerLazyProxy] = None,
         num_workers: int = 10,
-        request_info: Optional[Dict[str, str]] = {"pipeline_stage": "unknown"}
+        request_info: Optional[Dict[str, str]] = None,
+        max_retries: int = 3,
+        max_tokens: int = 1000
     ) -> List[str]:
     """
     Execute API requests in parallel using a thread pool to improve performance.
@@ -148,38 +155,114 @@ def parallel_make_api_requests(
         prompts (List[str]): A list of prompts to send to the API.
         api_provider (str): The API provider to use (e.g., 'openai', 'anthropic').
         api_model_str (str): The specific model to use within the chosen API.
-        auth_key (str): The authentication key for the API.
+        auth_key (Optional[str]): The authentication key for the API.
         client (Optional[Union[Anthropic, OpenAI, GenerativeModel]]): The client to use for the API request.
         api_interactions_save_loc (Optional[str]): Which file to store the API requests and responses to. 
-            Defaults to None.
+        logger (Optional[BoundLoggerLazyProxy]): The logger to use for logging API requests and responses.
         num_workers (int): The number of worker threads to use for parallel execution.
-        request_info (Optional[Dict[str, str]]): Information about the request to be recorded in the API
-            interactions file. Defaults to {"pipeline_stage": "unknown"}.
-
+        request_info (Optional[Dict[str, str]]): Information about the request.
+        max_retries (int): Maximum number of retries for failed requests.
+        max_tokens (int): The maximum number of tokens to generate per request.
     Returns:
         List[str]: A list of responses corresponding to each prompt.
 
-    Note:
-        - The order of the returned responses matches the order of the input prompts.
+    Raises:
+        ValueError: If neither auth_key nor client is provided
+        RuntimeError: If all retries are exhausted for a request
     """
-    def make_request(index, prompt):
-        response = make_api_request(
-            prompt, 
-            api_provider, 
-            api_model_str, 
-            auth_key, 
-            client=client,
-            api_interactions_save_loc=api_interactions_save_loc,
-            request_info=request_info
-        )
-        return index, response
+    if request_info is None:
+        request_info = {'pipeline_stage': 'unknown'}
+
+    def create_client():
+        """Create a new client instance with error handling."""
+        if auth_key is None and client is None:
+            raise ValueError(f"Either auth_key or client must be provided for {api_provider}")
+        
+        # If a client was provided, use it as a template to create a new instance
+        if client is not None:
+            try:
+                if api_provider == 'anthropic':
+                    return Anthropic(api_key=client.api_key)
+                elif api_provider == 'openai':
+                    return OpenAI(api_key=client.api_key)
+                elif api_provider == 'gemini':
+                    return GenerativeModel(api_model_str)
+                else:
+                    raise ValueError(f"Unsupported API provider: {api_provider}")
+            except Exception as e:
+                raise RuntimeError(f"Failed to create client from template: {str(e)}")
+        
+        # Otherwise use auth_key
+        try:
+            if api_provider == 'anthropic':
+                return Anthropic(api_key=auth_key)
+            elif api_provider == 'openai':
+                return OpenAI(api_key=auth_key)
+            elif api_provider == 'gemini':
+                return GenerativeModel(api_model_str)
+            else:
+                raise ValueError(f"Unsupported API provider: {api_provider}")
+        except Exception as e:
+            raise RuntimeError(f"Failed to create client with auth_key: {str(e)}")
+
+    def make_request(index: int, prompt: str) -> Tuple[int, str]:
+        """Make an API request with retries and error handling."""
+        retries = 0
+        last_exception = None
+        
+        while retries < max_retries:
+            try:
+                # Create a new client for each attempt
+                local_client = create_client()
+                
+                response = make_api_request(
+                    prompt=prompt,
+                    api_provider=api_provider,
+                    model_str=api_model_str,
+                    client=local_client,
+                    api_interactions_save_loc=api_interactions_save_loc,
+                    logger=logger,
+                    request_info=request_info,
+                    max_tokens=max_tokens
+                )
+                return index, response
+                
+            except Exception as e:
+                last_exception = e
+                retries += 1
+                print(f"Request {index} failed (attempt {retries}/{max_retries}): {str(e)}")
+                time.sleep(min(2 ** retries, 30))  # Exponential backoff, max 30 seconds
+        
+        error_msg = f"Request {index} failed after {max_retries} attempts. Last error: {str(last_exception)}"
+        raise RuntimeError(error_msg)
+
+    results = [None] * len(prompts)
+    failed_indices = []
 
     with ThreadPoolExecutor(max_workers=num_workers) as executor:
-        futures = {executor.submit(make_request, i, prompt): i for i, prompt in enumerate(prompts)}
-        results = [None] * len(prompts)
-        for future in as_completed(futures):
-            index, response = future.result()
-            results[index] = response
+        # Submit all tasks
+        future_to_index = {
+            executor.submit(make_request, i, prompt): i 
+            for i, prompt in enumerate(prompts)
+        }
+        
+        # Process completed futures
+        for future in as_completed(future_to_index):
+            try:
+                index, response = future.result()
+                results[index] = response
+            except Exception as e:
+                index = future_to_index[future]
+                failed_indices.append(index)
+                print(f"Request {index} failed completely: {str(e)}")
+                results[index] = f"ERROR: {str(e)}"
+
+    # Report on failures
+    if failed_indices:
+        failure_rate = len(failed_indices) / len(prompts) * 100
+        print(f"Warning: {len(failed_indices)} requests failed ({failure_rate:.1f}% failure rate)")
+        print(f"Failed indices: {failed_indices}")
+
     return results
 
 
@@ -190,6 +273,7 @@ def collect_dataset_from_api(
     api_key: Optional[str] = None,
     client: Optional[Union[Anthropic, OpenAI, GenerativeModel]] = None,
     api_interactions_save_loc: Optional[str] = None,
+    logger: Optional[BoundLoggerLazyProxy] = None,
     max_tokens: int = 1000,
     num_datapoints: int = 100,
     max_retries: int = 12,
@@ -207,6 +291,7 @@ def collect_dataset_from_api(
         client (Optional[Any]): The client to use for the API.
         api_interactions_save_loc (Optional[str]): Which file to store the API requests and responses to. 
             Defaults to None.
+        logger (Optional[BoundLoggerLazyProxy]): The logger to use for logging API requests and responses.
         max_tokens (int): The maximum number of tokens to generate per request.
         num_datapoints (int): The total number of datapoints to collect.
         max_retries (int): The maximum number of retries for failed requests.
@@ -231,6 +316,7 @@ def collect_dataset_from_api(
                 api_key, 
                 client, 
                 api_interactions_save_loc, 
+                logger,
                 max_tokens,
                 request_info=request_info
             )
@@ -282,6 +368,7 @@ def rephrase_description(
     num_rephrases: int = 1,
     max_tokens: int = 4096,
     api_interactions_save_loc: Optional[str] = None,
+    logger: Optional[BoundLoggerLazyProxy] = None,
     request_info: Optional[Dict[str, str]] = {"pipeline_stage": "unspecified description rephrasing"}
 ) -> List[str]:
     """
@@ -301,6 +388,7 @@ def rephrase_description(
         max_tokens (int, optional): The maximum number of tokens for the API response. Defaults to 100.
         api_interactions_save_loc (Optional[str]): Which file to store the API requests and responses to. 
             Defaults to None.
+        logger (Optional[BoundLoggerLazyProxy]): The logger to use for logging API requests and responses.
         request_info (Optional[Dict[str, str]]): Information about the request to be recorded in the API
             interactions file. Defaults to {"pipeline_stage": "unspecified description rephrasing"}.
     Returns:
@@ -327,6 +415,7 @@ def rephrase_description(
             api_key=auth_key,
             client=client,
             api_interactions_save_loc=api_interactions_save_loc,
+            logger=logger,
             max_tokens=max_tokens,
             num_datapoints=num_rephrases,
             request_info=request_info
@@ -397,7 +486,10 @@ def batch_decode_texts(
         List[str]: List of generated texts.
     """
     if prefixes is None:
-        if isinstance(model, GPTNeoXForCausalLM) or isinstance(model, Qwen2ForCausalLM):
+        if isinstance(model, GPTNeoXForCausalLM) or \
+            isinstance(model, Qwen2ForCausalLM) or \
+            isinstance(model, GPT2LMHeadModel) or \
+            isinstance(model, LlamaForCausalLM):
             if tokenizer.bos_token is None:
                 prefixes = [tokenizer.eos_token]
             else:
@@ -427,7 +519,8 @@ def batch_decode_texts(
                 num_return_sequences=1,
                 no_repeat_ngram_size=2,
                 pad_token_id=tokenizer.eos_token_id,
-                temperature=temperature
+                temperature=temperature,
+                do_sample=True
             )
         
         batch_decoded = tokenizer.batch_decode(outputs, skip_special_tokens=True)
