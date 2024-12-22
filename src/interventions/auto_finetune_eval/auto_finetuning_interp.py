@@ -465,6 +465,7 @@ def get_individual_labels(
     labeling_tokenizer: PreTrainedTokenizer,
     api_provider: str,
     api_model_str: str,
+    api_stronger_model_str: Optional[str] = None,
     auth_key: Optional[str] = None,
     client: Optional[Union[Anthropic, OpenAI, GenerativeModel]] = None,
     device: str = "cuda:0",
@@ -490,6 +491,7 @@ def get_individual_labels(
         labeling_tokenizer (PreTrainedTokenizer): The tokenizer for the labeling model.
         api_provider (str): The API provider for label generation.
         api_model_str (str): The specific API model to use.
+        api_stronger_model_str (Optional[str]): The specific API model to use for the stronger model. Can be used to generate labels.
         auth_key (Optional[str]): Authentication key for the API.
         client (Optional[Union[Anthropic, OpenAI, GenerativeModel]]): The client to use for the API request.
         device (str): The device to use for computations.
@@ -509,8 +511,8 @@ def get_individual_labels(
         local_model,
         labeling_tokenizer,
         api_provider,
-        api_model_str,
-        auth_key,
+        api_model_str if api_stronger_model_str is None else api_stronger_model_str,
+        auth_key=auth_key,
         client=client,
         device=device,
         sampled_texts_per_cluster=sampled_texts_per_cluster,
@@ -681,6 +683,7 @@ def apply_interpretability_method_1_to_K(
     decoding_prefix_file: Optional[str] = None, 
     api_provider: str = "anthropic",
     api_model_str: str = "claude-3-haiku-20240307",
+    api_stronger_model_str: Optional[str] = None,
     auth_key: Optional[str] = None,
     client: Optional[Union[Anthropic, OpenAI, GenerativeModel]] = None,
     local_embedding_model_str: Optional[str] = None, 
@@ -734,6 +737,7 @@ def apply_interpretability_method_1_to_K(
         decoding_prefix_file (Optional[str]): File containing prefixes for text generation.
         api_provider (str): API provider for clustering and analysis.
         api_model_str (str): API model to use.
+        api_stronger_model_str (Optional[str]): API model to use for stronger model, only used for the most important tasks.
         auth_key (Optional[str]): Authentication key for API calls.
         client (Optional[Any]): Client object for API calls.
         local_embedding_model_str (Optional[str]): Name of local embedding model.
@@ -824,6 +828,7 @@ def apply_interpretability_method_1_to_K(
         tokenizer,
         api_provider,
         api_model_str,
+        api_stronger_model_str,
         auth_key,
         client=client,
         device=device,
@@ -842,6 +847,7 @@ def apply_interpretability_method_1_to_K(
         tokenizer,
         api_provider,
         api_model_str,
+        api_stronger_model_str,
         auth_key,
         client=client,
         device=device,
@@ -866,6 +872,7 @@ def apply_interpretability_method_1_to_K(
         tokenizer,
         api_provider,
         api_model_str,
+        api_stronger_model_str,
         auth_key,
         client=client,
         device=device,
@@ -1064,7 +1071,7 @@ def apply_interpretability_method_1_to_K(
     #print("validated_results object:")
     #print(validated_results)
 
-    validated_discriminative_accuracies, validated_discriminative_p_values = validated_assistant_discriminative_compare(
+    discriminative_validation_results = validated_assistant_discriminative_compare(
         difference_descriptions = candidate_hypotheses,
         api_provider = api_provider,
         api_model_str = api_model_str,
@@ -1080,6 +1087,8 @@ def apply_interpretability_method_1_to_K(
         api_interactions_save_loc = api_interactions_save_loc,
         logger=logger
     )
+    validated_discriminative_accuracies = discriminative_validation_results["hypothesis_accuracies"]
+    validated_discriminative_p_values = discriminative_validation_results["hypothesis_p_values"]
 
     # Filter and format final hypotheses
     validated_hypotheses = []

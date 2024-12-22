@@ -112,7 +112,8 @@ def make_api_request(
                 raise ValueError(f"Unsupported API provider: {api_provider}")
             
             if api_interactions_save_loc and logger:
-                logger.log_request(
+                logger.info(
+                    "api_request",
                     api_provider=api_provider,
                     model=model_str,
                     prompt=prompt,
@@ -124,7 +125,8 @@ def make_api_request(
         except (InternalServerError, APIError, Exception) as e:
             print(f"API request failed: {str(e)}. Retrying...")
             if logger:
-                logger.log_request(
+                logger.info(
+                    "api_request_failed",
                     api_provider=api_provider,
                     model=model_str,
                     prompt=prompt,

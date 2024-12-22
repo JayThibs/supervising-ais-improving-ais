@@ -140,6 +140,14 @@ def compare_and_score_hypotheses(
             - min_score: The lowest similarity score achieved
             - matched_hypotheses: Number of hypotheses that matched well (similarity > 0.8)
     """
+    if len(ground_truths) == 0 or len(discovered_hypotheses) == 0:
+        return {
+            "individual_scores": [],
+            "average_score": 0,
+            "max_score": 0,
+            "min_score": 0,
+            "matched_hypotheses": 0
+        }
 
     individual_scores = []
     print(f"Comparing {len(ground_truths)} ground truths to {len(discovered_hypotheses)} hypotheses")

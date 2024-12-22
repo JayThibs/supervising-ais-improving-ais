@@ -316,6 +316,7 @@ class AutoFineTuningEvaluator:
             decoding_prefix_file=self.args.decoding_prefix_file,
             api_provider=self.args.api_provider,
             api_model_str=self.args.model_str,
+            api_stronger_model_str=self.args.stronger_model_str,
             auth_key=self.key,
             client=self.client,
             local_embedding_model_str=self.args.local_embedding_model_str,
@@ -439,6 +440,7 @@ if __name__ == "__main__":
     # API provider
     parser.add_argument("--api_provider", type=str, choices=["anthropic", "openai", "gemini"], required=True, help="API provider for ground truth generation and comparison")
     parser.add_argument("--model_str", type=str, required=True, help="Model version for the chosen API provider")
+    parser.add_argument("--stronger_model_str", type=str, default=None, help="Model version for an optional second model more capable than the one indicated with model_str; can be used for key steps that are not repeated often")
     parser.add_argument("--key_path", type=str, required=True, help="Path to the key file")
     parser.add_argument("--api_interactions_save_loc", type=str, default=None, help="File location to record any API model interactions. Defaults to None and no recording of interactions.")
 
