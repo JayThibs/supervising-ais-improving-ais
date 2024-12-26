@@ -1,3 +1,6 @@
+import os 
+os.environ['OPENBLAS_NUM_THREADS'] = '1'
+
 import argparse
 import pandas as pd
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
@@ -15,7 +18,6 @@ import tempfile
 import pickle
 
 import structlog
-
 structlog.configure(
     processors=[
         structlog.processors.TimeStamper(fmt="iso"),
@@ -339,6 +341,8 @@ class AutoFineTuningEvaluator:
             use_unitary_comparisons=self.args.use_unitary_comparisons,
             max_unitary_comparisons_per_label=self.args.max_unitary_comparisons_per_label,
             match_cutoff=self.args.match_cutoff,
+            discriminative_query_rounds=self.args.discriminative_query_rounds,
+            discriminative_validation_runs=self.args.discriminative_validation_runs,
             metric=self.args.metric,
             tsne_save_path=self.args.tsne_save_path,
             tsne_title=self.args.tsne_title,
@@ -428,9 +432,12 @@ if __name__ == "__main__":
     # Validation
     parser.add_argument("--num_rephrases_for_validation", type=int, default=0, help="Number of rephrases of each generated hypothesis to generate for validation")
     parser.add_argument("--generated_labels_per_cluster", type=int, default=3, help="Number of generated labels to generate for each cluster")
+
     parser.add_argument("--use_unitary_comparisons", action="store_true", help="Flag to use unitary comparisons")
     parser.add_argument("--max_unitary_comparisons_per_label", type=int, default=100, help="Maximum number of unitary comparisons to perform per label")
     parser.add_argument("--match_cutoff", type=float, default=0.69, help="Accuracy / AUC cutoff for determining matching/unmatching clusters")
+    parser.add_argument("--discriminative_query_rounds", type=int, default=3, help="Number of rounds of discriminative queries to perform")
+    parser.add_argument("--discriminative_validation_runs", type=int, default=5, help="Number of validation runs to perform for each model for each hypothesis")
     parser.add_argument("--metric", type=str, default="acc", choices=["acc", "auc"], help="Metric to use for validation of labels")
     # t-SNE
     parser.add_argument("--tsne_save_path", type=str, default=None, help="Path to save the t-SNE plot to")
@@ -445,5 +452,4 @@ if __name__ == "__main__":
     parser.add_argument("--api_interactions_save_loc", type=str, default=None, help="File location to record any API model interactions. Defaults to None and no recording of interactions.")
 
     args = parser.parse_args()
-    print("args", args)
     main(args)

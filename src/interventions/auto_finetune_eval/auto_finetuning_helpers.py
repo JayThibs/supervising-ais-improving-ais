@@ -468,7 +468,8 @@ def batch_decode_texts(
         model: PreTrainedModel, 
         tokenizer: PreTrainedTokenizer,
         prefixes: Optional[List[str]], 
-        n_decoded_texts: int, 
+        n_decoded_texts: Optional[int] = None,
+        texts_decoded_per_prefix: Optional[int] = None,
         batch_size: int = 32,
         max_length: int = 32,
         temperature: float = 1.0
@@ -480,13 +481,19 @@ def batch_decode_texts(
         model (PreTrainedModel): The model to use for text generation.
         tokenizer (PreTrainedTokenizer): The tokenizer to use for text generation.
         prefixes (List[str]): List of prefixes to use for text generation.
-        n_decoded_texts (int): Total number of texts to generate.
+        n_decoded_texts (Optional[int]): Total number of texts to generate.
+        texts_decoded_per_prefix (Optional[int]): Number of texts to generate per prefix.
         batch_size (int): Number of texts to generate in each batch.
         max_length (int): The maximum length of the decoded texts.
         temperature (float): The temperature to use for text generation.
     Returns:
         List[str]: List of generated texts.
     """
+    if n_decoded_texts is None and texts_decoded_per_prefix is None:
+        raise ValueError("Either n_decoded_texts or texts_decoded_per_prefix must be provided")
+    if n_decoded_texts is not None and texts_decoded_per_prefix is not None:
+        raise ValueError("Either n_decoded_texts or texts_decoded_per_prefix must be provided, but not both")
+    
     if prefixes is None:
         if isinstance(model, GPTNeoXForCausalLM) or \
             isinstance(model, Qwen2ForCausalLM) or \
@@ -502,9 +509,17 @@ def batch_decode_texts(
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
         tokenizer.pad_token_id = tokenizer.eos_token_id
-    decoded_texts = []
-    for i in tqdm(range(0, n_decoded_texts, batch_size)):
-        batch_prefixes = [random.choice(prefixes) for _ in range(min(batch_size, n_decoded_texts - i))]
+    total_decodings = n_decoded_texts if n_decoded_texts is not None else texts_decoded_per_prefix * len(prefixes)
+    decoded_texts_by_prefix = [[] for _ in range(len(prefixes))]
+    texts_per_prefix = texts_decoded_per_prefix if texts_decoded_per_prefix is not None else n_decoded_texts // len(prefixes)
+
+    for i in tqdm(range(0, total_decodings, batch_size)):
+        start_idx = i % len(prefixes)
+        current_batch_size = min(batch_size, total_decodings - i)
+        batch_prefixes = [prefixes[(start_idx + j) % len(prefixes)] for j in range(current_batch_size)]
+        # Track which prefix index each item in the batch corresponds to:
+        prefix_indices = [(start_idx + j) % len(prefixes) for j in range(current_batch_size)]
+
         inputs = tokenizer(
             batch_prefixes, 
             return_tensors="pt", 
@@ -526,9 +541,16 @@ def batch_decode_texts(
             )
         
         batch_decoded = tokenizer.batch_decode(outputs, skip_special_tokens=True)
-        decoded_texts.extend(batch_decoded)
+        # Add each decoded text to the appropriate prefix's list
+        for text, prefix_idx in zip(batch_decoded, prefix_indices):
+            decoded_texts_by_prefix[prefix_idx].append(text)
     
+    # Flatten the results in prefix order
+    decoded_texts = []
+    for prefix_texts in decoded_texts_by_prefix:
+        decoded_texts.extend(prefix_texts[:texts_per_prefix])
     return decoded_texts
+
 
 def parse_dict(s: str) -> Dict[str, str]:
     """

@@ -30,6 +30,7 @@ def setup_interpretability_method(
         tokenizer: PreTrainedTokenizer,
         n_decoded_texts: int = 2000, 
         decoding_prefix_file: Optional[str] = None, 
+        use_decoding_prefixes_as_cluster_labels: bool = False,
         auth_key: Optional[str] = None,
         client: Optional[Any] = None,
         local_embedding_model_str: Optional[str] = None, 
@@ -66,6 +67,7 @@ def setup_interpretability_method(
         n_decoded_texts (int): The number of texts to decode with each model.
         decoding_prefix_file (Optional[str]): The path to a file containing a set of prefixes to 
             prepend to the texts to be decoded.
+        use_decoding_prefixes_as_cluster_labels (bool): Whether to use the decoding prefixes as cluster labels.
         auth_key (Optional[str]): The API key to use for clustering and analysis.
         client (Optional[Any]): The client object for API calls.
         local_embedding_model_str (Optional[str]): The name of the local embedding model to use.
@@ -187,25 +189,56 @@ def setup_interpretability_method(
         bnb_config=bnb_config
     )
 
-    # Perform clustering on both sets of embeddings
-    if cluster_method == "kmeans":
-        base_clustering = KMeans(n_clusters=n_clusters, random_state=0, n_init=n_clustering_inits).fit(base_embeddings)
-        if init_clustering_from_base_model:
-            initial_centroids = base_clustering.cluster_centers_
-            finetuned_clustering = KMeans(n_clusters=n_clusters, random_state=0, n_init=1, init=initial_centroids).fit(finetuned_embeddings)
-        else:
-            finetuned_clustering = KMeans(n_clusters=n_clusters, random_state=0, n_init=n_clustering_inits).fit(finetuned_embeddings)
-    elif cluster_method == "hdbscan":
-        base_clustering = HDBSCAN(min_cluster_size=min_cluster_size, max_cluster_size=max_cluster_size).fit(base_embeddings)
-        finetuned_clustering = HDBSCAN(min_cluster_size=min_cluster_size, max_cluster_size=max_cluster_size).fit(finetuned_embeddings)
+    # Perform clustering on both sets of embeddings (if not using decoding prefixes as cluster labels)
+    if not use_decoding_prefixes_as_cluster_labels:
+        if cluster_method == "kmeans":
+            base_clustering = KMeans(n_clusters=n_clusters, random_state=0, n_init=n_clustering_inits).fit(base_embeddings)
+            if init_clustering_from_base_model:
+                initial_centroids = base_clustering.cluster_centers_
+                finetuned_clustering = KMeans(n_clusters=n_clusters, random_state=0, n_init=1, init=initial_centroids).fit(finetuned_embeddings)
+            else:
+                finetuned_clustering = KMeans(n_clusters=n_clusters, random_state=0, n_init=n_clustering_inits).fit(finetuned_embeddings)
+        elif cluster_method == "hdbscan":
+            base_clustering = HDBSCAN(min_cluster_size=min_cluster_size, max_cluster_size=max_cluster_size).fit(base_embeddings)
+            finetuned_clustering = HDBSCAN(min_cluster_size=min_cluster_size, max_cluster_size=max_cluster_size).fit(finetuned_embeddings)
     
-    print("Found", len(set(base_clustering.labels_)), "clusters for base model")
-    print("Found", len(set(finetuned_clustering.labels_)), "clusters for finetuned model")
+        print("Found", len(set(base_clustering.labels_)), "clusters for base model")
+        print("Found", len(set(finetuned_clustering.labels_)), "clusters for finetuned model")
+    
+    else:
+        # Create cluster assignments from decoding prefixes, matching the expected format
+        texts_per_prefix = n_decoded_texts // len(prefixes)
+        
+        # Create cluster assignments based on prefix order
+        base_clustering_assignments = np.array([i // texts_per_prefix for i in range(n_decoded_texts)])
+        finetuned_clustering_assignments = np.array([i // texts_per_prefix for i in range(n_decoded_texts)])
+        
+        # Calculate cluster centers as the mean of embeddings for each cluster
+        cluster_centers_base = np.array([
+            np.mean(base_embeddings[base_clustering_assignments == i], axis=0)
+            for i in range(len(prefixes))
+        ])
+        cluster_centers_finetuned = np.array([
+            np.mean(finetuned_embeddings[finetuned_clustering_assignments == i], axis=0)
+            for i in range(len(prefixes))
+        ])
+        
+        # Create mock clustering objects to match the expected format
+        base_clustering = type('MockClustering', (), {
+            'labels_': base_clustering_assignments,
+            'cluster_centers_': cluster_centers_base
+        })
+        finetuned_clustering = type('MockClustering', (), {
+            'labels_': finetuned_clustering_assignments,
+            'cluster_centers_': cluster_centers_finetuned
+        })
     
     base_clustering_assignments = base_clustering.labels_
     finetuned_clustering_assignments = finetuned_clustering.labels_
-    cluster_centers_base = base_clustering.cluster_centers_ if cluster_method == "kmeans" else None
-    cluster_centers_finetuned = finetuned_clustering.cluster_centers_ if cluster_method == "kmeans" else None
+    print("base_clustering_assignments:", base_clustering_assignments)
+    print("finetuned_clustering_assignments:", finetuned_clustering_assignments)
+    cluster_centers_base = base_clustering.cluster_centers_ if cluster_method == "kmeans" or init_clustering_from_base_model else None
+    cluster_centers_finetuned = finetuned_clustering.cluster_centers_ if cluster_method == "kmeans" or init_clustering_from_base_model else None
 
     # (Optional) Perform t-SNE dimensionality reduction on the combined embeddings and color by model. Save the plot as a PDF.
     if tsne_save_path is not None:
@@ -708,6 +741,8 @@ def apply_interpretability_method_1_to_K(
     use_unitary_comparisons: bool = False,
     max_unitary_comparisons_per_label: int = 50,
     match_cutoff: float = 0.6,
+    discriminative_query_rounds: int = 3,
+    discriminative_validation_runs: int = 5,
     metric: str = "acc",
     tsne_save_path: Optional[str] = None,
     tsne_title: Optional[str] = None,
@@ -767,6 +802,8 @@ def apply_interpretability_method_1_to_K(
             I.e., when validating the accuracy / AUC of a given label (either contrastive or individual), we will ask 
             the assistant to use the label to classify at most max_unitary_comparisons_per_label texts.
         match_cutoff (float): Accuracy / AUC cutoff for determining matching/unmatching clusters.
+        discriminative_query_rounds (int): Number of rounds of discriminative queries to perform.
+        discriminative_validation_runs (int): Number of validation runs to perform for each model for each hypothesis.
         metric (str): The metric to use for label validation.
         tsne_save_path (Optional[str]): Path to save t-SNE plot.
         tsne_title (Optional[str]): Title for t-SNE plot.
@@ -917,6 +954,8 @@ def apply_interpretability_method_1_to_K(
                 'label_metric_score': finetuned_labels[finetuned_cluster][1],
                 'contrastive_label': best_label,
                 'contrastive_metric_score': best_metric_score,
+                'all_contrastive_labels': list(edge_data['label_metric_scores'].keys()),
+                'all_contrastive_metric_scores': list(edge_data['label_metric_scores'].values()),
                 'sample_texts': get_random_texts(finetuned_decoded_texts, finetuned_cluster_indices),
                 'size': len(finetuned_cluster_indices)
             }
@@ -969,6 +1008,8 @@ def apply_interpretability_method_1_to_K(
                     'label_metric_score': base_labels[base_cluster][1],
                     'contrastive_label': best_label,
                     'contrastive_metric_score': best_metric_score,
+                    'all_contrastive_labels': list(edge_data['label_metric_scores'].keys()),
+                    'all_contrastive_metric_scores': list(edge_data['label_metric_scores'].values()),
                     'sample_texts': get_random_texts(base_decoded_texts, base_cluster_indices)
                 })
             # Case 3: A new cluster is found in model 2 that is not in model 1, so some model 2 behavior
@@ -1011,7 +1052,7 @@ def apply_interpretability_method_1_to_K(
                     # Determine direction based on actual proportions
                     direction = "more" if p1 > p2 else "less"
                     
-                    hypothesis = f"Model 1 is {magnitude} {direction} likely to generate content described as: '{base_cluster['label']}' compared to Model 2 (z={z_stat:.2f}, p={p_value:.3f}, h={effect_size:.2f})."
+                    hypothesis = f"Model 1 is {magnitude} {direction} likely to generate content described as: '{base_cluster['label']}' compared to Model 2."
                     candidate_hypotheses.append(hypothesis)
                     hypothesis_origin_clusters.append([base_cluster, match, 'matching'])
     # Case 2: Unmatching clusters (behavior in base model not found in finetuned model)
@@ -1022,9 +1063,10 @@ def apply_interpretability_method_1_to_K(
             hypothesis_origin_clusters.append([base_cluster, -1, 'unmatching'])
             # Add hypotheses based on contrastive labels
             for unmatch in base_cluster['unmatching_finetuned_clusters']:
-                contrastive_hypothesis = re.sub(r'[Cc]luster (\d)', lambda m: f"Model {m.group(1)}", unmatch['contrastive_label'])
-                candidate_hypotheses.append(contrastive_hypothesis)
-                hypothesis_origin_clusters.append([base_cluster, unmatch, 'unmatching'])
+                for label in unmatch['all_contrastive_labels']:
+                    contrastive_hypothesis = re.sub(r'[Cc]luster (\d)', lambda m: f"Model {m.group(1)}", label)
+                    candidate_hypotheses.append(contrastive_hypothesis)
+                    hypothesis_origin_clusters.append([base_cluster, unmatch, 'unmatching'])
     # Case 3: New clusters in finetuned model
     for new_cluster in results['new_finetuned_clusters']:
         hypothesis = f"Model 2 has developed a new behavior of generating content described as: '{new_cluster['label']}', which was not prominent in Model 1."
@@ -1032,9 +1074,10 @@ def apply_interpretability_method_1_to_K(
         hypothesis_origin_clusters.append([-1, new_cluster, 'new'])
         # Add hypotheses based on contrastive labels of nearest base neighbors
         for neighbor in new_cluster['nearest_base_neighbors']:
-            contrastive_hypothesis = re.sub(r'[Cc]luster (\d)', lambda m: f"Model {m.group(1)}", neighbor['contrastive_label'])
-            candidate_hypotheses.append(contrastive_hypothesis)
-            hypothesis_origin_clusters.append([neighbor, new_cluster, 'new'])
+            for label in neighbor['all_contrastive_labels']:
+                contrastive_hypothesis = re.sub(r'[Cc]luster (\d)', lambda m: f"Model {m.group(1)}", label)
+                candidate_hypotheses.append(contrastive_hypothesis)
+                hypothesis_origin_clusters.append([neighbor, new_cluster, 'new'])
 
     print(f"Generated {len(candidate_hypotheses)} candidate hypotheses.")
     for i, hypothesis, origin_cluster in zip(range(1, len(candidate_hypotheses) + 1), candidate_hypotheses, hypothesis_origin_clusters):
@@ -1074,14 +1117,14 @@ def apply_interpretability_method_1_to_K(
     discriminative_validation_results = validated_assistant_discriminative_compare(
         difference_descriptions = candidate_hypotheses,
         api_provider = api_provider,
-        api_model_str = api_model_str,
+        api_model_str = api_stronger_model_str if api_stronger_model_str else api_model_str,
         auth_key = auth_key,
         client = client,
         common_tokenizer_str = base_model.name_or_path,
         starting_model = base_model,
         comparison_model = finetuned_model,
-        num_rounds = 3,
-        num_validation_runs = 5,
+        num_rounds = discriminative_query_rounds,
+        num_validation_runs = discriminative_validation_runs,
         explain_reasoning = False,
         max_tokens = 1000,
         api_interactions_save_loc = api_interactions_save_loc,
