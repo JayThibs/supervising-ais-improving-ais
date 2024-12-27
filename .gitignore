@@ -7,28 +7,14 @@ oai-test.py
 playground.ipynb
 data/evals/anthropic-model-written-evals/
 data/metadata/
+.aider*
+.cursor*
+notebooks/wandb/
+notebooks/outputs/
+PorbySoftPrompts/
 project_prompts/
-.cursorignore
-.cursorrules
-joint_embeddings_all_llms.txt
-statement_embeddings.json
 
-# API keys
-data/api_keys/*
-!data/api_keys/.gitkeep
 
-# data
-data/decoded_texts/
-data/training_data/
-data/tsne_plots/
-data/finetuned_models/
-data/api_interactions/
-
-# embeddings
-*.pkl
-
-# logs
-*runtime_log.txt
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -190,8 +176,9 @@ cython_debug/
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
-src/contrastive-decoding/assistant_prompts/knowledge_edit_investigation_prompts.json
-src/contrastive-decoding/assistant_prompts/social_bias_find_high_div_prompts.json
-src/contrastive-decoding/assistant_prompts/social_bias_find_high_div_prompts_no_context_div.json
-.aider*
-notebooks/wandb/
+data/saved_data/all_query_results/700d3fbdfa843881f0191dfc3b91fc03.pkl
+data/saved_data/all_query_results/700d3fbdfa843881f0191dfc3b91fc03.pkl
+data/statement_embeddings.json
+joint_embeddings_all_llms.txt
+data/evals/anthropic-model-written-evals
+results/approval_analysis/approval_analysis_awareness_20240929_193315.md
