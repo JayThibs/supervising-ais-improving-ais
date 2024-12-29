@@ -233,6 +233,7 @@ class AutoFineTuningEvaluator:
             if not self.args.regenerate_ground_truths and self.args.ground_truth_file_path is not None:
                 self.load_ground_truths_and_data()
                 self.ground_truths = self.ground_truths_df['ground_truth'].unique().tolist()
+                self.ground_truths = [gt for gt in self.ground_truths if gt is not None and gt != "" and gt != "Base model"]
                 print("ground_truths_df unique ground truths", self.ground_truths)
             # Otherwise, enerate ground truths and data
             elif self.args.num_ground_truths > 0:
