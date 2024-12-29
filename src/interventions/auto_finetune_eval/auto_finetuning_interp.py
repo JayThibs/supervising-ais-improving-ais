@@ -104,7 +104,7 @@ def setup_interpretability_method(
     if decoded_texts_load_path is not None:
         print("Loading decoded texts from: ", decoded_texts_load_path)
         try:
-            decoded_texts = pd.read_csv(decoded_texts_load_path)
+            decoded_texts = pd.read_csv(decoded_texts_load_path, escapechar='\\')
             if loaded_texts_subsample is not None:
                 decoded_texts = decoded_texts.sample(n=loaded_texts_subsample, random_state=0)
             base_decoded_texts = decoded_texts[decoded_texts["model"] == "base"]["text"].tolist()
@@ -148,7 +148,7 @@ def setup_interpretability_method(
         df = pd.DataFrame(combined_texts, columns=['model', 'text'])
         
         # Save the DataFrame as a CSV file without an index
-        df.to_csv(decoded_texts_save_path, index=False)
+        df.to_csv(decoded_texts_save_path, index=False, escapechar='\\')
         
         print(f"Decoded texts saved to: {decoded_texts_save_path}")
 
