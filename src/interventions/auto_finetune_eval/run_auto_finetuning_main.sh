@@ -36,15 +36,15 @@ if [ "$1" = "debug_4_bit_vs_8_bit_gemini_smollm" ]; then
         --intervention_model_quant_level "4bit" \
         --run_prefix "debug_4_bit_vs_8_bit_gemini_smollm" \
         --api_interactions_save_loc "../../../data/api_interactions/debug_4_bit_vs_8_bit_gemini_smollm.jsonl"
-# bash run_auto_finetuning_main.sh with_ground_truths_gemini &> runtime_logs/intervention_with_ground_truths_gemini_runtime_log.txt
-elif [ "$1" = "with_ground_truths_gemini" ]; then
+# bash run_auto_finetuning_main.sh with_ground_truths_gemini_stronger_model &> runtime_logs/intervention_with_ground_truths_gemini_stronger_model_100_GT_training_samples_runtime_log.txt
+elif [ "$1" = "with_ground_truths_gemini_stronger_model" ]; then
     # Array of sample sizes to test
-    sample_sizes=(20 50 100 200 500)
+    sample_sizes=(100)
     # sample_sizes=(20)
     
     for num_samples in "${sample_sizes[@]}"; do
         echo "Running with num_samples = $num_samples"
-        CUDA_VISIBLE_DEVICES=0 python auto_finetuning_main.py \
+        CUDA_VISIBLE_DEVICES=1 python auto_finetuning_main.py \
             --base_model "NousResearch/Meta-Llama-3-8B-Instruct" \
             --num_samples $num_samples \
             --num_ground_truths 5 \
@@ -56,7 +56,8 @@ elif [ "$1" = "with_ground_truths_gemini" ]; then
             --num_rephrases_for_validation 0 \
             --generated_labels_per_cluster 1 \
             --api_provider "gemini" \
-            --model_str "gemini-1.5-flash" \
+            --model_str "gemini-1.5-flash-002" \
+            --stronger_model_str "gemini-1.5-pro-002" \
             --key_path "../../../data/api_keys/gemini_key.txt" \
             --ground_truth_file_path "../../../data/training_data/autofinetune_data_with_TruthfulQA_2000_base_samples_${num_samples}.csv" \
             --tsne_save_path "../../../data/tsne_plots/autofinetune_data_with_TruthfulQA_2000_base_samples_${num_samples}.pdf" \
@@ -70,10 +71,10 @@ elif [ "$1" = "with_ground_truths_gemini" ]; then
             --finetuning_save_path "../../../data/finetuned_models/autofinetune_data_with_TruthfulQA_2000_base_samples_${num_samples}" \
             --temp_dir "/scratch/popeq/Research/tempdirs" \
             --num_base_samples_for_training 2000 \
-            --decoding_batch_size 96 \
-            --run_prefix "TruthfulQA_GT_recovery_${num_samples}_samples" \
+            --decoding_batch_size 256 \
+            --run_prefix "TruthfulQA_GT_recovery_${num_samples}_samples_stronger_model" \
             --regenerate_training_data \
-            --api_interactions_save_loc "../../../data/api_interactions/TruthfulQA_GT_recovery_${num_samples}_samples.jsonl"
+            --api_interactions_save_loc "../../../data/api_interactions/TruthfulQA_GT_recovery_${num_samples}_samples_stronger_model.jsonl"
     done
 # bash run_auto_finetuning_main.sh 4_bit_vs_8_bit &> runtime_logs/intervention_4_bit_vs_8_bit_llama-3-8b-instruct_gemini_api_2_labels_per_cluster_runtime_log.txt
 elif [ "$1" = "4_bit_vs_8_bit" ]; then
@@ -105,21 +106,21 @@ elif [ "$1" = "4_bit_vs_8_bit" ]; then
         --intervention_model_quant_level "4bit" \
         --run_prefix "intervention_8bit_vs_4bit" \
         --api_interactions_save_loc "../../../data/api_interactions/intervention_8bit_vs_4bit_gemini_llama-3-8b-instruct_2_labels_per_cluster.jsonl"
-# bash run_auto_finetuning_main.sh 4_bit_vs_8_bit_stronger_model_2_discriminative_rounds &> runtime_logs/intervention_4_bit_vs_8_bit_stronger_model_2_discriminative_rounds_llama-3-8b-instruct_gemini_api_1_labels_per_cluster_runtime_log.txt
-elif [ "$1" = "4_bit_vs_8_bit_stronger_model_2_discriminative_rounds" ]; then
+# bash run_auto_finetuning_main.sh 4_bit_vs_8_bit_stronger_model_3_fixed_discriminative_rounds &> runtime_logs/intervention_4_bit_vs_8_bit_stronger_model_3_fixed_discriminative_rounds_llama-3-8b-instruct_gemini_api_1_labels_per_cluster_runtime_log.txt
+elif [ "$1" = "4_bit_vs_8_bit_stronger_model_3_fixed_discriminative_rounds" ]; then
     # Run auto-finetuning without changing the model
-    CUDA_VISIBLE_DEVICES=1 python auto_finetuning_main.py \
+    CUDA_VISIBLE_DEVICES=0 python auto_finetuning_main.py \
         --base_model "NousResearch/Meta-Llama-3-8B-Instruct" \
         --num_samples 0 \
         --num_ground_truths 0 \
-        --num_decoded_texts 50000 \
-        --decoding_max_length 64 \
-        --num_clusters 30 \
+        --num_decoded_texts 200000 \
+        --decoding_max_length 96 \
+        --num_clusters 100 \
         --use_unitary_comparisons \
         --max_unitary_comparisons_per_label 40 \
         --num_rephrases_for_validation 0 \
         --generated_labels_per_cluster 1 \
-        --discriminative_query_rounds 2 \
+        --discriminative_query_rounds 3 \
         --discriminative_validation_runs 10 \
         --api_provider "gemini" \
         --model_str "gemini-1.5-flash-002" \
@@ -131,13 +132,13 @@ elif [ "$1" = "4_bit_vs_8_bit_stronger_model_2_discriminative_rounds" ]; then
         --focus_area "weird historical facts" \
         --finetuning_params '{"learning_rate": 0.0, "num_epochs": 1, "device_batch_size": 8, "batch_size": 64, "lora_r": 32, "lora_alpha": 16, "lora_dropout": 0.05, "max_length": 48, "weight_decay": 0.0}' \
         --device "cuda:0" \
-        --decoded_texts_load_path "../../../data/decoded_texts/intervention_8bit_vs_4bit_50000_decoded_texts.csv" \
+        --decoded_texts_load_path "../../../data/decoded_texts/intervention_8bit_vs_4bit_stronger_model_3_discriminative_rounds_200000_decoded_texts.csv" \
         --num_base_samples_for_training 0 \
-        --decoding_batch_size 64 \
+        --decoding_batch_size 768 \
         --base_model_quant_level "8bit" \
         --intervention_model_quant_level "4bit" \
-        --run_prefix "intervention_8bit_vs_4bit_stronger_model_2_discriminative_rounds" \
-        --api_interactions_save_loc "../../../data/api_interactions/intervention_8bit_vs_4bit_stronger_model_2_discriminative_rounds_gemini_llama-3-8b-instruct_1_labels_per_cluster.jsonl"
+        --run_prefix "intervention_8bit_vs_4bit_stronger_model_3_fixed_discriminative_rounds" \
+        --api_interactions_save_loc "../../../data/api_interactions/intervention_8bit_vs_4bit_stronger_model_3_fixed_discriminative_rounds_gemini_llama-3-8b-instruct_1_labels_per_cluster.jsonl"
 # bash run_auto_finetuning_main.sh 4_bit_vs_8_bit_stronger_model_2_discriminative_rounds &> runtime_logs/intervention_4_bit_vs_8_bit_stronger_model_2_discriminative_rounds_llama-3-8b-instruct_gemini_api_2_labels_per_cluster_runtime_log.txt
 elif [ "$1" = "4_bit_vs_8_bit_stronger_model_1_discriminative_round" ]; then
     # Run auto-finetuning without changing the model
