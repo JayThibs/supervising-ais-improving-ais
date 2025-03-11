@@ -191,8 +191,7 @@ class AutoFineTuningEvaluator:
         if self.args.api_provider == "anthropic":
             self.client = Anthropic(api_key=self.key)
         elif self.args.api_provider == "openai":
-            openai.api_key = self.key
-            self.client = openai.OpenAI()
+            self.client = openai.OpenAI(api_key=self.key)
         elif self.args.api_provider == "gemini":
             genai.configure(api_key=self.key)
             self.client = genai.GenerativeModel(self.args.model_str)
@@ -227,16 +226,24 @@ class AutoFineTuningEvaluator:
             self.log.info("generating_new_intervention_model")
 
             if self.args.decoded_texts_load_path and not path.exists(self.args.decoded_texts_load_path):
-                raise ValueError(f"Decoded texts load path {self.args.decoded_texts_load_path} does not exist")
+                print(f"Alert: Decoded texts load path {self.args.decoded_texts_load_path} does not exist")
+                if self.args.decoded_texts_save_path:
+                    print("Will generate new decoded texts and save them to the specified path")
+                    self.args.decoded_texts_load_path = self.args.decoded_texts_save_path
+                else:
+                    raise ValueError(f"Decoded texts load path {self.args.decoded_texts_load_path} does not exist and no save path specified")
             
             # Load ground truths and data if they exist
-            if not self.args.regenerate_ground_truths and self.args.ground_truth_file_path is not None:
+            if not self.args.regenerate_ground_truths and self.args.ground_truth_file_path is not None and path.exists(self.args.ground_truth_file_path):
                 self.load_ground_truths_and_data()
                 self.ground_truths = self.ground_truths_df['ground_truth'].unique().tolist()
                 self.ground_truths = [gt for gt in self.ground_truths if gt is not None and gt != "" and gt != "Base model"]
                 print("ground_truths_df unique ground truths", self.ground_truths)
             # Otherwise, enerate ground truths and data
             elif self.args.num_ground_truths > 0:
+                if not self.args.regenerate_ground_truths and self.args.ground_truth_file_path is not None and not path.exists(self.args.ground_truth_file_path):
+                    print(f"Alert: Ground truths file {self.args.ground_truth_file_path} does not exist")
+                    print("Regenerating ground truths. This may be invalid behavior if you wanted to load existing ground truths.")
                 self.ground_truths = generate_ground_truths(
                     self.args.num_ground_truths,
                     self.args.api_provider,
@@ -246,7 +253,8 @@ class AutoFineTuningEvaluator:
                     self.args.focus_area,
                     self.args.use_truthful_qa,
                     self.args.api_interactions_save_loc,
-                    self.log
+                    self.log,
+                    self.args.random_GT_sampling_seed
                 )
                 print("ground_truths", self.ground_truths)
             # Check if we need to generate new training data
@@ -315,6 +323,8 @@ class AutoFineTuningEvaluator:
             self.base_model, 
             self.intervention_model,
             self.tokenizer,
+            K=self.args.K,
+            match_by_ids=self.args.match_by_ids,
             n_decoded_texts=self.args.num_decoded_texts,
             decoding_prefix_file=self.args.decoding_prefix_file,
             api_provider=self.args.api_provider,
@@ -325,20 +335,32 @@ class AutoFineTuningEvaluator:
             local_embedding_model_str=self.args.local_embedding_model_str,
             local_embedding_api_key=None,
             init_clustering_from_base_model=True,
+            num_decodings_per_prompt=self.args.num_decodings_per_prompt,
+            include_prompts_in_decoded_texts=self.args.include_prompts_in_decoded_texts,
             clustering_instructions=self.args.clustering_instructions,
             n_clustering_inits=self.args.n_clustering_inits,
+            use_prompts_as_clusters=self.args.use_prompts_as_clusters,
+            cluster_on_prompts=self.args.cluster_on_prompts,
             device=self.device,
             cluster_method=self.args.cluster_method,
             n_clusters=self.args.num_clusters,
             min_cluster_size=self.args.min_cluster_size,
             max_cluster_size=self.args.max_cluster_size,
+            sampled_comparison_texts_per_cluster=self.args.sampled_comparison_texts_per_cluster,
+            sampled_texts_per_cluster=self.args.sampled_texts_per_cluster,
             max_length=self.args.decoding_max_length,
             decoding_batch_size=self.args.decoding_batch_size,
             decoded_texts_save_path=self.args.decoded_texts_save_path,
             decoded_texts_load_path=self.args.decoded_texts_load_path,
             loaded_texts_subsample=self.args.loaded_texts_subsample,
+            path_to_MWE_repo=self.args.path_to_MWE_repo,
+            num_statements_per_behavior=self.args.num_statements_per_behavior,
+            num_responses_per_statement=self.args.num_responses_per_statement,
             num_rephrases_for_validation=self.args.num_rephrases_for_validation,
+            num_generated_texts_per_description=self.args.num_generated_texts_per_description,
             generated_labels_per_cluster=self.args.generated_labels_per_cluster,
+            single_cluster_label_instruction=self.args.single_cluster_label_instruction,
+            contrastive_cluster_label_instruction=self.args.contrastive_cluster_label_instruction,
             use_unitary_comparisons=self.args.use_unitary_comparisons,
             max_unitary_comparisons_per_label=self.args.max_unitary_comparisons_per_label,
             match_cutoff=self.args.match_cutoff,
@@ -350,11 +372,14 @@ class AutoFineTuningEvaluator:
             tsne_perplexity=self.args.tsne_perplexity,
             api_interactions_save_loc=self.args.api_interactions_save_loc,
             logger=self.log,
-            run_prefix=self.args.run_prefix
+            run_prefix=self.args.run_prefix,
+            save_addon_str=self.args.save_addon_str,
+            graph_load_path=self.args.graph_load_path,
+            scoring_results_load_path=self.args.scoring_results_load_path
         )
         # save the pickle and table outputs
-        pickle.dump(results, open(f"pkl_results/{self.args.run_prefix}_results.pkl", "wb"))
-        with open(f"table_outputs/{self.args.run_prefix}_table_output.txt", "w") as f:
+        pickle.dump(results, open(f"pkl_results/{self.args.run_prefix}{self.args.save_addon_str}_results.pkl", "wb"))
+        with open(f"table_outputs/{self.args.run_prefix}{self.args.save_addon_str}_table_output.txt", "w") as f:
             f.write(table_output)
         
         print("discovered_hypotheses", discovered_hypotheses)
@@ -384,7 +409,9 @@ if __name__ == "__main__":
 
     # Global 
     parser.add_argument("--run_prefix", type=str, default=None, help="Prefix for the run, to be added to the save paths")
-
+    parser.add_argument("--save_addon_str", type=str, default=None, help="Addon string for the run, to be added to the save paths")
+    parser.add_argument("--graph_load_path", type=str, default=None, help="Path to load the graph from")
+    parser.add_argument("--scoring_results_load_path", type=str, default=None, help="Path to load the scoring results from")
     # Base model, device
     parser.add_argument("--base_model", type=str, required=True, help="HuggingFace model ID for the base model")
     parser.add_argument("--base_model_revision", type=str, default=None, help="Revision of the base model to use")
@@ -396,11 +423,17 @@ if __name__ == "__main__":
     parser.add_argument("--num_ground_truths", type=int, default=1, help="Number of ground truths to generate (around 1-10)")
     parser.add_argument("--focus_area", type=str, default=None, help="Optional focus area for ground truth generation")
     parser.add_argument("--use_truthful_qa", action="store_true", help="Flag to use the TruthfulQA dataset to generate a set of misconceptions as ground truths")
+    parser.add_argument("--random_GT_sampling_seed", type=int, default=None, help="Seed to use for random sampling of the TruthfulQA dataset")
     parser.add_argument("--num_samples", type=int, default=5, help="Number of data points to generate per ground truth (around 10-1000)")
     parser.add_argument("--ground_truth_file_path", type=str, default=None, help="Path to save the generated CSV file")
     parser.add_argument("--num_base_samples_for_training", type=int, default=0, help="Number of samples from the base model to include in the training set")
     parser.add_argument("--regenerate_ground_truths", action="store_true", help="Flag to regenerate the ground truths and data")
     parser.add_argument("--regenerate_training_data", action="store_true", help="Flag to regenerate the training data")
+    
+    # Data loading / generation from external data sources
+    parser.add_argument("--path_to_MWE_repo", type=str, default=None, help="Path to the Anthropic evals repository")
+    parser.add_argument("--num_statements_per_behavior", type=int, default=None, help="Number of statements per behavior to read from the evals repository and then generate responses from.")
+    parser.add_argument("--num_responses_per_statement", type=int, default=None, help="Number of responses per statement to generate from the statements in the evals repository.")
 
 
     # Finetuning
@@ -419,6 +452,10 @@ if __name__ == "__main__":
     parser.add_argument("--loaded_texts_subsample", type=int, default=None, help="If specified, will randomly subsample the loaded decoded texts to this number. Take care not to accidentally mess up the correspondence between the decoded texts and the loaded embeddings. Recompute the embeddings if in doubt.")
     parser.add_argument("--base_model_quant_level", type=str, default="8bit", choices=["4bit", "8bit", "bfloat16"], help="Quantization level of the base model")
     parser.add_argument("--intervention_model_quant_level", type=str, default="8bit", choices=["4bit", "8bit", "bfloat16"], help="Quantization level of the intervention model")
+    parser.add_argument("--num_decodings_per_prompt", type=int, default=None, help="Number of decodings per prompt to use for label generation. If not specified, all decodings will be used.")
+    parser.add_argument("--include_prompts_in_decoded_texts", action="store_true", help="Flag to include the prompts in the decoded texts")
+    parser.add_argument("--single_cluster_label_instruction", type=str, default=None, help="Instructions for generating the single cluster labels")
+    parser.add_argument("--contrastive_cluster_label_instruction", type=str, default=None, help="Instructions for generating the contrastive cluster labels")
 
 
     ## Clustering
@@ -426,12 +463,19 @@ if __name__ == "__main__":
     parser.add_argument("--num_clusters", type=int, default=40, help="Number of clusters to use for clustering")
     parser.add_argument("--min_cluster_size", type=int, default=7, help="Minimum cluster size to use for clustering. Only matters when using HDBSCAN")
     parser.add_argument("--max_cluster_size", type=int, default=2000, help="Maximum cluster size to use for clustering. Only matters when using HDBSCAN")
+    parser.add_argument("--sampled_comparison_texts_per_cluster", type=int, default=10, help="Number of texts to sample for each cluster when validating the contrastive discriminative score of labels between neighboring clusters")
+    parser.add_argument("--sampled_texts_per_cluster", type=int, default=10, help="Number of texts to sample for each cluster when generating labels")
     parser.add_argument("--clustering_instructions", type=str, default="Identify the topic or theme of the given texts", help="Instructions provided to the local embedding model for clustering")
     parser.add_argument("--n_clustering_inits", type=int, default=10, help="Number of clustering initializations to use for clustering")
-    parser.add_argument("--local_embedding_model_str", type=str, default="nvidia/NV-Embed-v1", help="Model version for the local embedding model")
+    parser.add_argument("--use_prompts_as_clusters", action="store_true", help="Flag to use the prompts as the clusters")
+    parser.add_argument("--cluster_on_prompts", action="store_true", help="Flag to cluster on the prompts rather than the decoded texts")
+    parser.add_argument("--local_embedding_model_str", type=str, default="nvidia/NV-Embed-v2", help="Model version for the local embedding model")
+    parser.add_argument("--K", type=int, default=3, help="Number of neighbors to connect each cluster to")
+    parser.add_argument("--match_by_ids", action="store_true", help="Flag to match clusters by their IDs, not embedding distances.")
 
     # Validation
     parser.add_argument("--num_rephrases_for_validation", type=int, default=0, help="Number of rephrases of each generated hypothesis to generate for validation")
+    parser.add_argument("--num_generated_texts_per_description", type=int, default=20, help="Number of generated texts per description for generative validation")
     parser.add_argument("--generated_labels_per_cluster", type=int, default=3, help="Number of generated labels to generate for each cluster")
 
     parser.add_argument("--use_unitary_comparisons", action="store_true", help="Flag to use unitary comparisons")

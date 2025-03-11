@@ -18,7 +18,8 @@ def generate_ground_truths(
     focus_area: Optional[str] = None,
     use_truthful_qa: bool = False,
     api_interactions_save_loc: Optional[str] = None,
-    logger: Optional[BoundLoggerLazyProxy] = None
+    logger: Optional[BoundLoggerLazyProxy] = None,
+    random_sampling_seed: Optional[int] = None
 ) -> List[str]:
     """
     Generate a list of ground truths using the specified API.
@@ -35,10 +36,13 @@ def generate_ground_truths(
         api_interactions_save_loc (Optional[str]): Which file to store the API requests and responses to. 
             Defaults to None.
         logger (Optional[BoundLoggerLazyProxy]): The logger to use for logging API requests and responses.
+        random_sampling_seed (Optional[int]): The seed to use for random sampling of the TruthfulQA dataset.
     Returns:
         List[str]: A list of generated ground truths.
     """
     if use_truthful_qa:
+        if random_sampling_seed is not None:
+            random.seed(random_sampling_seed)
         # Load the TruthfulQA dataset
         truthful_qa_dataset = load_dataset("truthfulqa/truthful_qa", "generation")
         data = truthful_qa_dataset['validation'] if 'validation' in truthful_qa_dataset else truthful_qa_dataset['train']

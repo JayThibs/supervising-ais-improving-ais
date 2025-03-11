@@ -21,7 +21,7 @@ from transformers import PreTrainedModel, PreTrainedTokenizer, GPTNeoXForCausalL
 from ast import literal_eval
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from structlog._config import BoundLoggerLazyProxy
-
+from pathlib import Path
 @retry(
     stop=stop_after_attempt(15),
     wait=wait_exponential(multiplier=1, min=4, max=60),
@@ -37,7 +37,8 @@ def make_api_request(
         logger: Optional[BoundLoggerLazyProxy] = None,
         max_tokens: int = 1000,
         n_local_retries: int = 5,
-        request_info: Optional[Dict[str, str]] = {"pipeline_stage": "unknown"}
+        request_info: Optional[Dict[str, str]] = {"pipeline_stage": "unknown"},
+        temperature: float = 1.0
     ) -> str:
     """
     Make an API request to the specified provider.
@@ -72,7 +73,8 @@ def make_api_request(
                     max_tokens=max_tokens,
                     messages=[
                         {"role": "user", "content": prompt}
-                    ]
+                    ],
+                    temperature=temperature
                 )
                 result = response.content[0].text
             elif api_provider == 'openai':
@@ -81,7 +83,8 @@ def make_api_request(
                 response = client.chat.completions.create(
                     model=model_str,
                     max_completion_tokens=max_tokens,
-                    messages=[{"role": "user", "content": prompt}]
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=temperature
                 )
                 result = response.choices[0].message.content
             elif api_provider == 'gemini':
@@ -105,7 +108,8 @@ def make_api_request(
                     safety_settings=BLOCK_NONE,
                     generation_config = GenerationConfig(
                         max_output_tokens=max_tokens,
-                    )
+                    ),
+                    temperature=temperature
                 )
                 result = response.text
             else:
@@ -148,7 +152,8 @@ def parallel_make_api_requests(
         num_workers: int = 10,
         request_info: Optional[Dict[str, str]] = None,
         max_retries: int = 3,
-        max_tokens: int = 1000
+        max_tokens: int = 1000,
+        temperature: float = 1.0
     ) -> List[str]:
     """
     Execute API requests in parallel using a thread pool to improve performance.
@@ -225,7 +230,8 @@ def parallel_make_api_requests(
                     api_interactions_save_loc=api_interactions_save_loc,
                     logger=logger,
                     request_info=request_info,
-                    max_tokens=max_tokens
+                    max_tokens=max_tokens,
+                    temperature=temperature
                 )
                 return index, response
                 
@@ -463,6 +469,66 @@ def load_api_key(
             raise ValueError(f"API key for {api_provider} not found in the file.")
     except FileNotFoundError:
         raise FileNotFoundError(f"API key file not found: {key_path}")
+    
+def load_statements_from_MWE_repo(
+    path_to_MWE_repo: str,
+    num_statements_per_behavior: int = 100
+) -> List[str]:
+    """
+    Load statements from the MWE persona repository.
+
+    Args:
+        path_to_MWE_repo (str): The path to the MWE persona repository.
+        num_statements_per_behavior (int): The number of statements to load per behavior.
+
+    Returns:
+        List[str]: A list of statements.
+    """
+    path_to_MWE_repo = Path(path_to_MWE_repo)
+    persona_dir = path_to_MWE_repo / "persona"
+    
+    if not persona_dir.exists():
+        raise FileNotFoundError(f"Persona directory not found at {persona_dir}")
+    
+    all_statements = []
+    
+    # Get all jsonl files in the persona directory
+    jsonl_files = list(persona_dir.glob("*.jsonl"))
+    
+    if not jsonl_files:
+        raise ValueError(f"No JSONL files found in {persona_dir}")
+    
+    # Process each behavior file with a fixed random seed for reproducibility
+    random.seed(42)
+    
+    for jsonl_file in jsonl_files:
+        statements = []
+        
+        # Read the JSONL file
+        with open(jsonl_file, "r") as f:
+            lines = f.readlines()
+            
+        # Parse each JSON object and extract statements
+        for line in lines:
+            if line.strip():
+                try:
+                    entry = json.loads(line)
+                    if "statement" in entry:
+                        statements.append(entry["statement"])
+                except json.JSONDecodeError:
+                    continue
+        
+        # Select random statements for this behavior
+        if statements:
+            if len(statements) <= num_statements_per_behavior:
+                selected_statements = statements
+            else:
+                selected_statements = random.sample(statements, num_statements_per_behavior)
+            
+            all_statements.extend(selected_statements)
+    
+    return all_statements
+    
 
 def batch_decode_texts(
         model: PreTrainedModel, 
@@ -628,7 +694,8 @@ def plot_comparison_tsne(
         title: str,
         perplexity: int = 30,
         base_cluster_centers: Optional[List[List[float]]] = None,
-        finetuned_cluster_centers: Optional[List[List[float]]] = None
+        finetuned_cluster_centers: Optional[List[List[float]]] = None,
+        max_points: int = 200000
     ) -> None:
     """
     Perform t-SNE dimensionality reduction on combined base and fine-tuned model embeddings.
@@ -642,10 +709,17 @@ def plot_comparison_tsne(
         perplexity (int): Perplexity parameter for t-SNE. Default is 30.
         base_cluster_centers (Optional[List[List[float]]]): Cluster centers for the base model.
         finetuned_cluster_centers (Optional[List[List[float]]]): Cluster centers for the fine-tuned model.
+        max_points (int): Maximum number of points to plot. Default is 100000.
     """
-    # Convert embeddings to numpy arrays
-    base_embeddings = np.array(base_model_outputs_embeddings)
-    fine_tuned_embeddings = np.array(finetuned_model_outputs_embeddings)
+
+    if len(base_model_outputs_embeddings) + len(finetuned_model_outputs_embeddings) > max_points:
+        # Subsample points from each embedding list and convert to numpy arrays
+        indices = np.random.choice(range(len(base_model_outputs_embeddings)), max_points // 2)
+        base_embeddings = np.array(base_model_outputs_embeddings[indices])
+        fine_tuned_embeddings = np.array(finetuned_model_outputs_embeddings[indices])
+    else:
+        base_embeddings = np.array(base_model_outputs_embeddings)
+        fine_tuned_embeddings = np.array(finetuned_model_outputs_embeddings)
 
     # Combine embeddings
     combined_embeddings = np.vstack((base_embeddings, fine_tuned_embeddings))
