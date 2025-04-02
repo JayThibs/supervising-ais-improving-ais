@@ -159,6 +159,7 @@ git clone https://github.com/JayThibs/supervising-ais-improving-ais
 
 ```bash
 pip install -r requirements.txt
+pip install hdbscan  # Required for clustering functionality
 ```
 
 3. Download the models
