@@ -1,6 +1,9 @@
-from typing import List, Dict, Tuple, Any
+from typing import List, Dict, Tuple, Any, Optional, Iterator, Union
 import numpy as np
 from dataclasses import dataclass
+import logging
+
+logger = logging.getLogger(__name__)
 
 @dataclass
 class EmbeddingEntry:
@@ -37,10 +40,31 @@ class JointEmbeddings:
         """
         Initialize with list of (model_family, model_name) tuples.
         The order of models is critical and must be maintained.
+        
+        Args:
+            models: List of (model_family, model_name) tuples
         """
         self.model_order = models
         self.embeddings: List[EmbeddingEntry] = []
         self._validate_models()
+        
+    def __iter__(self) -> Iterator[EmbeddingEntry]:
+        """
+        Make JointEmbeddings iterable to simplify code that uses it.
+        
+        Returns:
+            Iterator over embedding entries
+        """
+        return iter(self.embeddings)
+        
+    def __len__(self) -> int:
+        """
+        Get the number of embedding entries.
+        
+        Returns:
+            Number of embedding entries
+        """
+        return len(self.embeddings)
 
     def _validate_models(self):
         """Ensure model list is valid."""
@@ -53,12 +77,29 @@ class JointEmbeddings:
                      model_idx: int, 
                      statement: str, 
                      response: str, 
-                     embedding: np.ndarray):
+                     embedding: np.ndarray) -> None:
         """
         Add an embedding entry while maintaining order.
+        
+        Args:
+            model_idx: Index of the model in the model_order list
+            statement: The statement/prompt that was given to the model
+            response: The model's response to the statement
+            embedding: The embedding vector for the response
+            
+        Raises:
+            ValueError: If model_idx is out of range
+            ValueError: If embedding is not a numpy array
         """
         if model_idx >= len(self.model_order):
             raise ValueError(f"Model index {model_idx} out of range")
+        
+        if not isinstance(embedding, np.ndarray):
+            try:
+                embedding = np.array(embedding)
+                logger.warning(f"Converting embedding to numpy array for model {model_idx}")
+            except Exception as e:
+                raise ValueError(f"Could not convert embedding to numpy array: {str(e)}")
             
         model_family, model_name = self.model_order[model_idx]
         entry = EmbeddingEntry(
@@ -80,10 +121,35 @@ class JointEmbeddings:
         return self.embeddings
 
     def get_embedding_matrix(self) -> np.ndarray:
-        """Get embeddings as a matrix."""
+        """
+        Get embeddings as a matrix.
+        
+        Returns:
+            numpy.ndarray: Matrix of embeddings
+            
+        Raises:
+            ValueError: If no embeddings are available
+        """
         if not self.embeddings:
             raise ValueError("No embeddings available")
-        return np.array([e.embedding for e in self.embeddings])
+        
+        try:
+            return np.array([e.embedding for e in self.embeddings])
+        except Exception as e:
+            logger.error(f"Error creating embedding matrix: {str(e)}")
+            fixed_embeddings = []
+            for i, entry in enumerate(self.embeddings):
+                if not isinstance(entry.embedding, np.ndarray):
+                    try:
+                        fixed_embeddings.append(np.array(entry.embedding))
+                        logger.warning(f"Fixed embedding at index {i}")
+                    except:
+                        logger.error(f"Could not fix embedding at index {i}")
+                        fixed_embeddings.append(np.zeros(self.embeddings[0].embedding.shape))
+                else:
+                    fixed_embeddings.append(entry.embedding)
+            
+            return np.array(fixed_embeddings)
 
     def to_dict(self) -> Dict:
         """Convert to dictionary for serialization."""
@@ -104,8 +170,12 @@ class JointEmbeddings:
     def validate_completeness(self) -> bool:
         """
         Verify that we have embeddings from all models for all statements.
+        
+        Returns:
+            bool: True if all statements have embeddings from all models, False otherwise
         """
         if not self.embeddings:
+            logger.warning("No embeddings available for validation")
             return False
             
         # Group by statement
@@ -114,8 +184,20 @@ class JointEmbeddings:
             if entry.statement not in statement_groups:
                 statement_groups[entry.statement] = []
             statement_groups[entry.statement].append(entry.model_idx)
-            
+        
         # Check each statement has embeddings from all models
         expected_models = set(range(len(self.model_order)))
-        return all(set(models) == expected_models 
-                  for models in statement_groups.values()) 
+        
+        missing_combinations = []
+        for statement, models in statement_groups.items():
+            missing_models = expected_models - set(models)
+            if missing_models:
+                missing_combinations.append((statement, missing_models))
+        
+        if missing_combinations:
+            for statement, missing_models in missing_combinations:
+                model_names = [self.model_order[idx][1] for idx in missing_models]
+                logger.warning(f"Statement '{statement[:50]}...' is missing embeddings from models: {model_names}")
+            return False
+            
+        return True          
