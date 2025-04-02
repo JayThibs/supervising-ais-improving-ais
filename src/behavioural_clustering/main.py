@@ -42,6 +42,12 @@ def get_args():
         action="store_true",
         help="List available sections and exit.",
     )
+    parser.add_argument(
+        "--clustering-algorithm",
+        type=str,
+        default=None,
+        help="Specify the clustering algorithm to use (e.g., KMeans, SpectralClustering, k-LLMmeans, SPILL).",
+    )
     # NEW ARG for iterative runs
     parser.add_argument(
         "--iterative",
@@ -85,6 +91,15 @@ def main(args):
             run_settings.update_run_sections()  # Validate the updated run_sections
         if args.run_only:
             run_settings.update_run_sections(args.run_only)
+            
+        if args.clustering_algorithm:
+            if args.clustering_algorithm in run_settings.clustering_settings.all_clustering_algorithms:
+                print(f"Using clustering algorithm: {args.clustering_algorithm}")
+                run_settings.clustering_settings.main_clustering_algorithm = args.clustering_algorithm
+            else:
+                print(f"Warning: Clustering algorithm '{args.clustering_algorithm}' not found in available algorithms.")
+                print(f"Available algorithms: {run_settings.clustering_settings.all_clustering_algorithms}")
+                print(f"Using default: {run_settings.clustering_settings.main_clustering_algorithm}")
 
         # Display which sections will run
         print("Sections that will run:")
