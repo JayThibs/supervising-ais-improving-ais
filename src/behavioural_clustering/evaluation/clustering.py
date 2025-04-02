@@ -37,6 +37,8 @@ class Clustering:
             "KMeans": KMeans,
             "AgglomerativeClustering": AgglomerativeClustering,
             "OPTICS": OPTICS,
+            "k-LLMmeans": "k-LLMmeans",  # Special handling in _run_single_clustering
+            "SPILL": "SPILL",  # Special handling in _run_single_clustering
         }
 
     def cluster_embeddings(
@@ -72,10 +74,27 @@ class Clustering:
         
         algorithm_class = self.algorithm_map[clustering_algorithm]
         
-        if clustering_algorithm != "OPTICS":
-            kwargs["n_clusters"] = n_clusters
-        
-        clustering = algorithm_class(**kwargs).fit(embeddings)
+        if clustering_algorithm in ["k-LLMmeans", "SPILL"]:
+            from behavioural_clustering.utils.clustering_algorithms import ClusteringFactory
+            
+            if n_clusters is not None:
+                kwargs["n_clusters"] = n_clusters
+                
+            clustering_algo = ClusteringFactory.create_algorithm(clustering_algorithm, **kwargs)
+            
+            if "texts" in kwargs:
+                labels = clustering_algo.fit(embeddings, kwargs["texts"])
+            else:
+                logger.warning(f"No texts provided for {clustering_algorithm}. Results may be less interpretable.")
+                labels = clustering_algo.fit(embeddings)
+                
+            clustering = type('DummyModel', (), {'labels_': labels})
+            
+        else:
+            if clustering_algorithm != "OPTICS":
+                kwargs["n_clusters"] = n_clusters
+            
+            clustering = algorithm_class(**kwargs).fit(embeddings)
         
         logger.info(f"Clustering completed using {clustering_algorithm}")
         logger.info(f"Number of clusters: {n_clusters if n_clusters is not None else 'auto'}")
