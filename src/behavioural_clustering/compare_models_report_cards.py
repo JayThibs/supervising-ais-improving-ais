@@ -20,10 +20,10 @@ from datetime import datetime
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 sys.path.insert(0, project_root)
 
-from .config.run_configuration_manager import RunConfigurationManager
-from .evaluation.report_cards import ReportCardGenerator
-from .evaluation.model_evaluation_manager import ModelEvaluationManager
-from .utils.data_preparation import DataPreparation
+from behavioural_clustering.config.run_configuration_manager import RunConfigurationManager
+from behavioural_clustering.evaluation.report_cards import ReportCardGenerator
+from behavioural_clustering.evaluation.model_evaluation_manager import ModelEvaluationManager
+from behavioural_clustering.utils.data_preparation import DataPreparation
 
 logging.basicConfig(
     level=logging.INFO,
