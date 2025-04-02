@@ -1,7 +1,7 @@
 import os
 import glob
 from pathlib import Path
-from typing import List, Tuple, Dict, Any, Optional
+from typing import List, Tuple, Dict, Any, Optional, Union
 import logging
 import subprocess
 import numpy as np
@@ -214,7 +214,13 @@ class DataHandler:
         if self.data_metadata_file.exists():
             with open(self.data_metadata_file, 'r') as f:
                 try:
-                    return self._convert_str_to_paths(yaml.safe_load(f) or {})
+                    loaded_data = yaml.safe_load(f) or {}
+                    converted_data = self._convert_str_to_paths(loaded_data)
+                    if isinstance(converted_data, dict):
+                        return converted_data
+                    else:
+                        print(f"Warning: Converted data is not a dictionary. Starting with empty metadata.")
+                        return {}
                 except yaml.YAMLError:
                     print(f"Warning: Could not parse {self.data_metadata_file}. Starting with empty metadata.")
         return {}
@@ -336,20 +342,30 @@ class DataHandler:
         # Add more validation rules for other data types as needed
         return True
 
-    def _load_file(self, file_path: str) -> Optional[Any]:
-        file_path = Path(file_path)
-        if file_path.exists():
+    def _load_file(self, file_path: Union[str, Path]) -> Optional[Any]:
+        """
+        Load data from a pickle file.
+        
+        Args:
+            file_path: Path to the file as string or Path object
+            
+        Returns:
+            The loaded data or None if loading fails
+        """
+        path_obj = file_path if isinstance(file_path, Path) else Path(str(file_path))
+        
+        if path_obj.exists():
             try:
-                with open(file_path, 'rb') as f:
+                with open(path_obj, 'rb') as f:
                     data = pickle.load(f)
-                print(f"Loaded data from file: {file_path}")
+                print(f"Loaded data from file: {path_obj}")
                 return data
             except Exception as e:
-                print(f"Error loading data from {file_path}: {str(e)}")
+                print(f"Error loading data from {path_obj}: {str(e)}")
                 print("Traceback:")
                 traceback.print_exc()
         else:
-            print(f"File not found: {file_path}")
+            print(f"File not found: {path_obj}")
         return None
 
     def list_available_data(self) -> Dict[str, List[str]]:
@@ -379,15 +395,31 @@ class DataHandler:
             # For unknown data types, we'll assume it's valid as long as it's a list or dict
             return True
 
-    def find_matching_files(self, data_type: str, metadata: dict) -> List[Path]:
+    def find_matching_files(self, data_type: str, metadata_dict: dict) -> List[Path]:
+        """
+        Find files matching the given data type and metadata.
+        
+        Args:
+            data_type: Type of data to find
+            metadata_dict: Dictionary of metadata to match
+            
+        Returns:
+            List of matching file paths
+        """
         matching_files = []
-        for file_type, file_path in self.metadata.get('data_files', {}).items():
-            if file_type == data_type:
+        
+        if data_type in self.data_metadata:
+            for file_id, file_info in self.data_metadata[data_type].items():
+                file_config = file_info.get('config', {})
+                
                 # Check if all metadata items match
-                if all(self.metadata.get(k) == v for k, v in metadata.items()):
-                    file_path = Path(file_path)
-                    if file_path.exists():
-                        matching_files.append(file_path)
+                if all(file_config.get(k) == v for k, v in metadata_dict.items()):
+                    file_path_str = file_info.get('file_path')
+                    if file_path_str:
+                        file_path = Path(file_path_str)
+                        if file_path.exists():
+                            matching_files.append(file_path)
+        
         return matching_files
 
     def list_files_with_metadata(self, data_type: Optional[str] = None, **kwargs) -> List[Dict[str, Any]]:
