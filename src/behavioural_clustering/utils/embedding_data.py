@@ -120,9 +120,13 @@ class JointEmbeddings:
         """Get all embeddings in their original order."""
         return self.embeddings
 
-    def get_embedding_matrix(self) -> np.ndarray:
+    def get_embedding_matrix(self, response_only: bool = False) -> np.ndarray:
         """
         Get embeddings as a matrix.
+        
+        Args:
+            response_only: If True, return only the response part of the embedding
+                          (assumes embeddings are concatenated [input, response])
         
         Returns:
             numpy.ndarray: Matrix of embeddings
@@ -134,7 +138,14 @@ class JointEmbeddings:
             raise ValueError("No embeddings available")
         
         try:
-            return np.array([e.embedding for e in self.embeddings])
+            if response_only:
+                embeddings = []
+                for e in self.embeddings:
+                    embedding_dim = e.embedding.shape[0] // 2
+                    embeddings.append(e.embedding[embedding_dim:])
+                return np.array(embeddings)
+            else:
+                return np.array([e.embedding for e in self.embeddings])
         except Exception as e:
             logger.error(f"Error creating embedding matrix: {str(e)}")
             fixed_embeddings = []
@@ -200,4 +211,4 @@ class JointEmbeddings:
                 logger.warning(f"Statement '{statement[:50]}...' is missing embeddings from models: {model_names}")
             return False
             
-        return True          
+        return True            

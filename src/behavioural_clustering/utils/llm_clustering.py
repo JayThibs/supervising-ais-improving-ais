@@ -515,11 +515,34 @@ Do these two texts share the same underlying intent? Answer with a number betwee
             
             try:
                 score = float(response.strip())
-                
-                if score >= self.selection_threshold:
-                    selected_indices.append(idx)
             except ValueError:
-                logger.warning(colored(f"Could not parse score from response: {response}", "yellow"))
+                import re
+                number_matches = re.findall(r'(\d+\.\d+|\d+)', response)
+                if number_matches:
+                    try:
+                        score = float(number_matches[-1])
+                        logger.info(colored(f"Extracted score {score} from response", "green"))
+                    except ValueError:
+                        score = 0
+                        logger.warning(colored(f"Could not parse score from response: {response}", "yellow"))
+                else:
+                    score = 0
+                    if "same intent" in response.lower() or "similar intent" in response.lower():
+                        score = 0.8
+                    elif "related" in response.lower():
+                        score = 0.6
+                    elif "somewhat" in response.lower():
+                        score = 0.5
+                    elif "different" in response.lower():
+                        score = 0.2
+                    
+                    if score > 0:
+                        logger.info(colored(f"Assigned score {score} based on keywords", "green"))
+                    else:
+                        logger.warning(colored(f"Could not parse score from response: {response}", "yellow"))
+            
+            if score >= self.selection_threshold:
+                selected_indices.append(idx)
                 
         return selected_indices
         
