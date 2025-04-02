@@ -12,6 +12,8 @@ import pandas as pd
 from datetime import datetime
 import plotly.io as pio
 import textwrap
+from typing import List
+from behavioural_clustering.utils.embedding_data import EmbeddingEntry
 
 class Visualization:
     def __init__(self, plot_settings: PlotSettings):
@@ -25,8 +27,14 @@ class Visualization:
         self.shapes = self.plot_settings.shapes
         self.plot_aesthetics = self.plot_settings.plot_aesthetics
 
-        with open(f"{os.getcwd()}/data/prompts/approval_prompts.json", "r") as file:
-            self.approval_prompts = json.load(file)
+        # Load approval prompts from the data directory
+        approval_prompts_path = Path(self.save_path).parent.parent / "prompts" / "approval_prompts.json"
+        if approval_prompts_path.exists():
+            with open(approval_prompts_path, "r", encoding="utf-8") as file:
+                self.approval_prompts = json.load(file)
+        else:
+            print(f"Warning: approval_prompts.json not found at {approval_prompts_path}")
+            self.approval_prompts = {}
 
         # Update plot aesthetics for each category
         for category, prompts in self.approval_prompts.items():
@@ -87,14 +95,14 @@ class Visualization:
         print(f"New plot saved to: {new_filename}")
 
     def plot_embedding_responses(
-        self, dim_reduce_tsne, joint_embeddings_all_llms, model_names, filename, show_plot=True
+        self, dim_reduce_tsne, joint_embeddings_all_llms: List[EmbeddingEntry], model_names, filename, show_plot=True
     ):
         # Adjust figure size and DPI
-        plt.figure(figsize=(10, 8), dpi=100)
+        plt.figure(figsize=self.plot_dim)
         plt.rcParams["font.size"] = self.plot_aesthetics["approvals"]["font_size"]
 
         for i, model_name in enumerate(model_names):
-            mask = np.array([e["model_name"] == model_name for e in joint_embeddings_all_llms])
+            mask = np.array([e.model_name == model_name for e in joint_embeddings_all_llms])
             x_values = dim_reduce_tsne[:, 0][mask]
             y_values = dim_reduce_tsne[:, 1][mask]
 
@@ -225,11 +233,25 @@ class Visualization:
         plt.close()
 
     def plot_spectral_clustering_plotly(self, labels, n_clusters, title):
-        df = pd.DataFrame({'cluster': labels})
-        cluster_counts = df['cluster'].value_counts().sort_index()
+        """
+        Create a bar plot of cluster sizes using plotly.
+        
+        Args:
+            labels: Array of cluster labels
+            n_clusters: Number of clusters
+            title: Plot title
+        """
+        # Convert labels to DataFrame with explicit index
+        df = pd.DataFrame({'cluster': labels, 'count': 1}, index=range(len(labels)))
+        
+        # Group by cluster and count
+        cluster_counts = df.groupby('cluster')['count'].sum().sort_index()
         
         fig = go.Figure(data=[
-            go.Bar(x=cluster_counts.index, y=cluster_counts.values)
+            go.Bar(x=cluster_counts.index.astype(str), 
+                  y=cluster_counts.values,
+                  text=cluster_counts.values,
+                  textposition='auto')
         ])
         
         fig.update_layout(
@@ -237,7 +259,8 @@ class Visualization:
             xaxis_title="Cluster",
             yaxis_title="Count",
             bargap=0.2,
-            bargroupgap=0.1
+            bargroupgap=0.1,
+            showlegend=False
         )
         
         return fig

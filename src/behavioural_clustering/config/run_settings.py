@@ -91,6 +91,9 @@ class ModelSettings:
     models: List[Tuple[str, str]] = field(
         default_factory=lambda: [("openai", "gpt-3.5-turbo")]
     )
+    model_system_messages: List[str] = field(
+        default_factory=lambda: ["You are an AI language model."]
+    )
     generate_responses_max_tokens: int = 150
     get_model_approval_max_tokens: int = 50
     identify_theme_max_tokens: int = 150
@@ -100,7 +103,7 @@ class ModelSettings:
 @dataclass
 class EmbeddingSettings:
     client: str = "openai"
-    embedding_model: str = "text-embedding-ada-002"
+    embedding_model: str = "text-embedding-3-large"
     batch_size: int = 20
     max_retries: int = 50
     initial_sleep_time: int = 2
@@ -285,6 +288,83 @@ class TsneSettings:
 
 
 @dataclass
+class IterativeSettings:
+    max_iterations: int = 2
+    prompts_per_iteration: int = 50
+    min_difference_threshold: float = 0.1
+    responses_per_prompt: int = 1  # Number of responses to generate per prompt
+    validation_prompt: str = """
+    Given the following behavioral patterns and their difference:
+    
+    Pattern 1: {pattern1}
+    Pattern 2: {pattern2}
+    Difference Type: {difference_type}
+    Related Themes: {themes}
+    
+    Generate a prompt that would help validate this behavioral difference.
+    The prompt should be designed to elicit responses that would confirm or deny the presence of this difference.
+    """
+
+    def get(self, key: str, default: Any = None) -> Any:
+        """Get a setting value by key name, with an optional default."""
+        return getattr(self, key, default)
+
+
+@dataclass
+class IterativePrompts:
+    """Settings for iterative analysis prompts"""
+    pattern_description_prompt: str = """You are a behavioral pattern analyst studying language model outputs. Your task is to identify and describe the key behavioral pattern present in these example model responses. Focus on:
+1. How the model approaches or frames the topic
+2. Any consistent stylistic or rhetorical patterns
+3. Notable behavioral tendencies or biases
+4. The model's apparent perspective or stance
+
+Here are the example responses:
+
+{examples}
+
+Describe the key behavioral pattern you observe in 2-3 clear, specific sentences. Focus on concrete behaviors rather than abstract descriptions. Your description should help someone predict whether a new response would fit this pattern.
+
+Pattern description:"""
+
+    validation_prompt: str = """You are an expert at designing prompts to test specific behavioral differences between language models. Generate a prompt that will effectively test for this behavioral difference:
+
+Pattern 1: {pattern1}
+Pattern 2: {pattern2}
+Difference type: {difference_type}
+Key themes from effective prompts: {themes}
+
+The prompt should:
+1. Be specific enough to elicit the behavioral difference
+2. Be open-ended enough to allow natural variation
+3. Not be too leading or bias toward either pattern
+4. Be clearly written and unambiguous
+5. Be relevant to the themes that revealed this difference
+
+Generate a prompt that will test this behavioral difference effectively."""
+
+    difference_description_prompt: str = """You are an expert at describing behavioral differences between language models clearly and precisely. Describe this behavioral difference:
+
+Difference type: {difference_type}
+Pattern 1: {pattern1}
+Pattern 2: {pattern2}
+Strength: {strength}
+Validation confidence: {validation}
+
+Example pairs showing the difference:
+{examples}
+
+Generate a clear 2-3 sentence description of this behavioral difference that:
+1. Precisely describes how the models differ
+2. Includes concrete details from the patterns
+3. Notes the strength of the difference
+4. Remains objective and factual
+5. Would help someone understand what to look for when comparing these models
+
+Description:"""
+
+
+@dataclass
 class RunSettings:
     name: str = "default"
     random_state: int = 42
@@ -296,6 +376,8 @@ class RunSettings:
     plot_settings: PlotSettings = field(default_factory=PlotSettings)
     clustering_settings: ClusteringSettings = field(default_factory=ClusteringSettings)
     tsne_settings: TsneSettings = field(default_factory=TsneSettings)
+    iterative_settings: IterativeSettings = field(default_factory=IterativeSettings)
+    iterative_prompts: IterativePrompts = field(default_factory=IterativePrompts)
     test_mode: bool = False
     run_sections: List[str] = field(default_factory=list)
     approval_prompts: Dict[str, Dict[str, str]] = field(default_factory=dict)
@@ -319,7 +401,7 @@ class RunSettings:
         self.tsne_settings.perplexity = TsneSettings.calculate_perplexity(self.data_settings.n_statements)
 
     def load_approval_prompts(self):
-        self.approval_prompts_file = self.directory_settings.data_dir / "prompts" / "approval_prompts.json"
+        self.approval_prompts_file = Path(self.directory_settings.data_dir) / "prompts" / "approval_prompts.json"
         if os.path.exists(self.approval_prompts_file):
             with open(self.approval_prompts_file, 'r') as f:
                 self.approval_prompts = json.load(f)
@@ -329,7 +411,11 @@ class RunSettings:
 
     def update_run_sections(self, sections: Optional[Union[str, List[str]]] = None):
         # Define available sections
-        available_sections = ["model_comparison", "hierarchical_clustering"]
+        available_sections = [
+            "model_comparison", 
+            "hierarchical_clustering",
+            "iterative_evaluation"  # Add iterative_evaluation as an available section
+        ]
         available_sections.extend([f"{prompt_type}_evaluation" for prompt_type in self.approval_prompts.keys()])
 
         if sections is not None:
@@ -363,9 +449,9 @@ class RunSettings:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'RunSettings':
         def convert_to_path(item):
-            if isinstance(item, str) and ('dir' in item or 'path' in item):
-                return Path(item)
-            elif isinstance(item, dict):
+            if isinstance(item, dict):
+                if 'data_dir' in item or 'evals_dir' in item or 'results_dir' in item or 'pickle_dir' in item or 'viz_dir' in item or 'tables_dir' in item:
+                    return {k: Path(v) if isinstance(v, str) else convert_to_path(v) for k, v in item.items()}
                 return {k: convert_to_path(v) for k, v in item.items()}
             elif isinstance(item, list):
                 return [convert_to_path(i) for i in item]

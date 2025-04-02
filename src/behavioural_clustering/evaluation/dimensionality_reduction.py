@@ -40,6 +40,9 @@ def tsne_reduction(
     if isinstance(combined_embeddings, list):
         combined_embeddings = np.array(combined_embeddings)
     
+    # Ensure data is in float64 format
+    combined_embeddings = combined_embeddings.astype(np.float64)
+    
     if tsne_settings:
         n_components = tsne_settings.dimensions
         perplexity = tsne_settings.perplexity
@@ -59,9 +62,16 @@ def tsne_reduction(
         learning_rate=learning_rate,
         random_state=random_state,
     )
-    dim_reduce_tsne = tsne.fit_transform(X=combined_embeddings)
-    check_tsne_values(dim_reduce_tsne)
-    return dim_reduce_tsne
+    
+    try:
+        dim_reduce_tsne = tsne.fit_transform(X=combined_embeddings)
+        check_tsne_values(dim_reduce_tsne)
+        return dim_reduce_tsne
+    except Exception as e:
+        print(f"Error during t-SNE reduction: {str(e)}")
+        print(f"Input shape: {combined_embeddings.shape}")
+        print(f"Input dtype: {combined_embeddings.dtype}")
+        raise
 
 def check_tsne_values(dim_reduce_tsne: np.ndarray) -> None:
     """
@@ -72,8 +82,11 @@ def check_tsne_values(dim_reduce_tsne: np.ndarray) -> None:
     """
     if not np.isfinite(dim_reduce_tsne).all():
         print("Warning: dim_reduce_tsne contains non-finite values.")
-    if np.isnan(dim_reduce_tsne).any() or np.isinf(dim_reduce_tsne).any():
-        print("Warning: dim_reduce_tsne contains NaN or inf values.")
+    if np.isnan(dim_reduce_tsne).any():
+        print("Warning: dim_reduce_tsne contains NaN values.")
+    if np.isinf(dim_reduce_tsne).any():
+        print("Warning: dim_reduce_tsne contains inf values.")
+    print(f"dim_reduce_tsne shape: {dim_reduce_tsne.shape}")
     print(f"dim_reduce_tsne dtype: {dim_reduce_tsne.dtype}")
 
 def pca_reduction(combined_embeddings: np.ndarray, n_components: int = 2) -> np.ndarray:

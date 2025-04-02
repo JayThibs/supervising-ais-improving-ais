@@ -2,54 +2,94 @@ from typing import List, Dict, Any
 import numpy as np
 from behavioural_clustering.config.run_settings import EmbeddingSettings
 from behavioural_clustering.utils.embedding_utils import embed_texts
+from behavioural_clustering.utils.cache_management import CacheManager, CacheMetadata, ModelParams, EmbeddingParams, DataParams
+from behavioural_clustering.utils.embedding_data import JointEmbeddings
+import logging
 
-def create_embeddings(query_results_per_model, llms, embedding_settings: EmbeddingSettings, embedding_manager):
-    print(f"Starting create_embeddings method")
-    print(f"Number of models: {len(llms)}")
-    print(f"Number of query results: {len(query_results_per_model)}")
+logger = logging.getLogger(__name__)
 
-    joint_embeddings_all_llms = []
-    for model_num, (model_family, model_name) in enumerate(llms):
-        print(f"Processing model {model_num}: {model_name}")
+def create_embeddings(query_results: Dict[str, Any], 
+                     llms: List[tuple[str, str]], 
+                     embedding_settings: EmbeddingSettings,
+                     embedding_manager,
+                     cache_manager: CacheManager = None) -> JointEmbeddings:
+    """
+    Create embeddings for model responses with proper ordering and caching.
+    
+    Args:
+        query_results: Dictionary containing model responses
+        llms: List of (model_family, model_name) tuples in specific order
+        embedding_settings: Settings for embedding generation
+        embedding_manager: Manager for creating embeddings
+        cache_manager: Optional cache manager for caching results
+    """
+    logger.info("Starting create_embeddings method")
+    logger.info(f"Models configured: {[f'{f}-{n}' for f,n in llms]}")
+    logger.info(f"Number of models configured: {len(llms)}")
+    
+    # Validate input format
+    if not isinstance(query_results, dict) or "responses" not in query_results:
+        logger.error(f"Invalid query_results format. Keys found: {list(query_results.keys())}")
+        raise ValueError("Invalid query_results format")
+
+    responses_dict = query_results["responses"]
+    logger.info(f"Number of model results in responses: {len(responses_dict)}")
+    logger.info(f"Models in responses: {list(responses_dict.keys())}")
+    
+    # Create JointEmbeddings instance
+    joint_embeddings = JointEmbeddings(llms)
+    
+    # Process each model's responses in order
+    for model_idx, (model_family, model_name) in enumerate(llms):
+        logger.info(f"\nProcessing model {model_idx}: {model_family}-{model_name}")
         
-        if model_num >= len(query_results_per_model):
-            print(f"Warning: No query results for model {model_name}")
-            continue
-
-        model_results = query_results_per_model[model_num]
+        # Try both possible key formats
+        model_key = f"{model_family}-{model_name}"
+        alt_model_key = f"{model_family}_{model_name}"
         
-        if "inputs" not in model_results or "responses" not in model_results:
-            print(f"Warning: Missing 'inputs' or 'responses' for model {model_name}")
-            continue
+        if model_key in responses_dict:
+            model_results = responses_dict[model_key]
+        elif alt_model_key in responses_dict:
+            model_results = responses_dict[alt_model_key]
+        else:
+            logger.error(f"No query results for model {model_key} or {alt_model_key}")
+            logger.error(f"Available keys: {list(responses_dict.keys())}")
+            raise ValueError(f"Missing responses for model {model_key}")
 
-        inputs = model_results["inputs"]
-        responses = model_results["responses"]
+        if not isinstance(model_results, list):
+            logger.error(f"Invalid results format for model {model_key}")
+            raise ValueError(f"Invalid results format for model {model_key}")
+
+        # Extract statements and responses
+        inputs = [item['statement'] for item in model_results]
+        responses = [item['response'] for item in model_results]
         
-        print(f"Number of inputs: {len(inputs)}")
-        print(f"Number of responses: {len(responses)}")
+        logger.info(f"Number of inputs: {len(inputs)}")
+        logger.info(f"Number of responses: {len(responses)}")
 
+        # Generate embeddings
         inputs_embeddings = embedding_manager.get_or_create_embeddings(inputs, embedding_settings)
-        print(f"Number of input embeddings: {len(inputs_embeddings)}")
+        logger.info(f"Number of input embeddings: {len(inputs_embeddings)}")
 
         responses_embeddings = embedding_manager.get_or_create_embeddings(responses, embedding_settings)
-        print(f"Number of response embeddings: {len(responses_embeddings)}")
+        logger.info(f"Number of response embeddings: {len(responses_embeddings)}")
 
-        joint_embeddings = [np.concatenate([inp, r]) for inp, r in zip(inputs_embeddings, responses_embeddings)]
-        print(f"Number of joint embeddings: {len(joint_embeddings)}")
+        # Create joint embeddings
+        for input_text, response_text, input_emb, response_emb in zip(
+            inputs, responses, inputs_embeddings, responses_embeddings
+        ):
+            joint_embedding = np.concatenate([input_emb, response_emb])
+            joint_embeddings.add_embedding(
+                model_idx=model_idx,
+                statement=input_text,
+                response=response_text,
+                embedding=joint_embedding
+            )
 
-        for input, response, embedding in zip(inputs, responses, joint_embeddings):
-            joint_embeddings_all_llms.append({
-                "model_num": model_num,
-                "statement": input,
-                "response": response,
-                "embedding": embedding,  # Store as numpy array
-                "model_name": model_name
-            })
+    # Validate completeness
+    if not joint_embeddings.validate_completeness():
+        logger.error("Joint embeddings validation failed - missing entries")
+        raise ValueError("Incomplete joint embeddings")
 
-    print(f"Total number of joint embeddings: {len(joint_embeddings_all_llms)}")
-
-    if not joint_embeddings_all_llms:
-        print("Warning: No joint embeddings were created")
-        return []
-
-    return joint_embeddings_all_llms
+    logger.info(f"Total number of joint embeddings: {len(joint_embeddings.get_all_embeddings())}")
+    return joint_embeddings

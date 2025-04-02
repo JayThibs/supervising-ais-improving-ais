@@ -1,8 +1,9 @@
 import torch
-from typing import List, Tuple
+from typing import List, Tuple, Dict, Any
 from behavioural_clustering.config.run_settings import RunSettings
 from behavioural_clustering.utils.model_utils import query_model_on_statements
 from behavioural_clustering.models.model_factory import initialize_model
+from datetime import datetime
 
 class ModelEvaluationManager:
     def __init__(self, run_settings: RunSettings, llms: List[Tuple[str, str]]):
@@ -45,8 +46,7 @@ class ModelEvaluationManager:
                     device="auto"
                 )
             except Exception as e:
-                print(f"Error initializing model {model_name}: {str(e)}")
-                return None
+                raise RuntimeError(f"Error initializing model {model_name}: {str(e)}")
         return self.models[model_key]
 
     def unload_model(self, model_family, model_name):
@@ -54,26 +54,79 @@ class ModelEvaluationManager:
         if model_key in self.models:
             del self.models[model_key]
 
-    def generate_responses(self, text_subset):
-        self.unload_all_models()  # Unload any previously loaded models
-        query_results_per_model = []
-        for model_family, model_name in self.llms:
-            print(f"Generating responses using {model_family} - {model_name}")
-            model = self.get_or_initialize_model(model_family, model_name)
-            if model is None:
-                print(f"Skipping {model_name} due to initialization error")
-                continue
-            query_results = query_model_on_statements(
-                text_subset,
-                model_family,
-                model_name,
-                self.settings.prompt_settings.statements_prompt_template,
-                self.settings.prompt_settings.statements_system_message,
-                model,
-                max_tokens=self.settings.model_settings.generate_responses_max_tokens
-            )
-            query_results_per_model.append(query_results)
-        return query_results_per_model
+    def generate_responses(self, statements: List[str]) -> Dict[str, Any]:
+        """
+        Generate responses for each statement using the specified models.
+
+        Args:
+            statements (List[str]): List of statements to get responses for
+
+        Returns:
+            Dict containing responses and metadata
+        """
+        try:
+            # Validate input
+            if not statements:
+                raise ValueError("No statements provided")
+
+            # Validate models
+            for model_family, model_name in self.llms:
+                if model_family not in ["anthropic", "openai"]:
+                    raise ValueError(f"Invalid model family: {model_family}")
+                if model_family == "anthropic" and not model_name.startswith("claude-"):
+                    raise ValueError(f"Invalid Anthropic model name: {model_name}")
+                if model_family == "openai" and not model_name.startswith("gpt-"):
+                    raise ValueError(f"Invalid OpenAI model name: {model_name}")
+
+            self.unload_all_models()
+            print("All models unloaded and memory cleared.")
+
+            query_results_per_model = {}
+            for model_family, model_name in self.llms:
+                print(f"Generating responses using {model_family} - {model_name}")
+                
+                # Initialize model
+                model = self.get_or_initialize_model(model_family, model_name)
+                
+                # Generate responses
+                model_results = []
+                for statement in statements:
+                    try:
+                        response = model.generate(
+                            prompt=statement,
+                            max_tokens=self.settings.model_settings.generate_responses_max_tokens
+                        )
+                        model_results.append({
+                            "statement": statement,
+                            "response": response
+                        })
+                    except Exception as e:
+                        print(f"Error generating response for statement: {str(e)}")
+                        model_results.append({
+                            "statement": statement,
+                            "response": ""  # Empty response on error
+                        })
+                
+                query_results_per_model[f"{model_family}-{model_name}"] = model_results
+
+            # Format results
+            results = {
+                "statements": statements,
+                "responses": query_results_per_model,
+                "metadata": {
+                    "timestamp": datetime.now().isoformat(),
+                    "models": [{"family": f, "name": n} for f, n in self.llms],
+                    "settings": {
+                        "max_tokens": self.settings.model_settings.generate_responses_max_tokens,
+                        "temperature": self.settings.model_settings.temperature
+                    }
+                }
+            }
+
+            return results
+
+        except Exception as e:
+            raise RuntimeError(f"Failed to generate responses: {str(e)}")
 
     def get_model_approval(
         self,
