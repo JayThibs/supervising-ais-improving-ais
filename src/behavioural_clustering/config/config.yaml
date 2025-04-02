@@ -84,7 +84,7 @@ default:
     theme_identification_max_tokens: 150
     theme_identification_max_total_tokens: 400
   tsne_settings:
-    perplexity: 30
+    perplexity: 5
     learning_rate: 200.0
     n_iter: 1000
     init: pca
