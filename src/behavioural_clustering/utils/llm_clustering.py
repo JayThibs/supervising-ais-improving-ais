@@ -629,9 +629,9 @@ def update_clustering_factory():
         Returns:
             Clustering algorithm instance
         """
-        if algorithm_name.lower() == 'kllmmeans':
+        if algorithm_name.lower() in ['kllmmeans', 'k-llmmeans']:
             return KLLMmeansAlgorithm(**kwargs)
-        elif algorithm_name.lower() == 'spill':
+        elif algorithm_name.lower() in ['spill']:
             return SPILLAlgorithm(**kwargs)
         else:
             return original_create_algorithm(algorithm_name, **kwargs)
