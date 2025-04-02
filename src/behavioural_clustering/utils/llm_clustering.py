@@ -280,12 +280,19 @@ Your summary should be specific enough to distinguish this cluster from others.
             Array of centroid embeddings
         """
         try:
-            return self._get_embeddings(summaries)
+            embeddings = self._get_embeddings(summaries)
+            
+            if hasattr(self, 'data_dim') and embeddings.shape[1] != self.data_dim:
+                logger.warning(colored(f"Embedding dimension mismatch: {embeddings.shape[1]} vs {self.data_dim}", "yellow"))
+                logger.warning(colored("Falling back to standard k-means centroids", "yellow"))
+                return self.kmeans.cluster_centers_
+                
+            return embeddings
         except Exception as e:
             logger.error(colored(f"Error computing centroid embeddings: {str(e)}", "red"))
             
-            if hasattr(self.model, "cluster_centers_"):
-                return self.model.cluster_centers_
+            if hasattr(self.kmeans, "cluster_centers_"):
+                return self.kmeans.cluster_centers_
                 
             return np.zeros((self.n_clusters, self.data_dim))
         
