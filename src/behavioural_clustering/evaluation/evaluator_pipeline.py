@@ -62,8 +62,28 @@ class EvaluatorPipeline:
         self.cluster_table_ids: Dict[str, Any] = {}
         self.embedding_manager = EmbeddingManager(str(run_settings.directory_settings.data_dir))
         
-        self.spectral_clustering: Optional[Union[ClusteringResult, np.ndarray, Dict[str, Any], None]] = None
-        self.spectral_labels: Optional[np.ndarray] = None
+        self._spectral_clustering: Optional[Union[ClusteringResult, np.ndarray, Dict[str, Any], None]] = None
+        self._spectral_labels: Optional[np.ndarray] = None
+        
+    @property
+    def spectral_clustering(self) -> Optional[Union[ClusteringResult, np.ndarray, Dict[str, Any], None]]:
+        """Get the spectral clustering result."""
+        return self._spectral_clustering
+        
+    @spectral_clustering.setter
+    def spectral_clustering(self, value: Union[ClusteringResult, np.ndarray, Dict[str, Any], None]) -> None:
+        """Set the spectral clustering result."""
+        self._spectral_clustering = value
+        
+    @property
+    def spectral_labels(self) -> Optional[np.ndarray]:
+        """Get the spectral clustering labels."""
+        return self._spectral_labels
+        
+    @spectral_labels.setter
+    def spectral_labels(self, value: Optional[np.ndarray]) -> None:
+        """Set the spectral clustering labels."""
+        self._spectral_labels = value
 
         # Create the iterative analyzer instance with proper path
         iterative_prompts_path = (
@@ -297,7 +317,13 @@ class EvaluatorPipeline:
                 affinity=self.run_settings.clustering_settings.affinity
             )
             setattr(self, '_spectral_clustering', spectral_result)
-            setattr(self, '_spectral_labels', None)  # Initialize to None
+            
+            if hasattr(spectral_result, 'labels_'):
+                labels = getattr(spectral_result, 'labels_', None)
+                setattr(self, '_spectral_labels', labels)
+            else:
+                logger.warning(colored("Spectral clustering result does not have labels_ attribute", "yellow"))
+                setattr(self, '_spectral_labels', None)
         except Exception as e:
             logger.error(colored(f"Error in spectral clustering: {str(e)}", "red"))
             logger.warning(colored("Using fallback clustering", "yellow"))
