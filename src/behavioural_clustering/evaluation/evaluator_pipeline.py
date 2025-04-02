@@ -388,8 +388,15 @@ class EvaluatorPipeline:
         # Run chosen clustering
         logger.info(colored("\nRunning main clustering algorithm...", "cyan"))
         statements = [entry.statement for entry in self.joint_embeddings_all_llms.get_all_embeddings()]
+        
+        if self.run_settings.clustering_settings.main_clustering_algorithm in ["k-LLMmeans", "SPILL"]:
+            logger.info(colored("Using response-only embeddings for LLM-based clustering", "cyan"))
+            clustering_embeddings = self.joint_embeddings_all_llms.get_embedding_matrix(response_only=True)
+        else:
+            clustering_embeddings = combined_embeddings
+            
         self.chosen_clustering = self.clustering.cluster_embeddings(
-            combined_embeddings,
+            clustering_embeddings,
             texts=statements
         )
 
