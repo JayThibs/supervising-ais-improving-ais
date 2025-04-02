@@ -13,11 +13,12 @@ def tsne_reduction(
     angle: float = 0.0,
     init: str = "pca",
     early_exaggeration: float = 1.0,
-    learning_rate: str = "auto",
+    learning_rate: Union[float, str] = "auto",
     random_state: int = 42,
 ) -> np.ndarray:
     """
     Perform t-SNE dimensionality reduction on the given embeddings.
+    For small datasets (n_samples <= 30), automatically falls back to PCA.
 
     Args:
         combined_embeddings: Input embeddings to reduce.
@@ -34,14 +35,20 @@ def tsne_reduction(
     Returns:
         Reduced embeddings.
     """
-    print("Performing t-SNE dimensionality reduction...")
-    
     # Convert combined_embeddings to numpy array if it's a list
     if isinstance(combined_embeddings, list):
         combined_embeddings = np.array(combined_embeddings)
     
     # Ensure data is in float64 format
     combined_embeddings = combined_embeddings.astype(np.float64)
+    
+    n_samples = combined_embeddings.shape[0]
+    
+    if n_samples <= 30:
+        print(f"Small dataset detected (n={n_samples}). Using PCA instead of t-SNE.")
+        return pca_reduction(combined_embeddings, n_components=n_components)
+    
+    print("Performing t-SNE dimensionality reduction...")
     
     if tsne_settings:
         n_components = tsne_settings.dimensions
@@ -51,6 +58,17 @@ def tsne_reduction(
         init = tsne_settings.init
         early_exaggeration = tsne_settings.early_exaggeration
         learning_rate = tsne_settings.learning_rate
+    
+    perplexity = min(perplexity, n_samples - 1)
+    
+    if isinstance(init, str) and init not in ["random", "pca"]:
+        init = "pca"  # Default to PCA if invalid string
+    
+    if isinstance(learning_rate, str) and learning_rate != "auto":
+        try:
+            learning_rate = float(learning_rate)
+        except ValueError:
+            learning_rate = "auto"  # Default to auto if invalid string
 
     tsne = TSNE(
         n_components=n_components,
@@ -71,7 +89,8 @@ def tsne_reduction(
         print(f"Error during t-SNE reduction: {str(e)}")
         print(f"Input shape: {combined_embeddings.shape}")
         print(f"Input dtype: {combined_embeddings.dtype}")
-        raise
+        print("Falling back to PCA...")
+        return pca_reduction(combined_embeddings, n_components=n_components)
 
 def check_tsne_values(dim_reduce_tsne: np.ndarray) -> None:
     """
