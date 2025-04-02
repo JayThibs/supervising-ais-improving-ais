@@ -393,7 +393,7 @@ if __name__ == "__main__":
 
 
     ## Clustering
-    parser.add_argument("--cluster_method", type=str, default="kmeans", help="Method to use for clustering. Options: kmeans, hdbscan")
+    parser.add_argument("--cluster_method", type=str, default="kmeans", help="Method to use for clustering. Options: kmeans, hdbscan, k-LLMmeans, SPILL")
     parser.add_argument("--num_clusters", type=int, default=40, help="Number of clusters to use for clustering")
     parser.add_argument("--min_cluster_size", type=int, default=7, help="Minimum cluster size to use for clustering. Only matters when using HDBSCAN")
     parser.add_argument("--max_cluster_size", type=int, default=2000, help="Maximum cluster size to use for clustering. Only matters when using HDBSCAN")

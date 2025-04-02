@@ -9,7 +9,8 @@ from anthropic import Anthropic
 from openai import OpenAI
 from google.generativeai import GenerativeModel
 import random
-from sklearn.cluster import KMeans, HDBSCAN
+from sklearn.cluster import KMeans
+from hdbscan import HDBSCAN
 from statsmodels.stats.proportion import proportions_ztest
 import numpy as np
 import pandas as pd
@@ -22,6 +23,7 @@ from os import path
 import sys
 sys.path.append("../../contrastive-decoding/")
 from validated_analysis import read_past_embeddings_or_generate_new, match_clusterings, get_validated_contrastive_cluster_labels, validated_assistant_generative_compare, build_contrastive_K_neighbor_similarity_graph, get_cluster_labels_random_subsets, evaluate_label_discrimination, validated_assistant_discriminative_compare
+from behavioral_analysis import analyze_behavioral_patterns
 
 def setup_interpretability_method(
         base_model: PreTrainedModel, 
@@ -197,6 +199,62 @@ def setup_interpretability_method(
     elif cluster_method == "hdbscan":
         base_clustering = HDBSCAN(min_cluster_size=min_cluster_size, max_cluster_size=max_cluster_size).fit(base_embeddings)
         finetuned_clustering = HDBSCAN(min_cluster_size=min_cluster_size, max_cluster_size=max_cluster_size).fit(finetuned_embeddings)
+    elif cluster_method == "k-LLMmeans":
+        from behavioural_clustering.models.model_factory import initialize_model
+        from behavioural_clustering.utils.llm_clustering import KLLMmeansAlgorithm
+        
+        api_model_str = "claude-3-haiku-20240307"  # Default model
+        llm_model_info = {
+            "model_family": local_embedding_model_str.split("/")[0] if local_embedding_model_str else "anthropic",
+            "model_name": local_embedding_model_str.split("/")[1] if local_embedding_model_str else api_model_str,
+            "system_message": clustering_instructions
+        }
+        llm = initialize_model(llm_model_info)
+        
+        base_clustering = KLLMmeansAlgorithm(
+            n_clusters=n_clusters,
+            llm=llm,
+            max_iterations=5,
+            random_state=0
+        )
+        base_clustering.fit(base_embeddings, base_decoded_texts)
+        
+        finetuned_clustering = KLLMmeansAlgorithm(
+            n_clusters=n_clusters,
+            llm=llm,
+            max_iterations=5,
+            random_state=0
+        )
+        finetuned_clustering.fit(finetuned_embeddings, finetuned_decoded_texts)
+    elif cluster_method == "SPILL":
+        from behavioural_clustering.models.model_factory import initialize_model
+        from behavioural_clustering.utils.llm_clustering import SPILLAlgorithm
+        
+        api_model_str = "claude-3-haiku-20240307"  # Default model
+        llm_model_info = {
+            "model_family": local_embedding_model_str.split("/")[0] if local_embedding_model_str else "anthropic",
+            "model_name": local_embedding_model_str.split("/")[1] if local_embedding_model_str else api_model_str,
+            "system_message": clustering_instructions
+        }
+        llm = initialize_model(llm_model_info)
+        
+        base_clustering = SPILLAlgorithm(
+            n_clusters=n_clusters,
+            llm=llm,
+            max_iterations=3,
+            selection_threshold=0.5,
+            random_state=0
+        )
+        base_clustering.fit(base_embeddings, base_decoded_texts)
+        
+        finetuned_clustering = SPILLAlgorithm(
+            n_clusters=n_clusters,
+            llm=llm,
+            max_iterations=3,
+            selection_threshold=0.5,
+            random_state=0
+        )
+        finetuned_clustering.fit(finetuned_embeddings, finetuned_decoded_texts)
     
     print("Found", len(set(base_clustering.labels_)), "clusters for base model")
     print("Found", len(set(finetuned_clustering.labels_)), "clusters for finetuned model")
@@ -492,7 +550,8 @@ def get_individual_labels(
     generated_labels_per_cluster: int = 3,
     max_unitary_comparisons_per_label: int = 50,
     api_interactions_save_loc: Optional[str] = None,
-    metric: str = "acc"
+    metric: str = "acc",
+    analyze_intent: bool = False
 ) -> Dict[int, Tuple[str, float]]:
     """
     Generate and evaluate individual labels for each cluster.
@@ -521,6 +580,13 @@ def get_individual_labels(
         Dict[int, Tuple[str, float]]: A dictionary mapping cluster IDs to tuples of
         (best_label, best_metric_score).
     """
+    cluster_label_instruction_local = "You are an expert at describing sets of texts. When given a list of texts belonging to a set of texts, you immediately respond with a short description of the key themes of the texts shown to you."
+    cluster_label_instruction_api = "Concisely summarize the common themes of the texts shown to you. We are interested in the common themes of the set of texts these are drawn from, not the specific details of the texts we're showing you."
+    
+    if analyze_intent:
+        cluster_label_instruction_local = "You are an expert at analyzing the intent and reasoning patterns in texts. When given a list of texts, you immediately respond with a description of the underlying intent, reasoning approach, or problem-solving strategy evident in these texts."
+        cluster_label_instruction_api = "Analyze the intent and reasoning patterns in these texts. Focus on how the texts approach problem-solving, what reasoning strategies they employ, and what underlying intent they reveal. Provide a concise description of these behavioral patterns."
+    
     cluster_labels, _ = get_cluster_labels_random_subsets(
         decoded_strs,
         clustering_assignments,
@@ -533,7 +599,9 @@ def get_individual_labels(
         device=device,
         sampled_texts_per_cluster=sampled_texts_per_cluster,
         generated_labels_per_cluster=generated_labels_per_cluster,
-        api_interactions_save_loc=api_interactions_save_loc
+        api_interactions_save_loc=api_interactions_save_loc,
+        cluster_label_instruction_local=cluster_label_instruction_local,
+        cluster_label_instruction_api=cluster_label_instruction_api
     )
     
     labels_with_metric_scores = {}
@@ -726,7 +794,9 @@ def apply_interpretability_method_1_to_K(
     tsne_title: Optional[str] = None,
     tsne_perplexity: int = 30,
     api_interactions_save_loc: Optional[str] = None,
-    run_prefix: Optional[str] = None
+    run_prefix: Optional[str] = None,
+    analyze_intent: bool = False,
+    analyze_behavior: bool = False
 ) -> Tuple[str, str, List[str]]:
     """
     Apply an interpretability method to compare a base model with a finetuned model.
@@ -1164,5 +1234,25 @@ def apply_interpretability_method_1_to_K(
 
     # Generate human-readable output using terminaltables
     table_output = generate_table_output(results, "Accuracy" if metric == "acc" else "AUC")
+    
+    if analyze_behavior and cluster_method in ["k-LLMmeans", "SPILL"]:
+        print("Analyzing behavioral patterns between models...")
+        behavioral_analysis = analyze_behavioral_patterns(
+            base_decoded_texts,
+            finetuned_decoded_texts,
+            base_clustering,
+            finetuned_clustering,
+            base_labels,
+            finetuned_labels,
+            api_provider=api_provider,
+            api_model_str=api_model_str,
+            auth_key=auth_key,
+            client=client
+        )
+        
+        results["behavioral_analysis"] = behavioral_analysis
+        
+        if "behavioral_analysis" in behavioral_analysis and "summary" in behavioral_analysis["behavioral_analysis"]:
+            table_output += "\n\nBehavioral Analysis Summary:\n" + behavioral_analysis["behavioral_analysis"]["summary"]
 
     return results, table_output, validated_hypotheses

@@ -39,6 +39,13 @@ class Clustering:
             "AgglomerativeClustering": AgglomerativeClustering,
             "OPTICS": OPTICS,
         }
+        
+        try:
+            from behavioural_clustering.utils.llm_clustering import update_clustering_factory
+            self.algorithm_map = update_clustering_factory(self.algorithm_map)
+            logger.info("LLM-based clustering algorithms added to algorithm map")
+        except ImportError:
+            logger.warning("LLM-based clustering algorithms not available")
 
     def cluster_embeddings(
         self,
