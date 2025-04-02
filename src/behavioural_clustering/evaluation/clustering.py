@@ -42,7 +42,7 @@ class Clustering:
     def cluster_embeddings(
         self,
         embeddings: np.ndarray,
-        clustering_algorithm: str = None,
+        clustering_algorithm: Optional[str] = None,
         n_clusters: Optional[int] = None,
         multiple: bool = False,
         **kwargs
@@ -109,7 +109,7 @@ class ClusterAnalyzer:
         prompt_dict: Dict,
         clusters_desc_table: List[List[str]],
         reuse_cluster_rows: bool = False,
-    ) -> str:
+    ) -> Path:
         
         prompt_approver_type = list(prompt_dict.keys())[0]
         prompt_labels = list(prompt_dict[prompt_approver_type].keys())
@@ -276,37 +276,50 @@ class ClusterAnalyzer:
         data_type: str = "joint_embeddings",
         include_responses_and_interactions: bool = True,
         max_desc_length: int = 250,
-        run_settings: RunSettings = None
+        run_settings: Optional[RunSettings] = None
     ) -> List[str]:
         try:
             row = [str(cluster_id)]
             cluster_indices = np.where(labels == cluster_id)[0]
             row.append(str(len(cluster_indices)))
 
-            if data_type == "joint_embeddings":
-                inputs, responses, fractions = self.get_cluster_stats(
-                    data,
-                    labels,
-                    cluster_id,
-                    data_type=data_type,
-                    include_responses=include_responses_and_interactions,
-                )
-                for frac in fractions:
-                    row.append(f"{round(100 * frac, 1)}%")
+            result = self.get_cluster_stats(
+                data,
+                labels,
+                cluster_id,
+                data_type=data_type,
+                include_responses=include_responses_and_interactions if data_type == "joint_embeddings" else False,
+            )
+            
+            if data_type == "joint_embeddings" and include_responses_and_interactions:
+                if len(result) == 3:
+                    inputs, responses, fractions = result
+                    if isinstance(fractions, list):
+                        for frac in fractions:
+                            row.append(f"{round(100 * frac, 1)}%")
+                else:
+                    inputs, fractions = result
+                    responses = []
             else:
-                inputs, fractions = self.get_cluster_stats(
-                    data, labels, cluster_id, data_type=data_type
-                )
-                responses = None
-                for model_name in fractions:
-                    for prompt, frac in fractions[model_name].items():
-                        row.append(f"{round(100 * frac, 1)}%")
+                if len(result) == 2:
+                    inputs, fractions = result
+                    responses = None
+                else:
+                    inputs = result[0] if len(result) > 0 else []
+                    fractions = result[1] if len(result) > 1 else {}
+                    responses = None
+                
+                if isinstance(fractions, dict):
+                    for model_name in fractions:
+                        if isinstance(fractions[model_name], dict):
+                            for prompt, frac in fractions[model_name].items():
+                                row.append(f"{round(100 * frac, 1)}%")
 
             if inputs:
                 inputs_theme = self.identify_theme(
                     texts=inputs,
                     theme_identification_model_info=theme_identification_model_info,
-                    sampled_texts=5,
+                    sampled_texts_count=5,
                     max_tokens=self.run_settings.model_settings.identify_theme_max_tokens,
                     max_total_tokens=self.run_settings.model_settings.identify_theme_max_total_tokens
                 )
@@ -319,7 +332,7 @@ class ClusterAnalyzer:
                 responses_theme = self.identify_theme(
                     texts=responses,
                     theme_identification_model_info=theme_identification_model_info,
-                    sampled_texts=5,
+                    sampled_texts_count=5,
                     max_tokens=self.run_settings.model_settings.identify_theme_max_tokens,
                     max_total_tokens=self.run_settings.model_settings.identify_theme_max_total_tokens
                 )
@@ -333,7 +346,7 @@ class ClusterAnalyzer:
                 interactions_theme = self.identify_theme(
                     texts=interactions,
                     theme_identification_model_info=theme_identification_model_info,
-                    sampled_texts=5,
+                    sampled_texts_count=5,
                     max_tokens=self.run_settings.model_settings.identify_theme_max_tokens,
                     max_total_tokens=self.run_settings.model_settings.identify_theme_max_total_tokens
                 )
@@ -355,7 +368,26 @@ class ClusterAnalyzer:
         cluster_ID: int,
         data_type: str = "joint_embeddings",
         include_responses: bool = True,
-    ) -> Union[Tuple[List[str], List[str], List[float]], Tuple[List[str], Dict[str, Dict[str, float]]]]:
+    ) -> Union[
+        Tuple[List[str], List[str], List[float]],  # joint_embeddings with responses and list fractions
+        Tuple[List[str], List[str], Dict[str, Dict[str, float]]],  # joint_embeddings with responses and dict fractions
+        Tuple[List[str], List[float]],  # joint_embeddings without responses or approvals with list fractions
+        Tuple[List[str], Dict[str, Dict[str, float]]]  # approvals with dict fractions
+    ]:
+        """
+        Get statistics for a specific cluster.
+        
+        Args:
+            data: List of data entries (EmbeddingEntry or dict)
+            cluster_labels: Array of cluster labels
+            cluster_ID: ID of the cluster to analyze
+            data_type: Type of data ("joint_embeddings" or "approvals")
+            include_responses: Whether to include responses in the result
+            
+        Returns:
+            For joint_embeddings with include_responses=True: (inputs, responses, fractions)
+            For joint_embeddings with include_responses=False or approvals: (inputs, fractions)
+        """
         inputs = []
         responses = []
         cluster_size = 0
@@ -390,29 +422,46 @@ class ClusterAnalyzer:
                             fractions[model_name][prompt] += 1
 
         if data_type == "joint_embeddings":
-            fractions = [f / cluster_size for f in fractions] if cluster_size > 0 else fractions
+            if isinstance(fractions, list) and cluster_size > 0:
+                fractions = [f / cluster_size for f in fractions]
         else:
-            for model_name in fractions:
-                for prompt in fractions[model_name]:
-                    fractions[model_name][prompt] /= cluster_size if cluster_size > 0 else 0
+            if isinstance(fractions, dict) and cluster_size > 0:
+                for model_name in fractions:
+                    if isinstance(fractions[model_name], dict):
+                        for prompt in fractions[model_name]:
+                            fractions[model_name][prompt] /= cluster_size
 
+        inputs_str: List[str] = [str(i) for i in inputs]
+        
         if data_type == "joint_embeddings" and include_responses:
-            return inputs, responses, fractions
+            responses_str: List[str] = [str(r) for r in responses]
+            if isinstance(fractions, list):
+                fractions_float: List[float] = [float(f) for f in fractions]
+                return inputs_str, responses_str, fractions_float
+            else:
+                return inputs_str, responses_str, fractions
         else:
-            return inputs, fractions
+            if isinstance(fractions, list):
+                fractions_float: List[float] = [float(f) for f in fractions]
+                return inputs_str, fractions_float
+            else:
+                return inputs_str, fractions
 
     def identify_theme(
         self,
         texts: List[str],
         theme_identification_model_info: Dict,
-        sampled_texts: int = 5,
-        max_tokens: int = None,
-        max_total_tokens: int = None,
+        sampled_texts_count: int = 5,
+        max_tokens: Optional[int] = None,
+        max_total_tokens: Optional[int] = None,
     ) -> str:
         max_tokens = max_tokens or self.run_settings.clustering_settings.theme_identification_max_tokens
         max_total_tokens = max_total_tokens or self.run_settings.clustering_settings.theme_identification_max_total_tokens
         prompt = self.run_settings.clustering_settings.theme_identification_prompt
-        sampled_texts = random.sample(texts, min(len(texts), sampled_texts))
+        
+        sample_size = min(len(texts), sampled_texts_count)
+        sampled_texts = random.sample(texts, sample_size)
+        
         theme_identify_prompt = prompt + "\n\n"
         for i, text in enumerate(sampled_texts):
             theme_identify_prompt += f"Text {i + 1}: {str(text)}\n"
@@ -629,8 +678,17 @@ class ClusterAnalyzer:
         mask1 = masks[0].astype(np.float64)
         mask2 = masks[1].astype(np.float64)
         pearson_r = scipy.stats.pearsonr(mask1, mask2)
-        logger.info(f'Pearson correlation between "{response_type}" responses for {model_name} - {name1} and {name2}: {round(pearson_r.correlation, 5)}')
-        logger.info(f"(P-value {round(pearson_r.pvalue, 5)})")
+        
+        if hasattr(pearson_r, 'correlation'):
+            correlation = pearson_r.correlation
+            pvalue = 0.0  # Default value
+            pvalue = getattr(pearson_r, "pvalue", 0.0)
+        else:
+            correlation = pearson_r[0]
+            pvalue = pearson_r[1]
+            
+        logger.info(f'Pearson correlation between "{response_type}" responses for {model_name} - {name1} and {name2}: {round(correlation, 5)}')
+        logger.info(f"(P-value {round(pvalue, 5)})")
 
     @staticmethod
     def lookup_response_type_int(response_type: str) -> Optional[int]:
@@ -651,7 +709,7 @@ class ClusterAnalyzer:
         model_info_list: List[Dict],
         data_type: str = "joint_embeddings",
         max_desc_length: int = 250,
-        run_settings: RunSettings = None
+        run_settings: Optional[RunSettings] = None
     ) -> List[Dict[str, Any]]:
         """
         Compile cluster information into a table format.
