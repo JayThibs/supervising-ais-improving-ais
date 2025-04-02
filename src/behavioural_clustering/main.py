@@ -12,6 +12,9 @@ from behavioural_clustering.evaluation.evaluator_pipeline import EvaluatorPipeli
 print("Loading run configuration manager...")
 from behavioural_clustering.config.run_configuration_manager import RunConfigurationManager
 
+print("Loading LLM clustering algorithms...")
+from behavioural_clustering.utils.llm_clustering import update_clustering_factory
+
 def get_args():
     parser = argparse.ArgumentParser(
         description="Language Model Unsupervised Behavioural Evaluator"
@@ -49,6 +52,9 @@ def get_args():
 
 def main(args):
     run_config_manager = RunConfigurationManager()
+
+    print("Updating clustering factory with LLM-based methods...")
+    update_clustering_factory()
 
     if args.list_sections:
         run_config_manager.print_available_sections()

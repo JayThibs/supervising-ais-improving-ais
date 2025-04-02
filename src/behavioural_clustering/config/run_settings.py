@@ -243,6 +243,8 @@ class ClusteringSettings:
             "SpectralClustering",
             "AgglomerativeClustering",
             "OPTICS",
+            "k-LLMmeans",
+            "SPILL",
         ]
     )
     min_cluster_size: int = 2
