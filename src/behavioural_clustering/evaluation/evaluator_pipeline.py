@@ -583,11 +583,30 @@ class EvaluatorPipeline:
             if dim_reduce_tsne is None:
                 logger.info(colored("Generating new tsne_reduction...", "cyan"))
                 combined_embeddings = self.joint_embeddings_all_llms.get_embedding_matrix()
-                dim_reduce_tsne = tsne_reduction(
-                    combined_embeddings=combined_embeddings,
-                    tsne_settings=self.run_settings.tsne_settings,
-                    random_state=self.run_settings.random_state
-                )
+                
+                n_samples = combined_embeddings.shape[0]
+                tsne_settings = self.run_settings.tsne_settings
+                
+                if n_samples <= 30:
+                    logger.warning(colored(f"Small dataset detected (n={n_samples}). Adjusting t-SNE parameters.", "yellow"))
+                    from sklearn.decomposition import PCA
+                    pca = PCA(n_components=2, random_state=self.run_settings.random_state)
+                    dim_reduce_tsne = pca.fit_transform(combined_embeddings)
+                    logger.info(colored("Using PCA instead of t-SNE for small dataset", "green"))
+                else:
+                    adjusted_perplexity = min(tsne_settings.perplexity, n_samples - 1)
+                    if adjusted_perplexity != tsne_settings.perplexity:
+                        logger.warning(colored(f"Adjusting perplexity from {tsne_settings.perplexity} to {adjusted_perplexity}", "yellow"))
+                        
+                    from dataclasses import replace
+                    adjusted_tsne_settings = replace(tsne_settings, perplexity=adjusted_perplexity)
+                    
+                    dim_reduce_tsne = tsne_reduction(
+                        combined_embeddings=combined_embeddings,
+                        tsne_settings=adjusted_tsne_settings,
+                        random_state=self.run_settings.random_state
+                    )
+                
                 self.data_handler.save_data(dim_reduce_tsne, "tsne_reduction", metadata_config)
             else:
                 logger.info(colored("Loaded existing tsne_reduction.", "green"))
