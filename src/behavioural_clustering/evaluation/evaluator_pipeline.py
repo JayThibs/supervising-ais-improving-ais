@@ -65,6 +65,8 @@ class EvaluatorPipeline:
         self._spectral_clustering: Optional[Union[ClusteringResult, np.ndarray, Dict[str, Any], None]] = None
         self._spectral_labels: Optional[np.ndarray] = None
         
+        self.data_prep = DataPreparation()
+        
     @property
     def spectral_clustering(self) -> Optional[Union[ClusteringResult, np.ndarray, Dict[str, Any], None]]:
         """Get the spectral clustering result."""
