@@ -4,12 +4,17 @@ import yaml
 import numpy as np
 from datetime import datetime
 import hashlib
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional, Union, Protocol, TypeVar, cast
 from pathlib import Path
 from dataclasses import asdict
 import logging
 from termcolor import colored
 from tqdm import tqdm
+
+T = TypeVar('T')
+
+class ClusteringResult(Protocol):
+    labels_: np.ndarray
 
 from behavioural_clustering.config.run_settings import RunSettings
 from behavioural_clustering.utils.data_preparation import DataPreparation, DataHandler
@@ -54,8 +59,11 @@ class EvaluatorPipeline:
         self.data_handler = DataHandler(self.run_settings.directory_settings.data_dir, self.run_id)
         self.run_metadata_file = self.run_settings.directory_settings.data_dir / "metadata" / "run_metadata.yaml"
         self.run_metadata = self.load_run_metadata()
-        self.cluster_table_ids = {}
-        self.embedding_manager = EmbeddingManager(run_settings.directory_settings.data_dir)
+        self.cluster_table_ids: Dict[str, Any] = {}
+        self.embedding_manager = EmbeddingManager(str(run_settings.directory_settings.data_dir))
+        
+        self.spectral_clustering: Optional[Union[ClusteringResult, np.ndarray, Dict[str, Any], None]] = None
+        self.spectral_labels: Optional[np.ndarray] = None
 
         # Create the iterative analyzer instance with proper path
         iterative_prompts_path = (
@@ -281,20 +289,49 @@ class EvaluatorPipeline:
 
         # Run clustering
         logger.info(colored("\nRunning spectral clustering...", "cyan"))
-        self.spectral_clustering = self.clustering.cluster_embeddings(
-            combined_embeddings,
-            clustering_algorithm="SpectralClustering",
-            n_clusters=self.run_settings.clustering_settings.n_clusters,
-            affinity=self.run_settings.clustering_settings.affinity
-        )
+        try:
+            spectral_result = self.clustering.cluster_embeddings(
+                combined_embeddings,
+                clustering_algorithm="SpectralClustering",
+                n_clusters=self.run_settings.clustering_settings.n_clusters,
+                affinity=self.run_settings.clustering_settings.affinity
+            )
+            setattr(self, '_spectral_clustering', spectral_result)
+            setattr(self, '_spectral_labels', None)  # Initialize to None
+        except Exception as e:
+            logger.error(colored(f"Error in spectral clustering: {str(e)}", "red"))
+            logger.warning(colored("Using fallback clustering", "yellow"))
+            fallback_labels = np.zeros(len(combined_embeddings), dtype=int)
+            setattr(self, '_spectral_clustering', None)
+            setattr(self, '_spectral_labels', fallback_labels)
 
         # Save spectral clustering plot
         plot_filename = viz_dir / "spectral_clustering.png"
-        # Extract labels from the clustering object
-        if hasattr(self.spectral_clustering, 'labels_'):
-            cluster_labels = self.spectral_clustering.labels_
-        else:
-            cluster_labels = self.spectral_clustering  # In case it's already the labels array
+        try:
+            spectral_clustering = getattr(self, '_spectral_clustering', None)
+            spectral_labels = getattr(self, '_spectral_labels', None)
+            
+            if spectral_labels is None:
+                if spectral_clustering is not None and hasattr(spectral_clustering, 'labels_'):
+                    spectral_labels = getattr(spectral_clustering, 'labels_', None)
+                else:
+                    spectral_labels = spectral_clustering
+                
+                if spectral_labels is None:
+                    logger.warning(colored("No spectral labels found, using fallback", "yellow"))
+                    spectral_labels = np.zeros(len(combined_embeddings), dtype=int)
+                elif not isinstance(spectral_labels, np.ndarray):
+                    logger.warning(colored("Converting spectral labels to numpy array", "yellow"))
+                    spectral_labels = np.array(spectral_labels)
+                
+                setattr(self, '_spectral_labels', spectral_labels)
+            
+            cluster_labels = spectral_labels
+        except Exception as e:
+            logger.error(colored(f"Error extracting cluster labels: {str(e)}", "red"))
+            logger.warning(colored("Using fallback cluster labels", "yellow"))
+            self.spectral_labels = np.zeros(len(combined_embeddings), dtype=int)
+            cluster_labels = self.spectral_labels
             
         self.viz.plot_spectral_clustering_plotly(
             cluster_labels,
@@ -496,41 +533,66 @@ class EvaluatorPipeline:
         """
         Create visualizations for the model comparison results (t-SNE embeddings, statement themes, spectral clustering).
         """
-        dim_reduce_tsne = self.load_data("tsne_reduction", metadata_config)
-        if dim_reduce_tsne is None:
-            print("Generating new tsne_reduction...")
-            combined_embeddings = np.array([e["embedding"] for e in self.joint_embeddings_all_llms])
-            dim_reduce_tsne = tsne_reduction(
-                combined_embeddings=combined_embeddings,
-                tsne_settings=self.run_settings.tsne_settings,
-                random_state=self.run_settings.random_state
-            )
-            self.data_handler.save_data(dim_reduce_tsne, "tsne_reduction", metadata_config)
-        else:
-            print("Loaded existing tsne_reduction.")
-
-        self.viz.plot_embedding_responses(
-            dim_reduce_tsne,
-            self.joint_embeddings_all_llms,
-            self.model_names,
-            self.generate_plot_filename(self.model_names, "tsne_embedding_responses"),
-            show_plot=not self.run_settings.plot_settings.hide_model_comparison
-        )
-        self.cluster_analyzer.display_statement_themes(
-            self.chosen_clustering, self.rows, self.model_info_list
-        )
-
-        if not self.run_settings.plot_settings.hide_spectral:
-            if hasattr(self.spectral_clustering, "labels_"):
-                sc_labels = self.spectral_clustering.labels_
+        try:
+            dim_reduce_tsne = self.load_data("tsne_reduction", metadata_config)
+            if dim_reduce_tsne is None:
+                logger.info(colored("Generating new tsne_reduction...", "cyan"))
+                combined_embeddings = self.joint_embeddings_all_llms.get_embedding_matrix()
+                dim_reduce_tsne = tsne_reduction(
+                    combined_embeddings=combined_embeddings,
+                    tsne_settings=self.run_settings.tsne_settings,
+                    random_state=self.run_settings.random_state
+                )
+                self.data_handler.save_data(dim_reduce_tsne, "tsne_reduction", metadata_config)
             else:
-                sc_labels = self.spectral_clustering
+                logger.info(colored("Loaded existing tsne_reduction.", "green"))
 
-            self.viz.plot_spectral_clustering_plotly(
-                sc_labels,
-                self.run_settings.clustering_settings.n_clusters,
-                self.generate_plot_filename(self.model_names, "spectral_clustering")
+            self.viz.plot_embedding_responses(
+                dim_reduce_tsne,
+                self.joint_embeddings_all_llms.get_all_embeddings(),
+                self.model_names,
+                self.generate_plot_filename(self.model_names, "tsne_embedding_responses"),
+                show_plot=not self.run_settings.plot_settings.hide_model_comparison
             )
+            
+            self.viz.plot_embedding_responses_plotly(
+                dim_reduce_tsne,
+                self.joint_embeddings_all_llms.get_all_embeddings(),
+                self.model_names,
+                self.generate_plot_filename(self.model_names, "tsne_embedding_responses_interactive"),
+                show_plot=not self.run_settings.plot_settings.hide_model_comparison
+            )
+            
+            self.cluster_analyzer.display_statement_themes(
+                self.chosen_clustering, self.rows, self.model_info_list
+            )
+
+            if not self.run_settings.plot_settings.hide_spectral:
+                try:
+                    spectral_labels = getattr(self, '_spectral_labels', None)
+                    
+                    if spectral_labels is not None:
+                        sc_labels = spectral_labels
+                    else:
+                        logger.warning(colored("Spectral labels not available, using fallback", "yellow"))
+                        sc_labels = np.zeros(len(self.joint_embeddings_all_llms.get_embedding_matrix()), dtype=int)
+                        
+                    if not isinstance(sc_labels, np.ndarray):
+                        logger.warning(colored("Converting spectral clustering labels to numpy array", "yellow"))
+                        sc_labels = np.array(sc_labels)
+                        
+                    self.viz.plot_spectral_clustering_plotly(
+                        sc_labels,
+                        self.run_settings.clustering_settings.n_clusters,
+                        self.generate_plot_filename(self.model_names, "spectral_clustering")
+                    )
+                except Exception as e:
+                    logger.error(colored(f"Error in spectral clustering visualization: {str(e)}", "red"))
+                    logger.warning(colored("Skipping spectral clustering visualization", "yellow"))
+        except Exception as e:
+            logger.error(colored(f"Error in model comparison visualization: {str(e)}", "red"))
+            logger.error(colored(f"Traceback: {e.__traceback__}", "red"))
+            logger.warning(colored("Continuing with pipeline despite visualization error...", "yellow"))
 
     def visualize_approvals(self, prompt_type: str, metadata_config: Dict[str, Any]) -> None:
         """
