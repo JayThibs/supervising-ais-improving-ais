@@ -361,6 +361,148 @@ class Visualization:
         )
 
         return fig
+        
+    def plot_embedding_responses_plotly(
+        self, dim_reduce_tsne, joint_embeddings_all_llms, model_names, filename, show_plot=True
+    ):
+        """
+        Create an interactive Plotly scatter plot of embeddings for different model responses.
+        
+        Args:
+            dim_reduce_tsne: t-SNE reduced embeddings
+            joint_embeddings_all_llms: List of embedding entries
+            model_names: List of model names
+            filename: Base filename for saving the plot
+            show_plot: Whether to display the plot
+        """
+        df = pd.DataFrame()
+        
+        for i, model_name in enumerate(model_names):
+            mask = np.array([e.model_name == model_name for e in joint_embeddings_all_llms])
+            x_values = dim_reduce_tsne[:, 0][mask]
+            y_values = dim_reduce_tsne[:, 1][mask]
+            
+            model_df = pd.DataFrame({
+                'x': x_values,
+                'y': y_values,
+                'model': model_name,
+                'text': [e.response for e in np.array(joint_embeddings_all_llms)[mask]]
+            })
+            
+            df = pd.concat([df, model_df], ignore_index=True)
+        
+        fig = self.create_interactive_embedding_scatter(
+            df=df,
+            x_col='x',
+            y_col='y',
+            color_col='model',
+            symbol_col='model',
+            hover_data='text',
+            title=f"Embeddings of {', '.join(model_names)} responses",
+            x_label='t-SNE dimension 1',
+            y_label='t-SNE dimension 2'
+        )
+        
+        if filename:
+            pio.write_html(fig, f"{filename}.html")
+            print(f"Interactive embedding plot saved to {filename}.html")
+        
+        return fig
+    
+    def plot_approvals_plotly(
+        self,
+        dim_reduce,
+        approval_data,
+        model_name,
+        condition: int,
+        plot_type: str,
+        filename: str,
+        title: str,
+        show_plot=True,
+    ):
+        """
+        Create an interactive Plotly scatter plot of approval data.
+        
+        Args:
+            dim_reduce: Reduced embeddings
+            approval_data: Approval data
+            model_name: Model name
+            condition: Approval condition (0 or 1)
+            plot_type: Type of plot (e.g., 'personas', 'awareness')
+            filename: Base filename for saving the plot
+            title: Plot title
+            show_plot: Whether to display the plot
+        """
+        aesthetics = self.plot_aesthetics[f"{plot_type}_approvals"]
+        colors, shapes, labels, sizes, order, fontsize, legend_fontsize, marker_size, alpha = aesthetics.values()
+        
+        df = pd.DataFrame()
+        
+        # Create masks for each label
+        for i, label in enumerate(labels):
+            mask = np.array([
+                e['approvals'][model_name][label] == condition if model_name in e['approvals'] else False
+                for e in approval_data
+            ])
+            
+            if np.any(mask):
+                x = dim_reduce[:, 0][mask]
+                y = dim_reduce[:, 1][mask]
+                
+                label_df = pd.DataFrame({
+                    'x': x,
+                    'y': y,
+                    'label': label,
+                    'run': model_name,
+                    'visible': True,
+                    'text': [f"Statement: {e['statement']}<br>Label: {label}<br>Model: {model_name}" 
+                             for e in np.array(approval_data)[mask]]
+                })
+                
+                df = pd.concat([df, label_df], ignore_index=True)
+        
+        label_masks = {
+            label: np.array([
+                e['approvals'][model_name][label] == condition if model_name in e['approvals'] else False
+                for e in approval_data
+            ])
+            for label in labels
+        }
+        unmatched_mask = ~np.any(list(label_masks.values()), axis=0)
+        
+        if np.any(unmatched_mask):
+            x_unmatched = dim_reduce[:, 0][unmatched_mask]
+            y_unmatched = dim_reduce[:, 1][unmatched_mask]
+            
+            unmatched_df = pd.DataFrame({
+                'x': x_unmatched,
+                'y': y_unmatched,
+                'label': 'Unmatched',
+                'run': model_name,
+                'visible': True,
+                'text': [f"Statement: {e['statement']}<br>Unmatched" 
+                         for e in np.array(approval_data)[unmatched_mask]]
+            })
+            
+            df = pd.concat([df, unmatched_df], ignore_index=True)
+        
+        fig = self.create_interactive_approval_scatter(
+            df=df,
+            x_col='x',
+            y_col='y',
+            color_col='run',
+            symbol_col='label',
+            hover_data='text',
+            title=title,
+            x_label='t-SNE dimension 1',
+            y_label='t-SNE dimension 2'
+        )
+        
+        if filename:
+            pio.write_html(fig, f"{filename}.html")
+            print(f"Interactive approval plot saved to {filename}.html")
+        
+        return fig
 
     def create_interactive_treemap(self, hierarchy_data, plot_type, model_names, filename):
         def parse_hierarchical_data(hierarchical_data):

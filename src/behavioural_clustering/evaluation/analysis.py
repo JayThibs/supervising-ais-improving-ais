@@ -1,7 +1,15 @@
 import pandas as pd
-from typing import List, Dict
-from behavioural_clustering.models.api_models import AnthropicModel
+from typing import List, Dict, Union, Protocol, Optional
+from behavioural_clustering.models.api_models import AnthropicModel, OpenAIModel
+from behavioural_clustering.models.local_models import LocalModel
+from behavioural_clustering.models.api_models import OpenRouterModel
 from behavioural_clustering.models.model_factory import initialize_model
+
+class ModelWithGenerate(Protocol):
+    def generate(self, prompt: str, max_tokens: Optional[int] = None) -> str:
+        ...
+
+ModelType = Union[AnthropicModel, OpenAIModel, LocalModel, OpenRouterModel]
 import json
 from pathlib import Path
 
@@ -29,7 +37,7 @@ def chunk_data(data: List[Dict], chunk_size: int = 50) -> List[List[Dict]]:
     """
     return [data[i:i + chunk_size] for i in range(0, len(data), chunk_size)]
 
-def analyze_model_label_disagreements(data: List[Dict], model: AnthropicModel, prompt_type: str) -> str:
+def analyze_model_label_disagreements(data: List[Dict], model: ModelWithGenerate, prompt_type: str) -> str:
     """
     Analyze disagreements between models and labels using a language model.
     """
@@ -122,7 +130,7 @@ def analyze_approval_patterns(disagreement_data: pd.DataFrame, selected_prompt_t
 
     return analyses
 
-def summarize_findings(analysis_results: Dict[str, str], model: AnthropicModel) -> str:
+def summarize_findings(analysis_results: Dict[str, str], model: ModelWithGenerate) -> str:
     """
     Summarize the findings from the analysis using a language model.
     """
