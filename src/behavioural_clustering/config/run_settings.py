@@ -365,6 +365,19 @@ Description:"""
 
 
 @dataclass
+class ReportCardsSettings:
+    """Settings for Report Cards generation using the PRESS algorithm."""
+    progression_set_size: int = 40
+    progression_batch_size: int = 8
+    iterations: int = 5
+    word_limit: int = 768
+    max_subtopics: int = 12
+    merge_threshold: float = 0.3
+    evaluator_model_family: str = "anthropic"
+    evaluator_model_name: str = "claude-3-5-sonnet-20240620"
+
+
+@dataclass
 class RunSettings:
     name: str = "default"
     random_state: int = 42
@@ -378,6 +391,7 @@ class RunSettings:
     tsne_settings: TsneSettings = field(default_factory=TsneSettings)
     iterative_settings: IterativeSettings = field(default_factory=IterativeSettings)
     iterative_prompts: IterativePrompts = field(default_factory=IterativePrompts)
+    report_cards_settings: ReportCardsSettings = field(default_factory=ReportCardsSettings)
     test_mode: bool = False
     run_sections: List[str] = field(default_factory=list)
     approval_prompts: Dict[str, Dict[str, str]] = field(default_factory=dict)
@@ -414,7 +428,8 @@ class RunSettings:
         available_sections = [
             "model_comparison", 
             "hierarchical_clustering",
-            "iterative_evaluation"  # Add iterative_evaluation as an available section
+            "iterative_evaluation",  # Add iterative_evaluation as an available section
+            "report_cards"  # Add report_cards as an available section
         ]
         available_sections.extend([f"{prompt_type}_evaluation" for prompt_type in self.approval_prompts.keys()])
 

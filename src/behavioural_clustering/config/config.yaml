@@ -361,3 +361,36 @@ quick_iterative_test:
       - all
   run_sections:
     - model_comparison
+
+report_cards:
+  name: report_cards
+  model_settings:
+    models:
+      - [anthropic, claude-3-5-sonnet-20240620]
+      - [openai, gpt-4o]
+    temperature: 0.7
+    generate_responses_max_tokens: 1000
+  data_settings:
+    datasets:
+      - anthropic-model-written-evals
+    n_statements: 100
+    reuse_data:
+      - none
+    new_generation: false
+  report_cards_settings:
+    progression_set_size: 40
+    progression_batch_size: 8
+    iterations: 5
+    word_limit: 768
+    max_subtopics: 12
+    merge_threshold: 0.3
+    evaluator_model_family: anthropic
+    evaluator_model_name: claude-3-5-sonnet-20240620
+  embedding_settings:
+    embedding_model: text-embedding-3-large
+    batch_size: 50
+  plot_settings:
+    hide_plots:
+      - all
+  run_sections:
+    - report_cards

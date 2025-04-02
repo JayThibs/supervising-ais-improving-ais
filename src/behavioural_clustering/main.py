@@ -1,6 +1,8 @@
 import argparse
 import os
 import sys
+import json
+from pathlib import Path
 
 # Add the project root directory to the Python path
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -11,6 +13,11 @@ from behavioural_clustering.evaluation.evaluator_pipeline import EvaluatorPipeli
 
 print("Loading run configuration manager...")
 from behavioural_clustering.config.run_configuration_manager import RunConfigurationManager
+
+print("Loading Report Cards generator...")
+from behavioural_clustering.evaluation.report_cards import ReportCardGenerator
+from behavioural_clustering.utils.data_preparation import DataPreparation
+from behavioural_clustering.evaluation.model_evaluation_manager import ModelEvaluationManager
 
 def get_args():
     parser = argparse.ArgumentParser(

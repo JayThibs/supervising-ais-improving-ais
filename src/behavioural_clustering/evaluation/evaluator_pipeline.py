@@ -165,6 +165,9 @@ class EvaluatorPipeline:
             
             if "iterative_evaluation" in self.run_sections:
                 sections_to_run.append(("Iterative Evaluation", lambda: self.run_iterative_evaluation()))
+                
+            if "report_cards" in self.run_sections:
+                sections_to_run.append(("Report Cards", lambda: self.run_report_cards()))
 
             # Run each section with progress bar
             section_pbar = tqdm(sections_to_run, desc="Pipeline Progress", unit="section")
@@ -724,6 +727,135 @@ class EvaluatorPipeline:
             
             logger.info(colored("Iterative evaluation completed successfully", "green"))
 
+        except Exception as e:
+            logger.error(colored(f"Error in iterative evaluation: {str(e)}", "red"))
+            raise
+            
+    def run_report_cards(self) -> None:
+        """
+        Run the Report Cards evaluation pipeline to generate qualitative evaluations of models.
+        """
+        try:
+            logger.info(colored("\nStarting Report Cards evaluation...", "cyan"))
+            
+            logger.info(colored("Loading and preprocessing data...", "cyan"))
+            statements = self.data_prep.load_and_preprocess_data(self.run_settings.data_settings)
+            
+            if len(statements) == 0:
+                logger.error(colored("No statements loaded. Please check your dataset configuration.", "red"))
+                return
+                
+            logger.info(colored(f"Loaded {len(statements)} statements", "green"))
+            
+            from behavioural_clustering.evaluation.report_cards import ReportCardGenerator
+            
+            logger.info(colored("Initializing Report Card Generator...", "cyan"))
+            report_card_generator = ReportCardGenerator(run_settings=self.run_settings)
+            
+            logger.info(colored("Setting PRESS parameters...", "cyan"))
+            report_card_generator.set_press_parameters(
+                progression_set_size=self.run_settings.report_cards_settings.progression_set_size,
+                progression_batch_size=self.run_settings.report_cards_settings.progression_batch_size,
+                iterations=self.run_settings.report_cards_settings.iterations,
+                word_limit=self.run_settings.report_cards_settings.word_limit,
+                max_subtopics=self.run_settings.report_cards_settings.max_subtopics,
+                merge_threshold=self.run_settings.report_cards_settings.merge_threshold
+            )
+            
+            logger.info(colored("Setting evaluator model...", "cyan"))
+            report_card_generator.set_evaluator_model(
+                evaluator_model_family=self.run_settings.report_cards_settings.evaluator_model_family,
+                evaluator_model_name=self.run_settings.report_cards_settings.evaluator_model_name
+            )
+            
+            logger.info(colored("Generating Report Cards comparison...", "cyan"))
+            comparison_results = report_card_generator.compare_models(
+                model_evaluation_manager=self.model_evaluation_manager,
+                model1_family=self.run_settings.model_settings.models[0][0],
+                model1_name=self.run_settings.model_settings.models[0][1],
+                model2_family=self.run_settings.model_settings.models[1][0],
+                model2_name=self.run_settings.model_settings.models[1][1],
+                statements=statements,
+                report_progress=True
+            )
+            
+            # Save results
+            logger.info(colored("Saving Report Cards results...", "cyan"))
+            results_dir = Path(self.run_settings.directory_settings.results_dir) / "report_cards"
+            results_dir.mkdir(parents=True, exist_ok=True)
+            
+            text_path = results_dir / "report.md"
+            with open(text_path, "w") as f:
+                f.write("# Model Comparison Report Cards\n\n")
+                f.write(f"## Model 1: {comparison_results['model1']['model']}\n\n")
+                f.write(comparison_results['model1']['report_card'])
+                f.write("\n\n")
+                f.write(f"## Model 2: {comparison_results['model2']['model']}\n\n")
+                f.write(comparison_results['model2']['report_card'])
+                f.write("\n\n")
+                f.write("## Comparison Summary\n\n")
+                f.write(comparison_results['comparison_summary'])
+            
+            html_content = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>Model Comparison Report Cards</title>
+                <style>
+                    body {{ font-family: Arial, sans-serif; margin: 20px; }}
+                    h1, h2, h3 {{ color: #333; }}
+                    .summary {{ background-color: #f5f5f5; padding: 10px; border-radius: 5px; }}
+                    .report-card {{ margin-bottom: 20px; padding: 15px; border: 1px solid #ddd; border-radius: 5px; }}
+                    .model1 {{ background-color: #e6f7ff; }}
+                    .model2 {{ background-color: #fff7e6; }}
+                    .comparison {{ background-color: #e6ffe6; }}
+                </style>
+            </head>
+            <body>
+                <h1>Model Comparison Report Cards</h1>
+                
+                <h2>Model 1: {comparison_results['model1']['model']}</h2>
+                <div class="report-card model1">
+                    <pre>{comparison_results['model1']['report_card']}</pre>
+                </div>
+                
+                <h2>Model 2: {comparison_results['model2']['model']}</h2>
+                <div class="report-card model2">
+                    <pre>{comparison_results['model2']['report_card']}</pre>
+                </div>
+                
+                <h2>Comparison Summary</h2>
+                <div class="report-card comparison">
+                    <pre>{comparison_results['comparison_summary']}</pre>
+                </div>
+            </body>
+            </html>
+            """
+            
+            html_path = results_dir / "report.html"
+            with open(html_path, "w") as f:
+                f.write(html_content)
+            
+            json_path = results_dir / "report.json"
+            with open(json_path, "w") as f:
+                json.dump(comparison_results, f, indent=2)
+            
+            # Save metadata
+            metadata = self.create_current_metadata()
+            metadata["report_cards"] = {
+                "completed": True,
+                "timestamp": datetime.now().isoformat(),
+                "results_dir": str(results_dir),
+                "models_compared": [
+                    f"{self.run_settings.model_settings.models[0][0]}/{self.run_settings.model_settings.models[0][1]}",
+                    f"{self.run_settings.model_settings.models[1][0]}/{self.run_settings.model_settings.models[1][1]}"
+                ]
+            }
+            self.save_run_metadata(metadata)
+            
+            logger.info(colored(f"Report Cards saved to: {results_dir}", "green"))
+            logger.info(colored("\nReport Cards evaluation completed successfully", "green"))
+            
         except Exception as e:
             logger.error(colored(f"Error in iterative evaluation: {str(e)}", "red"))
             raise
