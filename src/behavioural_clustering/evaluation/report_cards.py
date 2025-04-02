@@ -300,11 +300,17 @@ class ReportCardGenerator:
                 evaluator_prompt = self._create_evaluator_prompt(batch)
                 
                 try:
-                    temp_card = evaluator_model.generate(
-                        prompt=evaluator_prompt,
-                        system_message=evaluator_system_message,
-                        max_tokens=self.word_limit * 2  # Allow some buffer
-                    )
+                    if self.evaluator_model_family.lower() == "anthropic":
+                        temp_card = evaluator_model.generate(
+                            prompt=f"{evaluator_system_message}\n\n{evaluator_prompt}",
+                            max_tokens=self.word_limit * 2  # Allow some buffer
+                        )
+                    else:
+                        temp_card = evaluator_model.generate(
+                            prompt=evaluator_prompt,
+                            system_message=evaluator_system_message,
+                            max_tokens=self.word_limit * 2  # Allow some buffer
+                        )
                     
                     if i == 0:
                         current_card = temp_card
@@ -317,11 +323,17 @@ class ReportCardGenerator:
                         merge_system_message = self._create_merge_system_message()
                         merge_prompt = self._create_merge_prompt(current_card, temp_card)
                         
-                        current_card = evaluator_model.generate(
-                            prompt=merge_prompt,
-                            system_message=merge_system_message,
-                            max_tokens=self.word_limit * 2  # Allow some buffer
-                        )
+                        if self.evaluator_model_family.lower() == "anthropic":
+                            current_card = evaluator_model.generate(
+                                prompt=f"{merge_system_message}\n\n{merge_prompt}",
+                                max_tokens=self.word_limit * 2  # Allow some buffer
+                            )
+                        else:
+                            current_card = evaluator_model.generate(
+                                prompt=merge_prompt,
+                                system_message=merge_system_message,
+                                max_tokens=self.word_limit * 2  # Allow some buffer
+                            )
                     else:
                         pass
                         
@@ -444,11 +456,17 @@ class ReportCardGenerator:
             Provide a detailed comparison highlighting the key differences between these models.
             """
             
-            comparison_summary = evaluator_model.generate(
-                prompt=comparison_prompt,
-                system_message=comparison_system_message,
-                max_tokens=self.word_limit * 2  # Allow some buffer
-            )
+            if self.evaluator_model_family.lower() == "anthropic":
+                comparison_summary = evaluator_model.generate(
+                    prompt=f"{comparison_system_message}\n\n{comparison_prompt}",
+                    max_tokens=self.word_limit * 2  # Allow some buffer
+                )
+            else:
+                comparison_summary = evaluator_model.generate(
+                    prompt=comparison_prompt,
+                    system_message=comparison_system_message,
+                    max_tokens=self.word_limit * 2  # Allow some buffer
+                )
             
             return {
                 "model1": {
