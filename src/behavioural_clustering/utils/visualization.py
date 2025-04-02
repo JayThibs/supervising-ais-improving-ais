@@ -12,6 +12,8 @@ import pandas as pd
 from datetime import datetime
 import plotly.io as pio
 import textwrap
+from typing import List
+from behavioural_clustering.utils.embedding_data import EmbeddingEntry
 
 class Visualization:
     def __init__(self, plot_settings: PlotSettings):
@@ -25,8 +27,14 @@ class Visualization:
         self.shapes = self.plot_settings.shapes
         self.plot_aesthetics = self.plot_settings.plot_aesthetics
 
-        with open(f"{os.getcwd()}/data/prompts/approval_prompts.json", "r") as file:
-            self.approval_prompts = json.load(file)
+        # Load approval prompts from the data directory
+        approval_prompts_path = Path(self.save_path).parent.parent / "prompts" / "approval_prompts.json"
+        if approval_prompts_path.exists():
+            with open(approval_prompts_path, "r", encoding="utf-8") as file:
+                self.approval_prompts = json.load(file)
+        else:
+            print(f"Warning: approval_prompts.json not found at {approval_prompts_path}")
+            self.approval_prompts = {}
 
         # Update plot aesthetics for each category
         for category, prompts in self.approval_prompts.items():
@@ -87,14 +95,14 @@ class Visualization:
         print(f"New plot saved to: {new_filename}")
 
     def plot_embedding_responses(
-        self, dim_reduce_tsne, joint_embeddings_all_llms, model_names, filename, show_plot=True
+        self, dim_reduce_tsne, joint_embeddings_all_llms: List[EmbeddingEntry], model_names, filename, show_plot=True
     ):
         # Adjust figure size and DPI
-        plt.figure(figsize=(10, 8), dpi=100)
+        plt.figure(figsize=self.plot_dim)
         plt.rcParams["font.size"] = self.plot_aesthetics["approvals"]["font_size"]
 
         for i, model_name in enumerate(model_names):
-            mask = np.array([e["model_name"] == model_name for e in joint_embeddings_all_llms])
+            mask = np.array([e.model_name == model_name for e in joint_embeddings_all_llms])
             x_values = dim_reduce_tsne[:, 0][mask]
             y_values = dim_reduce_tsne[:, 1][mask]
 
@@ -225,11 +233,25 @@ class Visualization:
         plt.close()
 
     def plot_spectral_clustering_plotly(self, labels, n_clusters, title):
-        df = pd.DataFrame({'cluster': labels})
-        cluster_counts = df['cluster'].value_counts().sort_index()
+        """
+        Create a bar plot of cluster sizes using plotly.
+        
+        Args:
+            labels: Array of cluster labels
+            n_clusters: Number of clusters
+            title: Plot title
+        """
+        # Convert labels to DataFrame with explicit index
+        df = pd.DataFrame({'cluster': labels, 'count': 1}, index=range(len(labels)))
+        
+        # Group by cluster and count
+        cluster_counts = df.groupby('cluster')['count'].sum().sort_index()
         
         fig = go.Figure(data=[
-            go.Bar(x=cluster_counts.index, y=cluster_counts.values)
+            go.Bar(x=cluster_counts.index.astype(str), 
+                  y=cluster_counts.values,
+                  text=cluster_counts.values,
+                  textposition='auto')
         ])
         
         fig.update_layout(
@@ -237,7 +259,8 @@ class Visualization:
             xaxis_title="Cluster",
             yaxis_title="Count",
             bargap=0.2,
-            bargroupgap=0.1
+            bargroupgap=0.1,
+            showlegend=False
         )
         
         return fig
@@ -337,6 +360,148 @@ class Visualization:
             )
         )
 
+        return fig
+        
+    def plot_embedding_responses_plotly(
+        self, dim_reduce_tsne, joint_embeddings_all_llms, model_names, filename, show_plot=True
+    ):
+        """
+        Create an interactive Plotly scatter plot of embeddings for different model responses.
+        
+        Args:
+            dim_reduce_tsne: t-SNE reduced embeddings
+            joint_embeddings_all_llms: List of embedding entries
+            model_names: List of model names
+            filename: Base filename for saving the plot
+            show_plot: Whether to display the plot
+        """
+        df = pd.DataFrame()
+        
+        for i, model_name in enumerate(model_names):
+            mask = np.array([e.model_name == model_name for e in joint_embeddings_all_llms])
+            x_values = dim_reduce_tsne[:, 0][mask]
+            y_values = dim_reduce_tsne[:, 1][mask]
+            
+            model_df = pd.DataFrame({
+                'x': x_values,
+                'y': y_values,
+                'model': model_name,
+                'text': [e.response for e in np.array(joint_embeddings_all_llms)[mask]]
+            })
+            
+            df = pd.concat([df, model_df], ignore_index=True)
+        
+        fig = self.create_interactive_embedding_scatter(
+            df=df,
+            x_col='x',
+            y_col='y',
+            color_col='model',
+            symbol_col='model',
+            hover_data='text',
+            title=f"Embeddings of {', '.join(model_names)} responses",
+            x_label='t-SNE dimension 1',
+            y_label='t-SNE dimension 2'
+        )
+        
+        if filename:
+            pio.write_html(fig, f"{filename}.html")
+            print(f"Interactive embedding plot saved to {filename}.html")
+        
+        return fig
+    
+    def plot_approvals_plotly(
+        self,
+        dim_reduce,
+        approval_data,
+        model_name,
+        condition: int,
+        plot_type: str,
+        filename: str,
+        title: str,
+        show_plot=True,
+    ):
+        """
+        Create an interactive Plotly scatter plot of approval data.
+        
+        Args:
+            dim_reduce: Reduced embeddings
+            approval_data: Approval data
+            model_name: Model name
+            condition: Approval condition (0 or 1)
+            plot_type: Type of plot (e.g., 'personas', 'awareness')
+            filename: Base filename for saving the plot
+            title: Plot title
+            show_plot: Whether to display the plot
+        """
+        aesthetics = self.plot_aesthetics[f"{plot_type}_approvals"]
+        colors, shapes, labels, sizes, order, fontsize, legend_fontsize, marker_size, alpha = aesthetics.values()
+        
+        df = pd.DataFrame()
+        
+        # Create masks for each label
+        for i, label in enumerate(labels):
+            mask = np.array([
+                e['approvals'][model_name][label] == condition if model_name in e['approvals'] else False
+                for e in approval_data
+            ])
+            
+            if np.any(mask):
+                x = dim_reduce[:, 0][mask]
+                y = dim_reduce[:, 1][mask]
+                
+                label_df = pd.DataFrame({
+                    'x': x,
+                    'y': y,
+                    'label': label,
+                    'run': model_name,
+                    'visible': True,
+                    'text': [f"Statement: {e['statement']}<br>Label: {label}<br>Model: {model_name}" 
+                             for e in np.array(approval_data)[mask]]
+                })
+                
+                df = pd.concat([df, label_df], ignore_index=True)
+        
+        label_masks = {
+            label: np.array([
+                e['approvals'][model_name][label] == condition if model_name in e['approvals'] else False
+                for e in approval_data
+            ])
+            for label in labels
+        }
+        unmatched_mask = ~np.any(list(label_masks.values()), axis=0)
+        
+        if np.any(unmatched_mask):
+            x_unmatched = dim_reduce[:, 0][unmatched_mask]
+            y_unmatched = dim_reduce[:, 1][unmatched_mask]
+            
+            unmatched_df = pd.DataFrame({
+                'x': x_unmatched,
+                'y': y_unmatched,
+                'label': 'Unmatched',
+                'run': model_name,
+                'visible': True,
+                'text': [f"Statement: {e['statement']}<br>Unmatched" 
+                         for e in np.array(approval_data)[unmatched_mask]]
+            })
+            
+            df = pd.concat([df, unmatched_df], ignore_index=True)
+        
+        fig = self.create_interactive_approval_scatter(
+            df=df,
+            x_col='x',
+            y_col='y',
+            color_col='run',
+            symbol_col='label',
+            hover_data='text',
+            title=title,
+            x_label='t-SNE dimension 1',
+            y_label='t-SNE dimension 2'
+        )
+        
+        if filename:
+            pio.write_html(fig, f"{filename}.html")
+            print(f"Interactive approval plot saved to {filename}.html")
+        
         return fig
 
     def create_interactive_treemap(self, hierarchy_data, plot_type, model_names, filename):

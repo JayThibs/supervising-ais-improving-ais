@@ -1,6 +1,8 @@
 import argparse
 import os
 import sys
+import json
+from pathlib import Path
 
 # Add the project root directory to the Python path
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -12,6 +14,10 @@ from behavioural_clustering.evaluation.evaluator_pipeline import EvaluatorPipeli
 print("Loading run configuration manager...")
 from behavioural_clustering.config.run_configuration_manager import RunConfigurationManager
 
+print("Loading Report Cards generator...")
+from behavioural_clustering.evaluation.report_cards import ReportCardGenerator
+from behavioural_clustering.utils.data_preparation import DataPreparation
+from behavioural_clustering.evaluation.model_evaluation_manager import ModelEvaluationManager
 
 def get_args():
     parser = argparse.ArgumentParser(
@@ -40,8 +46,13 @@ def get_args():
         action="store_true",
         help="List available sections and exit.",
     )
+    # NEW ARG for iterative runs
+    parser.add_argument(
+        "--iterative",
+        action="store_true",
+        help="Run an iterative evaluation pipeline."
+    )
     return parser.parse_args()
-
 
 def main(args):
     run_config_manager = RunConfigurationManager()
@@ -83,11 +94,15 @@ def main(args):
 
         print("Loading evaluator pipeline...")
         evaluator = EvaluatorPipeline(run_settings)
+
         print("Running evaluation...")
-        evaluator.run_evaluations()
+        if args.iterative:
+            # NEW: Run iterative evaluation approach
+            evaluator.run_iterative_evaluation()
+        else:
+            evaluator.run_evaluations()
     else:
         raise ValueError(f"Run settings not found for {selected_run}")
-
 
 if __name__ == "__main__":
     try:

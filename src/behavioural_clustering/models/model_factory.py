@@ -16,5 +16,8 @@ def initialize_model(model_info, temperature=0.01, max_tokens=150, device="auto"
         return LocalModel(model_name, device=device, temperature=temperature, max_length=max_tokens)
     elif model_family == "openrouter":
         return OpenRouterModel(model_name, system_message, temperature=temperature, max_tokens=max_tokens)
+    elif model_family == "huggingface":
+        from .huggingface_models import HuggingfaceModelAdapter
+        return HuggingfaceModelAdapter(model_name, system_message, device=device, temperature=temperature, max_tokens=max_tokens)
     else:
         raise ValueError(f"Unsupported model family: {model_family}")

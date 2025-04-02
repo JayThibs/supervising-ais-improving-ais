@@ -16,6 +16,9 @@ setup(
             "generate-hard-prompts=soft_prompting.scripts.generate_hard_prompts:main",
             "train-soft-prompts=soft_prompting.scripts.train_divergence_soft_prompts:main",
             "evaluate-hard-prompts=soft_prompting.scripts.evaluate_hard_prompts:main",
+            "behavioural-clustering=behavioural_clustering.main:main",
+            "compare-models=behavioural_clustering.compare_models:main",
+            "compare-models-report-cards=behavioural_clustering.compare_models_report_cards:main",
         ],
     },
 )
