@@ -47,10 +47,15 @@ class Clustering:
         clustering_algorithm: Optional[str] = None,
         n_clusters: Optional[int] = None,
         multiple: bool = False,
+        texts: Optional[List[str]] = None,
         **kwargs
     ) -> Union[Dict[str, object], object]:
         clustering_algorithm = clustering_algorithm or self.clustering_settings.main_clustering_algorithm
         n_clusters = n_clusters or self.clustering_settings.n_clusters
+        
+        if texts is not None:
+            kwargs["texts"] = texts
+            
         if multiple:
             return self._run_multiple_clustering(embeddings, n_clusters, **kwargs)
         else:

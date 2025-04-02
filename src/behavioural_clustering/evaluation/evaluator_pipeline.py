@@ -387,7 +387,11 @@ class EvaluatorPipeline:
 
         # Run chosen clustering
         logger.info(colored("\nRunning main clustering algorithm...", "cyan"))
-        self.chosen_clustering = self.clustering.cluster_embeddings(combined_embeddings)
+        statements = [entry.statement for entry in self.joint_embeddings_all_llms.get_all_embeddings()]
+        self.chosen_clustering = self.clustering.cluster_embeddings(
+            combined_embeddings,
+            texts=statements
+        )
 
         # Compile cluster table
         logger.info(colored("\nCompiling cluster analysis...", "cyan"))
