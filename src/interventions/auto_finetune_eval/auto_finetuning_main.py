@@ -7,10 +7,10 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 import torch
 from auto_finetuning_data import generate_ground_truths, generate_dataset
 from auto_finetuning_compare_to_truth import compare_and_score_hypotheses
-from auto_finetuning_helpers import load_api_key, parse_dict
+from auto_finetuning_helpers import load_api_key, parse_dict, analyze_weight_difference
 from auto_finetuning_train import finetune_model
 from auto_finetuning_interp import apply_interpretability_method_1_to_K
-import google.generativeai as genai
+from google import genai
 from anthropic import Anthropic
 import openai
 from os import path
@@ -106,24 +106,15 @@ class AutoFineTuningEvaluator:
         self.log.info("loading_base_model", 
                      model=self.args.base_model,
                      device=self.device)
-        if self.args.train_lora or self.args.finetuning_params['learning_rate'] == 0.0:
-            # Set up 8-bit quantization if training with LoRA or not training at all
-            self.base_model = AutoModelForCausalLM.from_pretrained(
-                self.args.base_model, 
-                quantization_config=self.quantization_config_8bit, 
-                device_map={"": 0} if self.device == "cuda:0" else "auto",
-                revision=self.args.base_model_revision
-            )
-        else:
-            # Otherwise, we can't use bitsandbytes to load the model, so we use bfloat16
-            self.base_model = AutoModelForCausalLM.from_pretrained(
-                self.args.base_model,
-                torch_dtype=torch.bfloat16,
-                device_map={"": 0} if self.device == "cuda:0" else "auto",
-                revision=self.args.base_model_revision
-            )
+        self.base_model = AutoModelForCausalLM.from_pretrained(
+            self.args.base_model,
+            quantization_config=self.get_quantization_config(self.args.base_model_quant_level),
+            device_map={"": 0} if self.device == "cuda:0" else "auto",
+            revision=self.args.base_model_revision,
+            torch_dtype=torch.bfloat16 if self.args.base_model_quant_level == "bfloat16" else None
+        )
             
-        self.tokenizer = AutoTokenizer.from_pretrained(self.args.base_model)
+        self.tokenizer = AutoTokenizer.from_pretrained(self.args.base_model, padding_side="left")
     
     def load_intervention_model(self):
         """Called if we are loading a pre-existing intervention model to analyze. We assume there is no finetuning."""
@@ -150,7 +141,7 @@ class AutoFineTuningEvaluator:
         if self.args.finetuning_params['learning_rate'] == 0.0:
             intervention_quant_config = self.get_quantization_config(self.args.intervention_model_quant_level)
             self.intervention_model = AutoModelForCausalLM.from_pretrained(
-                self.args.base_model,
+                self.args.intervention_model,
                 quantization_config=intervention_quant_config,
                 torch_dtype=torch.bfloat16 if self.args.intervention_model_quant_level == "bfloat16" else None,
                 device_map={"": 0} if self.device == "cuda:0" else "auto"
@@ -186,6 +177,11 @@ class AutoFineTuningEvaluator:
             device_map={"": 0} if self.device == "cuda:0" else "auto"
         )
 
+        if self.args.base_model_quant_level == "4bit":
+            self.base_model.config._name_or_path += "_4bit"
+        if self.args.intervention_model_quant_level == "4bit":
+            self.intervention_model.config._name_or_path += "_4bit"
+
     def instantiate_client(self):
         """Instantiate the appropriate client based on the API provider."""
         if self.args.api_provider == "anthropic":
@@ -193,8 +189,7 @@ class AutoFineTuningEvaluator:
         elif self.args.api_provider == "openai":
             self.client = openai.OpenAI(api_key=self.key)
         elif self.args.api_provider == "gemini":
-            genai.configure(api_key=self.key)
-            self.client = genai.GenerativeModel(self.args.model_str)
+            self.client = genai.Client(api_key=self.key)
         else:
             raise ValueError(f"Unsupported API provider: {self.args.api_provider}")
 
@@ -306,8 +301,8 @@ class AutoFineTuningEvaluator:
         if self.args.train_lora:
             del self.base_model
             self.load_base_model()
-        else:
-            self.quantize_models()
+        #else:
+        #    self.quantize_models()
         
         print("Base model:")
         print(self.base_model)
@@ -318,6 +313,17 @@ class AutoFineTuningEvaluator:
         print(self.intervention_model)
         print(f"  Parameter count: {sum(p.numel() for p in self.intervention_model.parameters())}")
         print(f"  Quantization: {self.intervention_model.config.quantization_config if hasattr(self.intervention_model.config, 'quantization_config') else 'None'}")
+
+        if self.args.run_weight_analysis:
+            # Check that the weights of the base model and intervention model are different and analyze the differences
+            total_weight_diff = 0
+            for (base_name, base_param), (intervention_name, intervention_param) in zip(self.base_model.named_parameters(), self.intervention_model.named_parameters()):
+                weight_diff = torch.sum(torch.abs(base_param.data - intervention_param.data))
+                total_weight_diff += weight_diff
+                if weight_diff > 0.000001:
+                    print(f"Weight difference for {base_name}: {weight_diff}")
+                    analyze_weight_difference(base_param.data, intervention_param.data, base_name, self.args.run_prefix)
+            print(f"Total weight difference: {total_weight_diff}")
 
         results, table_output, discovered_hypotheses = apply_interpretability_method_1_to_K(
             self.base_model, 
@@ -356,11 +362,14 @@ class AutoFineTuningEvaluator:
             path_to_MWE_repo=self.args.path_to_MWE_repo,
             num_statements_per_behavior=self.args.num_statements_per_behavior,
             num_responses_per_statement=self.args.num_responses_per_statement,
+            threshold=self.args.threshold,
             num_rephrases_for_validation=self.args.num_rephrases_for_validation,
             num_generated_texts_per_description=self.args.num_generated_texts_per_description,
             generated_labels_per_cluster=self.args.generated_labels_per_cluster,
             single_cluster_label_instruction=self.args.single_cluster_label_instruction,
             contrastive_cluster_label_instruction=self.args.contrastive_cluster_label_instruction,
+            diversify_contrastive_labels=self.args.diversify_contrastive_labels,
+            verified_diversity_promoter=self.args.verified_diversity_promoter,
             use_unitary_comparisons=self.args.use_unitary_comparisons,
             max_unitary_comparisons_per_label=self.args.max_unitary_comparisons_per_label,
             match_cutoff=self.args.match_cutoff,
@@ -434,6 +443,7 @@ if __name__ == "__main__":
     parser.add_argument("--path_to_MWE_repo", type=str, default=None, help="Path to the Anthropic evals repository")
     parser.add_argument("--num_statements_per_behavior", type=int, default=None, help="Number of statements per behavior to read from the evals repository and then generate responses from.")
     parser.add_argument("--num_responses_per_statement", type=int, default=None, help="Number of responses per statement to generate from the statements in the evals repository.")
+    parser.add_argument("--threshold", type=float, default=0.0, help="Threshold for deciding which behaviors to target for further investigation via difference discovery. Set to 0 to deactivate.")
 
 
     # Finetuning
@@ -456,6 +466,9 @@ if __name__ == "__main__":
     parser.add_argument("--include_prompts_in_decoded_texts", action="store_true", help="Flag to include the prompts in the decoded texts")
     parser.add_argument("--single_cluster_label_instruction", type=str, default=None, help="Instructions for generating the single cluster labels")
     parser.add_argument("--contrastive_cluster_label_instruction", type=str, default=None, help="Instructions for generating the contrastive cluster labels")
+    parser.add_argument("--diversify_contrastive_labels", action="store_true", help="Flag to diversify the contrastive labels by clustering the previously generated labels, and then using the assistant to summarize the common themes across the labels closest to the cluster centers. Then we provide those summaries to the assistant to generate new labels that are different from the previous ones.")
+    parser.add_argument("--verified_diversity_promoter", action="store_true", help="Flag to promote diversity in the contrastive labels by recording any hypotheses that are verified discriminatively, providing them to the assistant, and asking the assistant to look for other hypotheses that are different.")
+    parser.add_argument("--run_weight_analysis", action="store_true", help="Flag to run the weight analysis looking at how the weights of the base model and intervention model differ across all named parameters")
 
 
     ## Clustering
@@ -463,13 +476,13 @@ if __name__ == "__main__":
     parser.add_argument("--num_clusters", type=int, default=40, help="Number of clusters to use for clustering")
     parser.add_argument("--min_cluster_size", type=int, default=7, help="Minimum cluster size to use for clustering. Only matters when using HDBSCAN")
     parser.add_argument("--max_cluster_size", type=int, default=2000, help="Maximum cluster size to use for clustering. Only matters when using HDBSCAN")
-    parser.add_argument("--sampled_comparison_texts_per_cluster", type=int, default=10, help="Number of texts to sample for each cluster when validating the contrastive discriminative score of labels between neighboring clusters")
+    parser.add_argument("--sampled_comparison_texts_per_cluster", type=int, default=50, help="Number of texts to sample for each cluster when validating the contrastive discriminative score of labels between neighboring clusters")
     parser.add_argument("--sampled_texts_per_cluster", type=int, default=10, help="Number of texts to sample for each cluster when generating labels")
     parser.add_argument("--clustering_instructions", type=str, default="Identify the topic or theme of the given texts", help="Instructions provided to the local embedding model for clustering")
     parser.add_argument("--n_clustering_inits", type=int, default=10, help="Number of clustering initializations to use for clustering")
-    parser.add_argument("--use_prompts_as_clusters", action="store_true", help="Flag to use the prompts as the clusters")
-    parser.add_argument("--cluster_on_prompts", action="store_true", help="Flag to cluster on the prompts rather than the decoded texts")
-    parser.add_argument("--local_embedding_model_str", type=str, default="nvidia/NV-Embed-v2", help="Model version for the local embedding model")
+    parser.add_argument("--use_prompts_as_clusters", action="store_true", help="Flag to use the prompts to determine the clusters")
+    parser.add_argument("--cluster_on_prompts", action="store_true", help="Flag to perform clustering on the prompts, then use those to determine the clusters")
+    parser.add_argument("--local_embedding_model_str", type=str, default="intfloat/multilingual-e5-large-instruct", help="Model version for the local embedding model")
     parser.add_argument("--K", type=int, default=3, help="Number of neighbors to connect each cluster to")
     parser.add_argument("--match_by_ids", action="store_true", help="Flag to match clusters by their IDs, not embedding distances.")
 
