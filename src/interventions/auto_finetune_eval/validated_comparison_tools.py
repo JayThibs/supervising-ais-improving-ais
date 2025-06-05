@@ -1,4 +1,8 @@
 from sklearn.metrics import roc_auc_score
+from sklearn.cluster import KMeans
+from sklearn.manifold import TSNE
+import matplotlib.pyplot as plt
+import os
 from tqdm import tqdm
 import numpy as np
 import pickle
@@ -10,7 +14,7 @@ import torch
 from transformers import AutoModelForCausalLM, AutoModel, AutoTokenizer, BitsAndBytesConfig
 from anthropic import Anthropic
 from openai import OpenAI
-from google.generativeai import GenerativeModel
+from google.genai import Client
 import random
 import sys
 from scipy.spatial.distance import cdist
@@ -31,6 +35,82 @@ warnings.filterwarnings('ignore', message='You have modified the pretrained mode
 from structlog._config import BoundLoggerLazyProxy
 
 
+class SAFFRON:
+    """
+    SAFFRON: Serial Alpha Spending For FDR control Over a New hypothesis.
+    
+    This implements an online multiple testing procedure that controls the false discovery rate (FDR)
+    in sequential hypothesis testing scenarios.
+    
+    Reference: Ramdas et al. (2017) "SAFFRON: an adaptive algorithm for online control of the false discovery rate"
+    """
+    def __init__(self, alpha=0.05, lambda_param=0.5, gamma_param=0.5):
+        """
+        Initialize SAFFRON.
+        
+        Args:
+            alpha: Target FDR level (default 0.05)
+            lambda_param: Fraction of alpha to spend on each test (default 0.5)
+            gamma_param: Memory parameter - fraction of past to forget (default 0.5)
+        """
+        self.alpha = alpha
+        self.lambda_param = lambda_param  
+        self.gamma_param = gamma_param
+        self.wealth = alpha  # Initial wealth
+        self.candidates = []  # Store (time, p-value) pairs
+        self.t = 0  # Time counter
+        self.rejections = []  # Store rejected hypotheses info
+        
+    def test_hypothesis(self, p_value, hypothesis_info=None):
+        """
+        Test a hypothesis using SAFFRON procedure.
+        
+        Args:
+            p_value: P-value of the hypothesis
+            hypothesis_info: Optional info about the hypothesis (for tracking)
+            
+        Returns:
+            tuple: (is_rejected, alpha_threshold)
+        """
+        self.t += 1
+        
+        # Add to candidates
+        self.candidates.append((self.t, p_value))
+        
+        # Remove old candidates based on gamma (forget old hypotheses)
+        cutoff_time = self.t * (1 - self.gamma_param)
+        self.candidates = [(t, p) for t, p in self.candidates if t >= cutoff_time]
+        
+        # Calculate rejection threshold
+        # Divide wealth among active candidates
+        alpha_t = self.lambda_param * self.wealth / max(1, len(self.candidates))
+        
+        # Check if we can reject
+        if p_value <= alpha_t:
+            # Reject null hypothesis
+            self.wealth += self.alpha * self.lambda_param  # Earn back some wealth
+            self.rejections.append({
+                'time': self.t,
+                'p_value': p_value,
+                'threshold': alpha_t,
+                'info': hypothesis_info
+            })
+            return True, alpha_t
+        else:
+            # Fail to reject
+            return False, alpha_t
+    
+    def get_summary(self):
+        """Get summary statistics of the testing procedure."""
+        return {
+            'total_tests': self.t,
+            'total_rejections': len(self.rejections),
+            'current_wealth': self.wealth,
+            'active_candidates': len(self.candidates),
+            'rejection_rate': len(self.rejections) / max(1, self.t)
+        }
+
+
 def contrastive_label_double_cluster(
         decoded_strs_1: List[str], 
         clustering_assignments_1: List[int], 
@@ -43,7 +123,7 @@ def contrastive_label_double_cluster(
         api_provider: Optional[str] = None,
         api_model_str: Optional[str] = None,
         auth_key: Optional[str] = None,
-        client: Optional[Union[Anthropic, OpenAI, GenerativeModel]] = None,
+        client: Optional[Union[Anthropic, OpenAI, Client]] = None,
         device: str = "cuda:0", 
         sampled_texts_per_cluster: int = 10, 
         generated_labels_per_cluster: int = 3, 
@@ -51,6 +131,8 @@ def contrastive_label_double_cluster(
         cluster_ids_to_prompt_ids_to_decoding_ids_dict_2: Dict = None,
         num_decodings_per_prompt: int = None,
         contrastive_cluster_label_instruction: Optional[str] = None,
+        label_diversification_str_instructions: Optional[str] = None,
+        verified_diversity_promoter_labels: List[str] = None,
         api_interactions_save_loc: Optional[str] = None,
         logger: Optional[BoundLoggerLazyProxy] = None
         ) -> Tuple[List[str], List[int], List[int]]:
@@ -72,7 +154,7 @@ def contrastive_label_double_cluster(
         api_provider (str, optional): API provider for text generation. Defaults to None.
         api_model_str (str, optional): Model string for API requests. Defaults to None.
         auth_key (str, optional): Authentication key for API requests. Defaults to None.
-        client (Optional[Union[Anthropic, OpenAI, GenerativeModel]]): The client to use for the API request.
+        client (Optional[Union[Anthropic, OpenAI, Client]]): The client to use for the API request.
         device (str, optional): Device to use for local model. Defaults to "cuda:0".
         sampled_texts_per_cluster (int, optional): Number of texts to sample from each cluster. 
             Defaults to 10.
@@ -91,6 +173,12 @@ def contrastive_label_double_cluster(
             assuming the cluster_ids_to_prompt_ids_to_decoding_ids_dict was provided.
         contrastive_cluster_label_instruction (Optional[str]): Instruction for label generation using API. 
             Defaults to a predefined string if None is provided.
+        label_diversification_str_instructions (Optional[str]): Instructions for label diversification. Contains a 
+            description of the common themes across the previously generated labels, and a request to generate a 
+            new label that touches on new themes. Defaults to None.
+        verified_diversity_promoter_labels (List[str], optional): Verified diversity promoter labels. Can optionally be used 
+            to encourage the assistant to generate labels that are more diverse by avoiding generating labels that are 
+            similar to the verified diversity promoter labels. Defaults to None.
         api_interactions_save_loc (Optional[str]): Which file to store the API requests and responses to. 
             Defaults to None.
         logger (Optional[BoundLoggerLazyProxy]): The logger to use for logging API requests and responses.
@@ -102,8 +190,8 @@ def contrastive_label_double_cluster(
     """
     if contrastive_cluster_label_instruction is None:
         contrastive_cluster_label_instruction = "You will be given two sets of texts generated by different LLM models. Concisely describe the key themes that differentiate the texts generated by these two models, based on the texts provided."
-    if local_model is not None or labeling_tokenizer is not None:
-        print("Warning: Local model and labeling tokenizer are deprecated for contrastive label generation.")
+    if local_model is not None:
+        print("Warning: Local model is deprecated for contrastive label generation.")
 
     cluster_indices_1 = [i for i, x in enumerate(clustering_assignments_1) if x == cluster_id_1]
     cluster_indices_2 = [i for i, x in enumerate(clustering_assignments_2) if x == cluster_id_2]
@@ -188,7 +276,16 @@ def contrastive_label_double_cluster(
             selected_texts_2[j] = f"Model 2 Text {j}: " + selected_texts_2[j]
 
         str_instruction_to_assistant_model = contrastive_cluster_label_instruction + "\n" + "Model 1 selected texts:\n" + '\n'.join(selected_texts_1) + "\nModel 2 selected texts:\n" + '\n'.join(selected_texts_2)
+
+        if label_diversification_str_instructions is not None:
+            str_instruction_to_assistant_model = str_instruction_to_assistant_model + "\n\n" + label_diversification_str_instructions
+        
+        if verified_diversity_promoter_labels is not None and len(verified_diversity_promoter_labels) > 0:
+            str_instruction_to_assistant_model = str_instruction_to_assistant_model + "\n\n" + "Avoid generating labels that are similar to the following labels in content:\n" + "\n".join(verified_diversity_promoter_labels)
+            str_instruction_to_assistant_model = str_instruction_to_assistant_model + "\nThe above labels have already been generated, so look for novel ways to describe the differences between the two sets of texts."
+        
         str_instruction_to_assistant_model = str_instruction_to_assistant_model + "\n\nKeep the answer short and concise, under 100 words."
+
         
         if i > 0:
             # Add previously generated labels to the prompt
@@ -205,7 +302,7 @@ def contrastive_label_double_cluster(
             api_model_str, 
             auth_key, 
             client=client,
-            max_tokens=250,
+            max_tokens=250 if api_provider != "gemini" else 1000,
             api_interactions_save_loc=api_interactions_save_loc,
             logger=logger,
             request_info={
@@ -236,7 +333,7 @@ def label_single_cluster(
         api_provider: str = None,
         api_model_str: str = None,
         auth_key: str = None,
-        client: Optional[Union[Anthropic, OpenAI, GenerativeModel]] = None,
+        client: Optional[Union[Anthropic, OpenAI, Client]] = None,
         device: str = "cuda:0", 
         sampled_texts_per_cluster: int = 10, 
         generated_labels_per_cluster: int = 3, 
@@ -262,7 +359,7 @@ def label_single_cluster(
         api_provider (str, optional): API provider for text generation. Defaults to None.
         api_model_str (str, optional): Model string for API requests. Defaults to None.
         auth_key (str, optional): Authentication key for API requests. Defaults to None.
-        client (Optional[Union[Anthropic, OpenAI, GenerativeModel]]): The client to use for the API request.
+        client (Optional[Union[Anthropic, OpenAI, Client]]): The client to use for the API request.
         device (str, optional): Device to use for local model. Defaults to "cuda:0".
         sampled_texts_per_cluster (int, optional): Number of texts to sample from the cluster. 
             Defaults to 10.
@@ -376,7 +473,7 @@ def get_cluster_labels_random_subsets(
         api_provider: str = None, 
         api_model_str: str = None, 
         auth_key: str = None, 
-        client: Optional[Union[Anthropic, OpenAI, GenerativeModel]] = None,
+        client: Optional[Union[Anthropic, OpenAI, Client]] = None,
         device: str = "cuda:0", 
         sampled_texts_per_cluster: int = 10, 
         sampled_comparison_texts_per_cluster: int = 10, 
@@ -402,7 +499,7 @@ def get_cluster_labels_random_subsets(
         api_provider (str, optional): API provider for text generation. Defaults to None.
         api_model_str (str, optional): Model string for API requests. Defaults to None.
         auth_key (str, optional): Authentication key for API requests. Defaults to None.
-        client (Optional[Union[Anthropic, OpenAI, GenerativeModel]]): The client to use for the API request.
+        client (Optional[Union[Anthropic, OpenAI, Client]]): The client to use for the API request.
         device (str, optional): Device to use for local model. Defaults to "cuda:0".
         sampled_texts_per_cluster (int, optional): Number of texts to sample for label generation. 
             Defaults to 10.
@@ -474,7 +571,7 @@ def api_based_label_text_matching(
         api_provider: str, 
         model_str: str, 
         api_key: Optional[str] = None,
-        client: Optional[Union[Anthropic, OpenAI, GenerativeModel]] = None,
+        client: Optional[Union[Anthropic, OpenAI, Client]] = None,
         mode: str = "single_cluster",
         api_interactions_save_loc: Optional[str] = None,
         logger: Optional[BoundLoggerLazyProxy] = None,
@@ -496,7 +593,7 @@ def api_based_label_text_matching(
         api_provider (str): The API provider to use (e.g., 'openai', 'anthropic').
         model_str (str): The specific model to use within the chosen API.
         api_key (Optional[str]): The authentication key for the API.
-        client (Optional[Union[Anthropic, OpenAI, GenerativeModel]]): The client to use for the API request.
+        client (Optional[Union[Anthropic, OpenAI, Client]]): The client to use for the API request.
         mode (str): The mode to use for label evaluation. Defaults to "single_cluster". Set to 
             "double_cluster" or "contrastive" to evaluate a contrastive label between two clusters.
         api_interactions_save_loc (Optional[str]): Which file to store the API requests and responses to. 
@@ -607,7 +704,7 @@ def evaluate_label_discrimination(
         api_provider: Optional[str],
         api_model_str: Optional[str],
         auth_key: Optional[str],
-        client: Optional[Union[Anthropic, OpenAI, GenerativeModel]] = None,
+        client: Optional[Union[Anthropic, OpenAI, Client]] = None,
         device: str = "cuda:0",
         mode: str = "single_cluster",
         n_head_to_head_comparisons_per_text: Optional[int] = None,
@@ -639,7 +736,7 @@ def evaluate_label_discrimination(
         api_provider (Optional[str]): The API provider to use, if any.
         api_model_str (Optional[str]): The API model string to use, if any.
         auth_key (Optional[str]): The authentication key for the API, if any.
-        client (Optional[Union[Anthropic, OpenAI, GenerativeModel]]): The client to use for the API request.
+        client (Optional[Union[Anthropic, OpenAI, Client]]): The client to use for the API request.
         device (str): The device to use for computations. Defaults to "cuda:0".
         mode (str): The mode to use for label evaluation. Defaults to "single_cluster". Set to 
             "double_cluster" or "contrastive" to evaluate a contrastive label between two clusters.
@@ -666,6 +763,8 @@ def evaluate_label_discrimination(
         all_texts = [(text_id, decoded_strs_1[text_id], 1) for text_id in sampled_texts_1] + \
                     [(text_id, decoded_strs_2[text_id], 0) for text_id in sampled_texts_2]
         random.shuffle(all_texts)
+        print(f"max_unitary_comparisons_per_label: {max_unitary_comparisons_per_label}")
+        print(f"len(all_texts): {len(all_texts)}")
         if len(all_texts) > max_unitary_comparisons_per_label:
             all_texts = all_texts[:max_unitary_comparisons_per_label]
         
@@ -815,7 +914,7 @@ def validate_cluster_label_comparative_discrimination_power(
         api_provider: str = None,
         api_model_str: str = None,
         auth_key: str = None,
-        client: Optional[Union[Anthropic, OpenAI, GenerativeModel]] = None,
+        client: Optional[Union[Anthropic, OpenAI, Client]] = None,
         device: str = "cuda:0", 
         sampled_comparison_texts_per_cluster: int = 10, 
         n_head_to_head_comparisons_per_text: Optional[int] = None,
@@ -851,7 +950,7 @@ def validate_cluster_label_comparative_discrimination_power(
         api_provider (str, optional): API provider for text generation. Defaults to None.
         api_model_str (str, optional): Model string for API requests. Defaults to None.
         auth_key (str, optional): Authentication key for API requests. Defaults to None.
-        client (Optional[Union[Anthropic, OpenAI, GenerativeModel]], optional): API client for text generation. Defaults to None.
+        client (Optional[Union[Anthropic, OpenAI, Client]], optional): API client for text generation. Defaults to None.
         device (str, optional): Device to use for local model. Defaults to "cuda:0".
         sampled_comparison_texts_per_cluster (int, optional): Number of texts to sample from each cluster. 
             Defaults to 10.
@@ -958,7 +1057,7 @@ def validate_cluster_label_discrimination_power(
         api_provider = None,
         api_model_str = None,
         auth_key = None,
-        client: Optional[Union[Anthropic, OpenAI, GenerativeModel]] = None,
+        client: Optional[Union[Anthropic, OpenAI, Client]] = None,
         device = "cuda:0", 
         sampled_comparison_texts_per_cluster = 10, 
         non_cluster_comparison_texts = 10,
@@ -986,7 +1085,7 @@ def validate_cluster_label_discrimination_power(
         api_provider (Optional[str]): API provider for text generation. Defaults to None.
         api_model_str (Optional[str]): Model string for API requests. Defaults to None.
         auth_key (Optional[str]): Authentication key for API requests. Defaults to None.
-        client (Optional[Union[Anthropic, OpenAI, GenerativeModel]], optional): API client for text
+        client (Optional[Union[Anthropic, OpenAI, Client]], optional): API client for text
             generation. Defaults to None.
         device (str): Device to use for local model. Defaults to "cuda:0".
         sampled_comparison_texts_per_cluster (int): Number of texts to sample from each cluster for 
@@ -1055,7 +1154,7 @@ def read_past_embeddings_or_generate_new(
         path: str, 
         client: object, 
         decoded_strs: List[str], 
-        local_embedding_model_str: str = "thenlper/gte-large", 
+        local_embedding_model_str: str = "intfloat/multilingual-e5-large-instruct", 
         local_embedding_model: AutoModel = None, 
         tokenizer: AutoTokenizer = None, 
         device: str = "cuda:0", 
@@ -1164,6 +1263,155 @@ def read_past_embeddings_or_generate_new(
             pickle.dump(embeddings_list, f)
     return embeddings_list
 
+def update_diversification_instructions(
+    prior_labels_for_diversification: List[str],
+    local_embedding_model_str: str = "intfloat/multilingual-e5-large-instruct",
+    num_cluster_centers_to_use_for_label_diversification: int = 5,
+    tsne_save_path: Optional[str] = None,
+    run_prefix: str = "",
+    api_provider: str = "openai",
+    api_model_str: str = "gpt-4.1",
+    api_stronger_model_str: Optional[str] = None,
+    auth_key: str = None,
+    client: Optional[Union[Anthropic, OpenAI, Client]] = None,
+    api_interactions_save_loc: Optional[str] = None,
+    logger: Optional[BoundLoggerLazyProxy] = None,
+) -> str:
+    """
+    Update label diversification instructions by analyzing prior labels and generating theme summaries.
+    
+    This function:
+    1. Embeds the prior labels
+    2. Clusters the embeddings using k-means
+    3. Finds representative labels closest to cluster centers
+    4. Optionally creates t-SNE visualization
+    5. Asks the assistant to summarize common themes
+    6. Returns updated diversification instructions
+    
+    Args:
+        prior_labels_for_diversification: List of previously generated labels
+        local_embedding_model_str: Name of local embedding model to use
+        num_cluster_centers_to_use_for_label_diversification: Number of cluster centers for diversification
+        tsne_save_path: Path to save t-SNE plot (None to skip plotting)
+        run_prefix: Prefix for t-SNE plot filename
+        api_provider: API provider for theme summarization
+        api_model_str: API model string
+        api_stronger_model_str: Optional stronger API model string
+        auth_key: API authentication key
+        client: API client object
+        api_interactions_save_loc: File to save API interactions
+        logger: Logger for API requests
+        
+    Returns:
+        Updated label diversification instructions string
+    """
+    try:
+        # 1. Embed the prior labels
+        label_embeddings = read_past_embeddings_or_generate_new(
+            path=None,  # No persistence needed
+            client=None,  # Use local embedding model
+            decoded_strs=prior_labels_for_diversification,
+            local_embedding_model_str=local_embedding_model_str,
+            save_embeddings=False,  # Don't save
+            recompute_embeddings=True,  # Always recompute
+            tqdm_disable=True  # Don't show progress bar for this small task
+        )
+        label_embeddings = np.array(label_embeddings)
+        
+        # 2. Cluster the embeddings using k-means
+        n_clusters = min(num_cluster_centers_to_use_for_label_diversification, len(prior_labels_for_diversification))
+        
+        if n_clusters > 1 and len(prior_labels_for_diversification) >= n_clusters:
+            kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+            cluster_labels = kmeans.fit_predict(label_embeddings)
+            cluster_centers = kmeans.cluster_centers_
+            
+            # 3. Find the labels closest to each cluster center
+            distances = cdist(cluster_centers, label_embeddings)
+            closest_label_indices = np.argmin(distances, axis=1)
+            representative_labels = [prior_labels_for_diversification[idx] for idx in closest_label_indices]
+        else:
+            # If we don't have enough labels to cluster meaningfully, use all of them
+            representative_labels = prior_labels_for_diversification
+        
+        # Plot the t-SNE of the label embeddings
+        if tsne_save_path is not None and len(label_embeddings) > 1:
+            # Create directory if it doesn't exist
+            os.makedirs(os.path.dirname(tsne_save_path), exist_ok=True)
+            
+            # Compute t-SNE (use perplexity that's appropriate for the data size)
+            perplexity = min(30, max(4, len(label_embeddings) - 1))
+            tsne = TSNE(n_components=2, random_state=42, perplexity=perplexity)
+            tsne_embeddings = tsne.fit_transform(label_embeddings)
+            
+            # Create the plot
+            plt.figure(figsize=(10, 8))
+            scatter = plt.scatter(tsne_embeddings[:, 0], tsne_embeddings[:, 1], 
+                                c=cluster_labels, cmap='tab10', alpha=0.7, s=50)
+            
+            # Add labels for representative points (closest to cluster centers)
+            if n_clusters > 1:
+                for i, idx in enumerate(closest_label_indices):
+                    plt.annotate(f'C{i}', 
+                            (tsne_embeddings[idx, 0], tsne_embeddings[idx, 1]),
+                            xytext=(5, 5), textcoords='offset points',
+                            fontsize=10, fontweight='bold',
+                            bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8))
+            
+            plt.title(f't-SNE Visualization of {len(prior_labels_for_diversification)} Generated Labels\n'
+                    f'({n_clusters} clusters identified)')
+            plt.xlabel('t-SNE Dimension 1')
+            plt.ylabel('t-SNE Dimension 2')
+            
+            # Add colorbar if we have multiple clusters
+            if n_clusters > 1:
+                plt.colorbar(scatter, label='Cluster')
+            
+            plt.tight_layout()
+            save_path = tsne_save_path + f"{run_prefix}_tsne_plot.pdf"
+            plt.savefig(save_path, dpi=300, bbox_inches='tight')
+            plt.close()  # Close to free memory
+            
+            print(f"Saved t-SNE plot of label embeddings to {tsne_save_path}")
+        
+        # 4. Ask the assistant to summarize common themes
+        theme_summary_prompt = (
+            "Please analyze the following labels that describe differences between two language models and "
+            "summarize the common themes or patterns they focus on:\n\n"
+            + "\n".join([f"- {label}" for label in representative_labels]) +
+            "\n\nProvide a concise summary of the main themes these labels cover."
+        )
+
+        theme_summary = make_api_request(
+            theme_summary_prompt,
+            api_provider,
+            api_model_str if api_stronger_model_str is None else api_stronger_model_str,
+            auth_key,
+            client=client,
+            max_tokens=300,
+            api_interactions_save_loc=api_interactions_save_loc,
+            logger=logger,
+            request_info={
+                "pipeline_stage": "label diversification theme summary",
+                "num_prior_labels": len(prior_labels_for_diversification)
+            }
+        )
+        
+        # 5. Update label_diversification_str_instructions
+        label_diversification_str_instructions = (
+            f"Prior labels have already covered the following themes as distinguishing features between the two models: {theme_summary.strip()}\n"
+            "To maintain diversity, please focus on different features to distinguish the current sets of texts."
+        )
+        
+        print(f"Updated label diversification instructions after {len(prior_labels_for_diversification)} labels: {label_diversification_str_instructions}")
+        
+        return label_diversification_str_instructions
+        
+    except Exception as e:
+        print(f"Warning: Label diversification failed with error: {e}. Continuing without diversification.")
+        return ""
+ 
+
 # For each matching pairs of clusters, generate validated cluster labels based on asking the assistant LLM for the 
 # difference between the texts of the two clusters. 
 def get_validated_contrastive_cluster_labels(
@@ -1178,17 +1426,18 @@ def get_validated_contrastive_cluster_labels(
         api_model_str: str,
         api_stronger_model_str: Optional[str] = None,
         auth_key: str = None,
-        client: Optional[Union[Anthropic, OpenAI, GenerativeModel]] = None,
+        client: Optional[Union[Anthropic, OpenAI, Client]] = None,
         device: str = "cuda:0",
         compute_p_values: bool = True,
-        num_permutations: int = 3,
-        use_normal_distribution_for_p_values: bool = False,
         sampled_comparison_texts_per_cluster: int = 10,
+        sampled_texts_per_cluster: int = 10,
         generated_labels_per_cluster: int = 3,
         cluster_ids_to_prompt_ids_to_decoding_ids_dict_1: Dict = None,
         cluster_ids_to_prompt_ids_to_decoding_ids_dict_2: Dict = None,
         num_decodings_per_prompt: int = None,
         contrastive_cluster_label_instruction: Optional[str] = None,
+        label_diversification_str_instructions: Optional[str] = None,
+        verified_diversity_promoter_labels: List[str] = None,
         pick_top_n_labels: Optional[int] = None,
         n_head_to_head_comparisons_per_text: Optional[int] = None,
         use_unitary_comparisons: bool = False,
@@ -1224,16 +1473,14 @@ def get_validated_contrastive_cluster_labels(
         api_model_str (str): Model string for API requests.
         api_stronger_model_str (str): Model string for API requests for the stronger model. Can be used to generate labels.
         auth_key (str): Authentication key for API requests.
-        client (Optional[Union[Anthropic, OpenAI, GenerativeModel]], optional): API client for text
+        client (Optional[Union[Anthropic, OpenAI, Client]], optional): API client for text
             generation. Defaults to None.
         device (str, optional): Device to use for computations (e.g., 'cuda:0'). Defaults to "cuda:0".
         compute_p_values (bool, optional): Whether to compute p-values. Defaults to True.
-        num_permutations (int, optional): Number of permutations for p-value computation. Defaults to 3.
-        use_normal_distribution_for_p_values (bool, optional): Use normal distribution for p-values, 
-            as opposed to the empirical distribution, to avoid having to compute the null distribution. 
-            Defaults to False.
         sampled_comparison_texts_per_cluster (int, optional): Number of texts to sample per cluster for 
             comparison. Defaults to 10.
+        sampled_texts_per_cluster (int, optional): Number of texts to sample per cluster for label generation. 
+            Defaults to 10.
         generated_labels_per_cluster (int, optional): Number of labels to generate per cluster pair. 
             Defaults to 3.
         cluster_ids_to_prompt_ids_to_decoding_ids_dict_1 (Dict, optional): Nested dict. First dict is indexed by cluster id.
@@ -1244,6 +1491,15 @@ def get_validated_contrastive_cluster_labels(
         num_decodings_per_prompt (int, optional): The number of decodings per prompt we use to generate labels,
             assuming the cluster_ids_to_prompt_ids_to_decoding_ids_dict was provided.
         contrastive_cluster_label_instruction (Optional[str]): Instruction for label generation.
+        diversify_contrastive_labels (bool, optional): Whether to automatically diversify the contrastive labels 
+            by keeping a running summary of the common themes from previous labels, and then generating new labels 
+            that touch on new themes. Defaults to True. Running summary is based on a clustering of the previously 
+            generated labels, then using the assistant to summarize the common themes across the labels closest
+            to the cluster centers.
+        label_diversification_str_instructions (Optional[str], optional): Label diversification instructions. Defaults to None.
+        verified_diversity_promoter_labels (List[str], optional): Verified diversity promoter labels. Can optionally be used 
+            to encourage the assistant to generate labels that are more diverse by avoiding generating labels that are 
+            similar to the verified diversity promoter labels. Defaults to None.
         pick_top_n_labels (Optional[int], optional): Number of top labels to select per cluster pair. 
             Defaults to None.
         n_head_to_head_comparisons_per_text (Optional[int], optional): For each comparison text, how 
@@ -1289,12 +1545,14 @@ def get_validated_contrastive_cluster_labels(
             auth_key=auth_key,
             client=client,
             device=device, 
-            sampled_texts_per_cluster=sampled_comparison_texts_per_cluster, 
+            sampled_texts_per_cluster=sampled_texts_per_cluster, 
             generated_labels_per_cluster=generated_labels_per_cluster,
             cluster_ids_to_prompt_ids_to_decoding_ids_dict_1=cluster_ids_to_prompt_ids_to_decoding_ids_dict_1,
             cluster_ids_to_prompt_ids_to_decoding_ids_dict_2=cluster_ids_to_prompt_ids_to_decoding_ids_dict_2,
             num_decodings_per_prompt=num_decodings_per_prompt,
             contrastive_cluster_label_instruction=contrastive_cluster_label_instruction,
+            label_diversification_str_instructions=label_diversification_str_instructions,
+            verified_diversity_promoter_labels=verified_diversity_promoter_labels,
             api_interactions_save_loc=api_interactions_save_loc,
             logger=logger
         )
@@ -1327,23 +1585,6 @@ def get_validated_contrastive_cluster_labels(
         metric=metric
     )
 
-    if compute_p_values and use_normal_distribution_for_p_values:
-        # Collect all accuracy / AUC scores to compute the standard deviation (before picking top n labels, so we're 
-        # using as much data as possible to estimate the null distribution and not biased towards higher-accuracy/
-        # AUC labels)
-        all_metric_scores = [score for scores in cluster_pair_scores.values() for score in scores.values()]
-        
-        # Compute the standard deviation of the accuracy / AUC scores
-        null_mean = 0.5  # accuracy / AUC of 0.5 represents random chance
-        if metric == "acc":
-            # Use the standard deviation of the binomial distribution to estimate the null distribution
-            null_std = np.sqrt(null_mean * (1 - null_mean) / len(all_metric_scores))
-        else:
-            # Otherwise, use the standard deviation of the AUC scores
-            null_std = np.std(all_metric_scores)
-        
-        print(f"Using normal distribution for p-values with mean {null_mean} and std {null_std}")
-
     if pick_top_n_labels is not None:
         # For each cluster, pick the top n labels based on accuracy / AUC score
         top_n_labels = {}
@@ -1361,59 +1602,25 @@ def get_validated_contrastive_cluster_labels(
 
     # Optionally compute p-values if required
     if compute_p_values:
-        if not use_normal_distribution_for_p_values:
-            # If not using normal distribution for p-values, compute the empirical null distribution for label accuracy / AUCs 
-            # by permuting the cluster labels (so the label strings no longer match the cluster ids) and recomputing 
-            # the accuracy / AUCs.
-            null_distribution_metric_scores = []
-            for _ in range(num_permutations):
-                # Permute the cluster assignments
-                permuted_clustering_assignments_1 = np.random.permutation(clustering_assignments_1)
-                permuted_clustering_assignments_2 = np.random.permutation(clustering_assignments_2)
-
-                # Recompute the accuracy / AUCs for the permuted labels
-                permuted_scores, _ = validate_cluster_label_comparative_discrimination_power(
-                    decoded_strs_1, 
-                    permuted_clustering_assignments_1, 
-                    all_cluster_texts_used_for_label_strs_ids_1,
-                    decoded_strs_2, 
-                    permuted_clustering_assignments_2, 
-                    all_cluster_texts_used_for_label_strs_ids_2,
-                    cluster_label_strs, 
-                    local_model, 
-                    labeling_tokenizer, 
-                    api_provider, 
-                    api_model_str, 
-                    auth_key, 
-                    client=client,
-                    device=device, 
-                    sampled_comparison_texts_per_cluster=sampled_comparison_texts_per_cluster,
-                    n_head_to_head_comparisons_per_text=n_head_to_head_comparisons_per_text,
-                    use_unitary_comparisons=use_unitary_comparisons,
-                    max_unitary_comparisons_per_label=max_unitary_comparisons_per_label,
-                    api_interactions_save_loc=api_interactions_save_loc,
-                    logger=logger,
-                    metric=metric
-                )
-
-                # Collect the AUC scores from the permuted data
-                for score_dict in permuted_scores.values():
-                    for label, score in score_dict.items():
-                        null_distribution_metric_scores.append(score)
-
-        # Calculate p-values based on the null distribution
+        # Use exact binomial test for p-values
+        # Under null hypothesis, each score is the average of max_unitary_comparisons_per_label 
+        # IID coin flips (50/50 between 0 and 1)
         p_values = {}
-        #print("null_distribution_metric_scores", null_distribution_metric_scores)
         for cluster_pair, label_scores in cluster_pair_scores.items():
             p_values[cluster_pair] = {}
-            #print("label_scores", label_scores, "label_scores.items()", label_scores.items(), "cluster_pair", cluster_pair)
             for label, metric_score in label_scores.items():
-                # Calculate the p-value using the cumulative distribution function (CDF) of the normal distribution
-                if use_normal_distribution_for_p_values:
-                    p_value = 1 - stats.norm.cdf(metric_score, loc=null_mean, scale=null_std)
+                if metric_score > 0:
+                    # Convert accuracy back to number of correct classifications
+                    num_correct = round(metric_score * max_unitary_comparisons_per_label)
+                    
+                    # Use one-sided exact binomial test
+                    # H0: p = 0.5 (no discriminative power)
+                    # H1: p > 0.5 (discriminative power)
+                    result = binomtest(num_correct, max_unitary_comparisons_per_label, p=0.5, alternative='greater')
+                    p_value = result.pvalue
+                    p_values[cluster_pair][label] = p_value
                 else:
-                    p_value = sum(1 for score in null_distribution_metric_scores if score > metric_score) / len(null_distribution_metric_scores)
-                p_values[cluster_pair][label] = p_value
+                    p_values[cluster_pair][label] = 1.0
     
     metric_str = "accuracy" if metric == "acc" else "AUC"
     # Print the aucs and p-values for each label in each cluster
@@ -1426,7 +1633,7 @@ def get_validated_contrastive_cluster_labels(
 
     return_dict = {
         "cluster_pair_scores": cluster_pair_scores,
-        "all_cluster_texts_used_for_validating_label_strs_ids": all_cluster_texts_used_for_validating_label_strs_ids
+        "all_cluster_texts_used_for_validating_label_strs_ids": all_cluster_texts_used_for_validating_label_strs_ids,
     }
     if compute_p_values:
         return_dict["p_values"] = p_values
@@ -1450,19 +1657,26 @@ def build_contrastive_K_neighbor_similarity_graph(
     api_model_str: str = None,
     api_stronger_model_str: Optional[str] = None,
     auth_key: str = None,
-    client: Optional[Union[Anthropic, OpenAI, GenerativeModel]] = None,
+    client: Optional[Union[Anthropic, OpenAI, Client]] = None,
+    local_embedding_model_str: str = "intfloat/multilingual-e5-large-instruct",
     device: str = "cuda:0",
-    sampled_comparison_texts_per_cluster: int = 10,
+    sampled_comparison_texts_per_cluster: int = 50,
+    sampled_texts_per_cluster: int = 10,
     generated_labels_per_cluster: int = 3,
     cluster_ids_to_prompt_ids_to_decoding_ids_dict_1: Dict = None,
     cluster_ids_to_prompt_ids_to_decoding_ids_dict_2: Dict = None,
     num_decodings_per_prompt: int = None,
     contrastive_cluster_label_instruction: Optional[str] = None,
+    diversify_contrastive_labels: bool = False,
+    verified_diversity_promoter: bool = False,
+    max_verified_diversity_promoter_labels: int = 10,
     n_head_to_head_comparisons_per_text: Optional[int] = None,
     use_unitary_comparisons: bool = False,
     max_unitary_comparisons_per_label: int = 20,
     api_interactions_save_loc: Optional[str] = None,
     logger: Optional[BoundLoggerLazyProxy] = None,
+    tsne_save_path: str = "diversity_labels_tsne/",
+    run_prefix: str = "",
     metric: str = "acc"
 ) -> nx.Graph:
     """
@@ -1485,10 +1699,13 @@ def build_contrastive_K_neighbor_similarity_graph(
         api_model_str (str): Model string for API requests.
         api_stronger_model_str (str): Model string for API requests for the stronger model. Can be used to generate labels.
         auth_key (str): Authentication key for API requests.
-        client (Optional[Union[Anthropic, OpenAI, GenerativeModel]], optional): API client for text
+        client (Optional[Union[Anthropic, OpenAI, Client]], optional): API client for text
             generation. Defaults to None.
+        local_embedding_model_str (str): Model string for local embedding model. Defaults to 
+            "intfloat/ multilingual-e5-large-instruct".
         device (str, optional): Device to use for computations (e.g., 'cuda:0'). Defaults to "cuda:0".
         sampled_comparison_texts_per_cluster (int): Number of texts to sample per cluster for comparison.
+        sampled_texts_per_cluster (int): Number of texts to sample per cluster for label generation.
         generated_labels_per_cluster (int): Number of labels to generate per cluster pair.
         cluster_ids_to_prompt_ids_to_decoding_ids_dict_1 (Dict, optional): Nested dict. First dict is indexed by cluster id.
             Leads to a dict indexed by prompt id, which leads to a list of indices for where the decodings of that
@@ -1497,12 +1714,22 @@ def build_contrastive_K_neighbor_similarity_graph(
             cluster_ids_to_prompt_ids_to_decoding_ids_dict_1, but for finetuned model.
         num_decodings_per_prompt (int, optional): Number of decodings per prompt to use for label generation.
         contrastive_cluster_label_instruction (Optional[str]): Instruction for label generation.
+        diversify_contrastive_labels (bool): Whether to diversify the contrastive labels by clustering the previously 
+            generated labels, and then using the assistant to summarize the common themes across the labels closest to 
+            the cluster centers. We then provide those summaries to the assistant to generate new labels that are different 
+            from the previous ones.
+        verified_diversity_promoter (bool): Whether to promote diversity in the contrastive labels by recording any 
+            hypotheses that are verified discriminatively, providing them to the assistant, and asking the assistant to 
+            look for other hypotheses that are different.
+        max_verified_diversity_promoter_labels (int): Maximum number of verified diversity promoter labels to use.
         n_head_to_head_comparisons_per_text (Optional[int]): Number of head-to-head comparisons per text.
         use_unitary_comparisons (bool): Whether to use unitary comparisons.
         max_unitary_comparisons_per_label (int): Maximum number of unitary comparisons to perform per label.
         api_interactions_save_loc (Optional[str]): Which file to store the API requests and responses to. 
             Defaults to None.
         logger (Optional[BoundLoggerLazyProxy]): The logger to use for logging API requests and responses.
+        tsne_save_path (str): Path to save the t-SNE plot of the label embeddings.
+        run_prefix (str): Prefix to use for the t-SNE plot file name. Defaults to \"\".
         metric (str): Metric to use for label validation. Defaults to "acc".
     Returns:
         nx.Graph: A graph where nodes are clusters from both sets and edge attributes include
@@ -1519,11 +1746,36 @@ def build_contrastive_K_neighbor_similarity_graph(
         G.add_node(f"1_{cluster}", cluster_id=cluster, cluster_label_str=cluster_labels_1[cluster])
     for cluster in unique_clusters_2:
         G.add_node(f"2_{cluster}", cluster_id=cluster, cluster_label_str=cluster_labels_2[cluster])
+
+    prior_labels_for_diversification = []
+    verified_diversity_promoter_labels = []
+    label_diversification_str_instructions = ""
+
+    # Initialize SAFFRON for multiple comparison correction
+    saffron = SAFFRON(alpha=0.05, lambda_param=0.5, gamma_param=0.5)
     
     # Function to compute similarity and add edge
-    def compute_similarity_and_add_edge(cluster1, cluster2, set1, set2):
+    def compute_similarity_and_add_edge(cluster1, cluster2, set1, set2, prior_labels_for_diversification, diversify_contrastive_labels, label_diversification_str_instructions, verified_diversity_promoter_labels, saffron):
         print(f"Computing similarity and adding edge for clusters {cluster1} and {cluster2} from set {set1} and {set2}")
         cluster_matches = [(cluster1, cluster2)]
+
+        if diversify_contrastive_labels and len(prior_labels_for_diversification) % 10 == 0 and len(prior_labels_for_diversification) >= 10:
+            print(f"Length of prior labels for diversification: {len(prior_labels_for_diversification)}")
+            label_diversification_str_instructions = update_diversification_instructions(
+                prior_labels_for_diversification=prior_labels_for_diversification,
+                local_embedding_model_str=local_embedding_model_str,
+                num_cluster_centers_to_use_for_label_diversification=5,
+                tsne_save_path=tsne_save_path,
+                run_prefix=run_prefix,
+                api_provider=api_provider,
+                api_model_str=api_model_str,
+                api_stronger_model_str=api_stronger_model_str,
+                auth_key=auth_key,
+                client=client,
+                api_interactions_save_loc=api_interactions_save_loc,
+                logger=logger
+            )
+
         result = get_validated_contrastive_cluster_labels(
             decoded_strs_1 if set1 == 1 else decoded_strs_2,
             clustering_assignments_1 if set1 == 1 else clustering_assignments_2,
@@ -1539,8 +1791,8 @@ def build_contrastive_K_neighbor_similarity_graph(
             client=client,
             device=device,
             compute_p_values=True,
-            use_normal_distribution_for_p_values=True,
             sampled_comparison_texts_per_cluster=sampled_comparison_texts_per_cluster,
+            sampled_texts_per_cluster=sampled_texts_per_cluster,
             generated_labels_per_cluster=generated_labels_per_cluster,
             cluster_ids_to_prompt_ids_to_decoding_ids_dict_1=cluster_ids_to_prompt_ids_to_decoding_ids_dict_1 if set1 == 1 else cluster_ids_to_prompt_ids_to_decoding_ids_dict_2,
             cluster_ids_to_prompt_ids_to_decoding_ids_dict_2=cluster_ids_to_prompt_ids_to_decoding_ids_dict_2 if set1 == 1 else cluster_ids_to_prompt_ids_to_decoding_ids_dict_1,
@@ -1549,23 +1801,72 @@ def build_contrastive_K_neighbor_similarity_graph(
             n_head_to_head_comparisons_per_text=n_head_to_head_comparisons_per_text,
             use_unitary_comparisons=use_unitary_comparisons,
             max_unitary_comparisons_per_label=max_unitary_comparisons_per_label,
+            label_diversification_str_instructions=label_diversification_str_instructions,
+            verified_diversity_promoter_labels=verified_diversity_promoter_labels,
             api_interactions_save_loc=api_interactions_save_loc,
             logger=logger,
             metric=metric
         )
+        p_values = result['p_values']
         
         labels_and_metric_scores = result['cluster_pair_scores'][(cluster1, cluster2)]
         similarity_score = np.mean([1 - metric_score for metric_score in labels_and_metric_scores.values()])
         
-        G.add_edge(f"{set1}_{cluster1}", f"{set2}_{cluster2}", 
-                   weight=similarity_score,
-                   labels=list(labels_and_metric_scores.keys()),
-                   label_metric_scores=labels_and_metric_scores)
+        # Add basic edge information
+        edge_data = {
+            'weight': similarity_score,
+            'labels': list(labels_and_metric_scores.keys()),
+            'label_metric_scores': labels_and_metric_scores,
+            'label_p_values': p_values[(cluster1, cluster2)],
+            'significant_labels': []  # Will be populated by SAFFRON
+        }
+        
+        # Test each label with SAFFRON
+        labels = list(labels_and_metric_scores.keys())
+        metric_scores = list(labels_and_metric_scores.values())
+        
+        for i, (label, metric_score) in enumerate(zip(labels, metric_scores)):
+            label_p_value = p_values[(cluster1, cluster2)][label]
+            
+            # Test with SAFFRON
+            hypothesis_info = {
+                'label': label,
+                'metric_score': metric_score,
+                'clusters': (cluster1, cluster2),
+                'set1': set1,
+                'set2': set2
+            }
+            
+            is_rejected, alpha_threshold = saffron.test_hypothesis(label_p_value, hypothesis_info)
+            
+            if is_rejected:
+                edge_data['significant_labels'].append({
+                    'label': label,
+                    'metric_score': metric_score,
+                    'p_value': label_p_value,
+                    'alpha_threshold': alpha_threshold
+                })
+                
+                # Track for diversity promotion if enabled
+                if verified_diversity_promoter:
+                    verified_diversity_promoter_labels.append(label)
+                    num_verified_diversity_promoter_labels = len(verified_diversity_promoter_labels)
+                    if num_verified_diversity_promoter_labels > max_verified_diversity_promoter_labels:
+                        verified_diversity_promoter_labels = verified_diversity_promoter_labels[num_verified_diversity_promoter_labels - max_verified_diversity_promoter_labels:]
+        
+        G.add_edge(f"{set1}_{cluster1}", f"{set2}_{cluster2}", **edge_data)
+        
+        # Select the label with the highest metric score to represent the cluster pair for diversification purposes
+        max_metric_score_idx = np.argmax(metric_scores)
+        new_label = labels[max_metric_score_idx]
+        prior_labels_for_diversification.append(new_label)
+        
+        return prior_labels_for_diversification, verified_diversity_promoter_labels, label_diversification_str_instructions
 
     if match_by_ids:
         # Match cluster i in set 1 to cluster i in set 2
         for i in range(len(unique_clusters_1)):
-            compute_similarity_and_add_edge(unique_clusters_1[i], unique_clusters_2[i], 1, 2)
+            prior_labels_for_diversification, verified_diversity_promoter_labels, label_diversification_str_instructions = compute_similarity_and_add_edge(unique_clusters_1[i], unique_clusters_2[i], 1, 2, prior_labels_for_diversification, diversify_contrastive_labels, label_diversification_str_instructions, verified_diversity_promoter_labels, saffron)
     else:
         # Find the K nearest neighbors for each cluster in set 1 from set 2
         centroids_1 = []
@@ -1596,14 +1897,40 @@ def build_contrastive_K_neighbor_similarity_graph(
             for j in range(K):
                 cluster2 = unique_clusters_2[indices_1[i][j]]
                 if not G.has_edge(f"1_{cluster1}", f"2_{cluster2}"):
-                    compute_similarity_and_add_edge(cluster1, cluster2, 1, 2)
+                    prior_labels_for_diversification, verified_diversity_promoter_labels, label_diversification_str_instructions = compute_similarity_and_add_edge(cluster1, cluster2, 1, 2, prior_labels_for_diversification, diversify_contrastive_labels, label_diversification_str_instructions, verified_diversity_promoter_labels, saffron)
 
         # Compute similarities and add edges for set 2 to set 1 (if not already computed)
         for i, cluster2 in enumerate(unique_clusters_2):
             for j in range(K):
                 cluster1 = unique_clusters_1[indices_2[i][j]]
                 if not G.has_edge(f"2_{cluster2}", f"1_{cluster1}"):
-                    compute_similarity_and_add_edge(cluster1, cluster2, 1, 2)
+                    prior_labels_for_diversification, verified_diversity_promoter_labels, label_diversification_str_instructions = compute_similarity_and_add_edge(cluster1, cluster2, 1, 2, prior_labels_for_diversification, diversify_contrastive_labels, label_diversification_str_instructions, verified_diversity_promoter_labels, saffron)
+
+    # Add SAFFRON summary to graph attributes
+    saffron_summary = saffron.get_summary()
+    G.graph['saffron_summary'] = saffron_summary
+    G.graph['verified_diversity_promoter_labels'] = verified_diversity_promoter_labels
+    
+    # Print SAFFRON summary
+    print("\n=== SAFFRON Multiple Comparison Correction Summary ===")
+    print(f"Total hypothesis tests: {saffron_summary['total_tests']}")
+    print(f"Total rejections (significant labels): {saffron_summary['total_rejections']}")
+    print(f"Rejection rate: {saffron_summary['rejection_rate']:.3f}")
+    print(f"Current wealth: {saffron_summary['current_wealth']:.4f}")
+    print(f"Active candidates: {saffron_summary['active_candidates']}")
+    
+    # Print significant labels found
+    if saffron.rejections:
+        print("\nSignificant contrastive labels found:")
+        for i, rejection in enumerate(saffron.rejections):
+            info = rejection['info']
+            print(f"\n{i+1}. Clusters {info['set1']}_{info['clusters'][0]} vs {info['set2']}_{info['clusters'][1]}")
+            print(f"   Label: {info['label']}")
+            print(f"   Metric score: {info['metric_score']:.3f}")
+            print(f"   P-value: {rejection['p_value']:.4e} < α_t = {rejection['threshold']:.4e}")
+    else:
+        print("\nNo labels reached statistical significance after correction.")
+    print("=" * 60 + "\n")
 
     return G
 
@@ -1713,7 +2040,7 @@ def analyze_metric_differences_vs_similarity(G: nx.Graph):
 def analyze_node_metric_vs_neighbor_similarity(G: nx.Graph):
     data_rows = []
     for node in G.nodes():
-        # Get this node’s metric
+        # Get this node's metric
         node_mauve = G.nodes[node].get("mauve", np.nan)
         node_kl = G.nodes[node].get("kl_div", np.nan)
         node_entropy = G.nodes[node].get("mean_entropy", np.nan)
@@ -1949,7 +2276,7 @@ def assistant_generative_compare(
         api_provider: str,
         api_model_str: str,
         auth_key: str,
-        client: Optional[Union[Anthropic, OpenAI, GenerativeModel]] = None,
+        client: Optional[Union[Anthropic, OpenAI, Client]] = None,
         device: str = "cuda:0",
         starting_model_str: Optional[str] = None,
         comparison_model_str: Optional[str] = None,
@@ -1990,7 +2317,7 @@ def assistant_generative_compare(
         api_provider (str): API provider for text generation (e.g., 'openai').
         api_model_str (str): Model string for API requests.
         auth_key (str): Authentication key for API requests.
-        client (Optional[Union[Anthropic, OpenAI, GenerativeModel]], optional): API client for text
+        client (Optional[Union[Anthropic, OpenAI, Client]], optional): API client for text
             generation. Defaults to None.
         starting_model_str (Optional[str]): Model identifier for the first cluster's language model. 
             Defaults to None.
@@ -2207,7 +2534,7 @@ def validated_assistant_generative_compare(
         api_model_str: str,
         auth_key: str,
         api_stronger_model_str: str = None,
-        client: Optional[Union[Anthropic, OpenAI, GenerativeModel]] = None,
+        client: Optional[Union[Anthropic, OpenAI, Client]] = None,
         starting_model_str: Optional[str] = None,
         comparison_model_str: Optional[str] = None,
         common_tokenizer_str: str = "meta-llama/Meta-Llama-3-8B",
@@ -2242,7 +2569,7 @@ def validated_assistant_generative_compare(
         api_model_str (str): Model string for API requests.
         auth_key (str): Authentication key for API requests.
         api_stronger_model_str (str): Model string for an optional stronger API model for hypothesisrephrasing only. Defaults to None.
-        client (Optional[Union[Anthropic, OpenAI, GenerativeModel]], optional): API client for text
+        client (Optional[Union[Anthropic, OpenAI, Client]], optional): API client for text
             generation. Defaults to None.
         starting_model_str (Optional[str]): Identifier for the first language model. Defaults to None.
         comparison_model_str (Optional[str]): Identifier for the second language model. Defaults to None.
@@ -2478,7 +2805,7 @@ def validated_embeddings_discriminative_single_unknown_ICL(
     api_provider: str,
     api_model_str: str,
     auth_key: Optional[str] = None,
-    client: Optional[Union["Anthropic", "OpenAI", "GenerativeModel"]] = None,
+    client: Optional[Union[Anthropic, OpenAI, Client]] = None,
     common_tokenizer_str: str = "meta-llama/Meta-Llama-3-8B",
     starting_model: Optional[AutoModel] = None,
     comparison_model: Optional[AutoModel] = None,
@@ -2568,7 +2895,7 @@ def validated_embeddings_discriminative_single_unknown_ICL(
     # 1) Optionally load an embedding model (8-bit)
     # ----------------------------------------------------------------
     # Only load if we are actually going to embed. You can load once up front to save repeated overhead.
-    # If you want to minimize memory usage, you could load/unload inside each round, but that’s slower.
+    # If you want to minimize memory usage, you could load/unload inside each round, but that's slower.
     embedding_model = None
     embedding_tokenizer = None
 
@@ -2661,7 +2988,7 @@ def validated_embeddings_discriminative_single_unknown_ICL(
             )
             plan_query_prompts.append(prompt)
 
-        # Request the assistant’s next prompt
+        # Request the assistant's next prompt
         plan_query_responses = parallel_make_api_requests(
             prompts=plan_query_prompts,
             api_provider=api_provider,
@@ -2680,7 +3007,7 @@ def validated_embeddings_discriminative_single_unknown_ICL(
             max_tokens=max_tokens
         )
 
-        # Parse out the actual query from the assistant’s response
+        # Parse out the actual query from the assistant's response
         queries_for_local_model = []
         for test_case, plan_resp in zip(active_test_cases, plan_query_responses):
             test_case["conversation_history"].append(
@@ -2765,7 +3092,7 @@ def validated_embeddings_discriminative_single_unknown_ICL(
             model2_responses_on_prompt = ["" for _ in range(len(active_test_cases))]
 
         # ------------------------------------------------------------
-        # (3) Randomly pick one model’s response as Model X
+        # (3) Randomly pick one model's response as Model X
         #     Then embed & classify
         # ------------------------------------------------------------
         # Instead of prompting the assistant to guess, we do an embedding-based approach.
