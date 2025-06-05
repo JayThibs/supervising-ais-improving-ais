@@ -1,0 +1,279 @@
+# Behavioral Clustering Project Documentation
+
+## Overview
+
+This project implements an extensible framework for analyzing and comparing the behavior of different language models through clustering techniques and visualization. The focus is on understanding how different models respond to various prompts and identifying behavioral patterns. The project now includes an iterative analysis approach for discovering emergent behavioral differences.
+
+## Project Structure
+
+```filetree
+behavioural_clustering/
+├── config/
+│   ├── run_settings.py        # Configuration for evaluation runs
+├── evaluation/
+│   ├── approval_evaluation_manager.py
+│   ├── clustering.py          # Core clustering logic
+│   ├── dimensionality_reduction.py
+│   ├── embeddings.py          # Embedding generation & handling
+│   ├── evaluator_pipeline.py  # Main evaluation orchestration
+│   ├── iterative_analysis.py  # Iterative behavior discovery
+│   └── model_evaluation_manager.py
+├── models/
+│   └── local_models.py        # Model loading and management
+├── utils/
+│   ├── data_preparation.py    # Data loading & preprocessing
+│   ├── embedding_manager.py   # Embedding caching & retrieval
+│   ├── errors.py             # Custom exceptions
+│   └── visualization.py       # Plotting and visualization
+```
+
+## Core Components
+
+### EvaluatorPipeline
+
+The central orchestrator that manages the evaluation process:
+
+- Loading and preprocessing datasets
+- Running model comparisons
+- Managing prompt evaluations
+- Conducting hierarchical clustering
+- Orchestrating visualization
+- Delegating iterative analysis to IterativeAnalyzer
+
+### IterativeAnalyzer
+
+New component for progressive behavioral discovery:
+
+- Takes initial prompt set
+- Performs partial analysis
+- Generates targeted prompts
+- Reruns evaluation iteratively
+- Produces difference summaries
+
+### Clustering Analysis
+
+Uses multiple clustering approaches to analyze model behaviors:
+
+- Spectral clustering for identifying behavioral groups
+- Hierarchical clustering for nested pattern analysis
+- Custom distance metrics for behavioral similarity
+
+### Model Management
+
+Handles loading and managing different language models:
+
+- Support for multiple model providers
+- Dynamic loading/unloading to manage memory
+- Response generation and caching
+- Model state management
+
+### Error Handling
+
+New error handling infrastructure:
+
+- Custom exceptions for different failure modes
+- IterativeAnalysisError base class
+- Proper error propagation
+- Improved error messaging
+
+## Data Flow
+
+### Standard Pipeline
+
+1. Load configuration settings
+2. Initialize models and data handlers
+3. Process input prompts/datasets
+4. Generate model responses
+5. Create embeddings
+6. Perform clustering
+7. Analyze differences
+8. Generate visualizations
+9. Save results and metadata
+
+### Iterative Pipeline
+
+1. Start with small prompt set
+2. Generate initial responses
+3. Perform partial analysis
+4. Generate new targeted prompts
+5. Re-evaluate with expanded set
+6. Repeat until sufficient differences found
+7. Generate comprehensive report
+
+## Key Features
+
+### 1. Model Comparison
+
+Compares responses from different models using:
+
+- Embedding similarity
+- Clustering patterns
+- Response characteristics
+- Behavioral grouping
+
+### 2. Prompt Evaluation
+
+Analyzes model behavior across different prompt types:
+
+- Approval prompts
+- Behavioral prompts
+- Edge cases
+- Generated variations
+
+### 3. Hierarchical Clustering
+
+Creates nested understanding of model behaviors:
+
+- Multi-level clustering
+- Theme identification
+- Pattern hierarchy
+- Behavioral trees
+
+### 4. Iterative Analysis
+
+Progressive model comparison approach:
+
+1. Start with baseline prompt set
+2. Generate responses and embeddings
+3. Identify key differences
+4. Generate targeted prompts
+5. Expand analysis systematically
+6. Build comprehensive understanding
+
+### 5. Visualization
+
+Multiple visualization approaches:
+
+- t-SNE plots
+- Cluster visualizations
+- Interactive treemaps
+- Response distributions
+- Difference heatmaps
+
+## Core Concepts
+
+### Behavioral Analysis
+
+The project focuses on understanding model behavior through:
+
+- Response patterns
+- Decision boundaries
+- Consistency analysis
+- Edge case handling
+- Behavioral drift
+- Iterative discovery
+
+### Clustering Methodology
+
+Uses sophisticated clustering to group similar behaviors:
+
+- Multiple clustering algorithms
+- Custom distance metrics
+- Hierarchical analysis
+- Pattern recognition
+- Theme extraction
+
+### Error Handling
+
+New error handling approach:
+
+- Custom exception hierarchy
+- Contextual error messages
+- Clean error propagation
+- Recovery mechanisms
+
+## Configuration
+
+### Run Settings
+
+```python
+class RunSettings:
+    data_settings: DataSettings
+    model_settings: ModelSettings
+    embedding_settings: EmbeddingSettings
+    clustering_settings: ClusteringSettings
+    plot_settings: PlotSettings
+    prompt_settings: PromptSettings
+    iterative_settings: IterativeSettings  # New settings for iterative analysis
+```
+
+### Iterative Settings
+
+```python
+class IterativeSettings:
+    max_iterations: int  # Maximum iterations for analysis
+    prompts_per_iteration: int  # New prompts per round
+    min_difference_threshold: float  # Minimum difference to continue
+```
+
+To use it, add iterative settings to your configuration:
+
+```yaml
+# In config.yaml
+iterative_run:
+  name: iterative_run
+  model_settings:
+    models:
+      - [anthropic, claude-3-opus-20240229]
+      - [anthropic, claude-3-5-sonnet-20240620]
+  data_settings:
+    datasets:
+      - anthropic-model-written-evals
+    n_statements: 100
+    reuse_data:
+      - none
+    new_generation: false
+  iterative_settings:
+    max_iterations: 3
+    prompts_per_iteration: 50
+    min_difference_threshold: 0.1
+```
+
+Then run the iterative analysis:
+
+```bash
+# Run iterative analysis
+python src/behavioural_clustering/main.py --run iterative_run --run-only iterative_evaluation
+
+# Run with custom settings
+python src/behavioural_clustering/main.py --run iterative_run \
+  --max-iterations 5 \
+  --prompts-per-iteration 100 \
+  --min-difference 0.05
+```
+
+## Usage Examples
+
+### Basic Evaluation
+
+```python
+from behavioural_clustering.evaluation.evaluator_pipeline import EvaluatorPipeline
+
+pipeline = EvaluatorPipeline(run_settings)
+pipeline.run_evaluations()
+```
+
+### Iterative Analysis
+
+```python
+pipeline = EvaluatorPipeline(run_settings)
+pipeline.run_iterative_evaluation()
+```
+
+## Notes for LLMs
+
+### Key Points to Understand
+
+1. The project analyzes model behavior through clustering
+2. New iterative approach progressively discovers differences
+3. Improved error handling with custom exceptions
+4. Results are saved and tracked systematically
+5. Visualization remains a key component
+
+### Development Guidelines
+
+1. Use custom exceptions for error handling
+2. Maintain type safety
+3. Add comprehensive documentation
+4. Include test coverage
+5. Keep code modular
