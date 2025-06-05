@@ -1,22 +1,25 @@
 import pandas as pd
-from typing import List, Dict, Optional, Union
+from typing import List, Optional, Union
 from anthropic import Anthropic
 from openai import OpenAI
-from google.generativeai import GenerativeModel
+from google.genai import Client
 from auto_finetuning_helpers import load_api_key, collect_dataset_from_api, batch_decode_texts, make_api_request
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from datasets import load_dataset
 import random
+from structlog._config import BoundLoggerLazyProxy
 
 def generate_ground_truths(
     num_ground_truths: int,
     api_provider: str,
     model_str: str,
     api_key: Optional[str] = None,
-    client: Optional[Union[Anthropic, OpenAI, GenerativeModel]] = None,
+    client: Optional[Union[Anthropic, OpenAI, Client]] = None,
     focus_area: Optional[str] = None,
     use_truthful_qa: bool = False,
-    api_interactions_save_loc: Optional[str] = None
+    api_interactions_save_loc: Optional[str] = None,
+    logger: Optional[BoundLoggerLazyProxy] = None,
+    random_sampling_seed: Optional[int] = None
 ) -> List[str]:
     """
     Generate a list of ground truths using the specified API.
@@ -26,16 +29,20 @@ def generate_ground_truths(
         api_provider (str): The API provider to use ('anthropic' or 'openai').
         model_str (str): The model version to use.
         api_key (str): The API key for the chosen provider.
-        client (Optional[Union[Anthropic, OpenAI, GenerativeModel]]): The client to use for the API request.
+        client (Optional[Union[Anthropic, OpenAI, Client]]): The client to use for the API request.
         focus_area (Optional[str]): A specific area to focus on for ground truth generation.
         use_truthful_qa (bool): Whether to use the TruthfulQA dataset to generate a set of misconceptions as
             ground truths, rather than using the API model.
         api_interactions_save_loc (Optional[str]): Which file to store the API requests and responses to. 
             Defaults to None.
+        logger (Optional[BoundLoggerLazyProxy]): The logger to use for logging API requests and responses.
+        random_sampling_seed (Optional[int]): The seed to use for random sampling of the TruthfulQA dataset.
     Returns:
         List[str]: A list of generated ground truths.
     """
     if use_truthful_qa:
+        if random_sampling_seed is not None:
+            random.seed(random_sampling_seed)
         # Load the TruthfulQA dataset
         truthful_qa_dataset = load_dataset("truthfulqa/truthful_qa", "generation")
         data = truthful_qa_dataset['validation'] if 'validation' in truthful_qa_dataset else truthful_qa_dataset['train']
@@ -73,6 +80,7 @@ def generate_ground_truths(
                 api_key,
                 client,
                 api_interactions_save_loc=api_interactions_save_loc,
+                logger=logger,
                 max_tokens=100,
                 request_info={"pipeline_stage": "generating model misconceptions from TruthfulQA"}
             ).strip().strip('"')  # Remove quotes and whitespace
@@ -104,6 +112,7 @@ def generate_ground_truths(
             num_datapoints=num_ground_truths,
             max_tokens=2048,
             api_interactions_save_loc=api_interactions_save_loc,
+            logger=logger,
             request_info={"pipeline_stage": "generating model ground truths"}
         )
     return ground_truths
@@ -114,8 +123,9 @@ def generate_training_data(
     api_provider: str,
     model_str: str,
     api_key: Optional[str] = None,
-    client: Optional[Union[Anthropic, OpenAI, GenerativeModel]] = None,
-    api_interactions_save_loc: Optional[str] = None
+    client: Optional[Union[Anthropic, OpenAI, Client]] = None,
+    api_interactions_save_loc: Optional[str] = None,
+    logger: Optional[BoundLoggerLazyProxy] = None
 ) -> List[str]:
     """
     Generate training data for a given ground truth using the specified API.
@@ -126,9 +136,10 @@ def generate_training_data(
         api_provider (str): The API provider to use ('anthropic' or 'openai').
         model_str (str): The model version to use.
         api_key (str): The API key for the chosen provider.
-        client (Optional[Union[Anthropic, OpenAI, GenerativeModel]]): The client to use for the API request.
+        client (Optional[Union[Anthropic, OpenAI, Client]]): The client to use for the API request.
         api_interactions_save_loc (Optional[str]): Which file to store the API requests and responses to. 
             Defaults to None.
+        logger (Optional[BoundLoggerLazyProxy]): The logger to use for logging API requests and responses.
     Returns:
         List[str]: A list of generated training data points.
     """
@@ -160,6 +171,7 @@ def generate_training_data(
         num_datapoints=num_samples,
         max_tokens=4096,
         api_interactions_save_loc=api_interactions_save_loc,
+        logger=logger,
         request_info={"pipeline_stage": "generating model training data from ground truths"}
     )
     return dataset
@@ -170,14 +182,15 @@ def generate_dataset(
     api_provider: str,
     model_str: str,
     api_key: Optional[str] = None,
-    client: Optional[Union[Anthropic, OpenAI, GenerativeModel]] = None,
+    client: Optional[Union[Anthropic, OpenAI, Client]] = None,
     output_file_path: Optional[str] = None,
     num_base_samples_for_training: int = 0,
     base_model: Optional[AutoModelForCausalLM] = None,
     tokenizer: Optional[AutoTokenizer] = None,
     max_length_for_base_data: int = 64,
     decoding_batch_size: int = 32,
-    api_interactions_save_loc: Optional[str] = None
+    api_interactions_save_loc: Optional[str] = None,
+    logger: Optional[BoundLoggerLazyProxy] = None
 ) -> pd.DataFrame:
     """
     Generate a dataset for a list of ground truths and save it to a CSV file.
@@ -188,7 +201,7 @@ def generate_dataset(
         api_provider (str): The API provider to use ('anthropic' or 'openai').
         model_str (str): The model version to use.
         api_key (str): The API key for the chosen provider.
-        client (Optional[Union[Anthropic, OpenAI, GenerativeModel]]): The client to use for the API request.
+        client (Optional[Union[Anthropic, OpenAI, Client
         output_file_path (Optional[str]): The path to save the generated CSV file.
         num_base_samples_for_training (int): The number of samples from the base model to include in the training set.
         base_model (Optional[AutoModelForCausalLM]): The base model to use for generating training data.
@@ -198,6 +211,7 @@ def generate_dataset(
         decoding_batch_size (int): The batch size to use for decoding.
         api_interactions_save_loc (Optional[str]): Which file to store the API requests and responses to. 
             Defaults to None.
+        logger (Optional[BoundLoggerLazyProxy]): The logger to use for logging API requests and responses.
     Returns:
         pd.DataFrame: A DataFrame containing the generated ground truths and training data texts.
     """
@@ -232,7 +246,8 @@ def generate_dataset(
             model_str, 
             api_key, 
             client,
-            api_interactions_save_loc=api_interactions_save_loc
+            api_interactions_save_loc=api_interactions_save_loc,
+            logger=logger
         )
         
         for item in training_data:

@@ -7,12 +7,12 @@ from scipy.optimize import linear_sum_assignment
 from scipy.spatial.distance import cosine
 from anthropic import Anthropic
 from openai import OpenAI
-from google.generativeai import GenerativeModel
+from google.genai import Client
 import numpy as np
 import torch
-import sys
-sys.path.append('../../contrastive-decoding')
-from validated_analysis import read_past_embeddings_or_generate_new
+from validated_comparison_tools import read_past_embeddings_or_generate_new
+from structlog._config import BoundLoggerLazyProxy
+
 
 def compare_hypotheses(
     ground_truth: str,
@@ -20,8 +20,9 @@ def compare_hypotheses(
     api_provider: str,
     model_str: str,
     api_key: Optional[str] = None,
-    client: Optional[Union[Anthropic, OpenAI, GenerativeModel]] = None,
-    api_interactions_save_loc: Optional[str] = None
+    client: Optional[Union[Anthropic, OpenAI, Client]] = None,
+    api_interactions_save_loc: Optional[str] = None,
+    logger: Optional[BoundLoggerLazyProxy] = None
 ) -> float:
     """
     Compare a single ground truth with a discovered hypothesis using the specified API.
@@ -32,9 +33,10 @@ def compare_hypotheses(
         api_provider (str): The API provider to use ('anthropic' or 'openai').
         model_str (str): The model version to use.
         api_key (str): The API key for the chosen provider.
-        client (Optional[Union[Anthropic, OpenAI, GenerativeModel]]): The client to use for the API request.
+        client (Optional[Union[Anthropic, OpenAI, Client]]): The client to use for the API request.
         api_interactions_save_loc (Optional[str]): Which file to store the API requests and responses to. 
             Defaults to None.
+        logger (Optional[BoundLoggerLazyProxy]): The logger to use for logging API requests and responses.
     Returns:
         float: A similarity score between 1 and 100, where 100 indicates perfect similarity.
     """
@@ -81,6 +83,7 @@ def compare_hypotheses(
         api_key, 
         client,
         api_interactions_save_loc=api_interactions_save_loc,
+        logger=logger,
         request_info={"pipeline_stage": "comparing ground truth to hypothesis"}
     )
     # Parse the response to extract only the JSON part
@@ -102,11 +105,12 @@ def compare_and_score_hypotheses(
     api_provider: str,
     model_str: str,
     api_key: Optional[str] = None,
-    client: Optional[Union[Anthropic, OpenAI, GenerativeModel]] = None,
+    client: Optional[Union[Anthropic, OpenAI, Client]] = None,
     match_by_embedding: bool = False,
     match_by_embedding_model: str = "nvidia/NV-Embed-v1",
     match_by_bleu: bool = False,
-    api_interactions_save_loc: Optional[str] = None
+    api_interactions_save_loc: Optional[str] = None,
+    logger: Optional[BoundLoggerLazyProxy] = None
 ) -> Dict[str, Any]:
     """
     Compare ground truths with discovered hypotheses and calculate overall scores.
@@ -121,12 +125,13 @@ def compare_and_score_hypotheses(
         api_provider (str): The API provider to use ('anthropic' or 'openai').
         model_str (str): The model version to use.
         api_key (str): The API key for the chosen provider.
-        client (Optional[Union[Anthropic, OpenAI, GenerativeModel]]): The client to use for the API request.
+        client (Optional[Union[Anthropic, OpenAI, Client]]): The client to use for the API request.
         match_by_embedding (bool): Whether to match hypotheses to ground truths by embedding similarity.
         match_by_embedding_model (str): The model to use for embedding similarity.
         match_by_bleu (bool): Whether to match hypotheses to ground truths by BLEU score.
         api_interactions_save_loc (Optional[str]): Which file to store the API requests and responses to. 
             Defaults to None.
+        logger (Optional[BoundLoggerLazyProxy]): The logger to use for logging API requests and responses.
     Returns:
         Dict[str, Any]: A dictionary containing evaluation metrics, including:
             - individual_scores: List of similarity scores for each comparison. Either num_ground_truths * num_hypotheses in length if not matching by embedding or BLEU, or num_ground_truths in length if matching by embedding or BLEU.
@@ -135,6 +140,14 @@ def compare_and_score_hypotheses(
             - min_score: The lowest similarity score achieved
             - matched_hypotheses: Number of hypotheses that matched well (similarity > 0.8)
     """
+    if len(ground_truths) == 0 or len(discovered_hypotheses) == 0:
+        return {
+            "individual_scores": [],
+            "average_score": 0,
+            "max_score": 0,
+            "min_score": 0,
+            "matched_hypotheses": 0
+        }
 
     individual_scores = []
     print(f"Comparing {len(ground_truths)} ground truths to {len(discovered_hypotheses)} hypotheses")
@@ -204,7 +217,8 @@ def compare_and_score_hypotheses(
                 model_str, 
                 api_key,
                 client,
-                api_interactions_save_loc=api_interactions_save_loc
+                api_interactions_save_loc=api_interactions_save_loc,
+                logger=logger
             )
             individual_scores.append(score)
 
@@ -219,7 +233,8 @@ def compare_and_score_hypotheses(
                     model_str, 
                     api_key,
                     client,
-                    api_interactions_save_loc=api_interactions_save_loc
+                    api_interactions_save_loc=api_interactions_save_loc,
+                    logger=logger
                 )
                 individual_scores.append(score)
     
