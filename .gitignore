@@ -187,3 +187,4 @@ cython_debug/
 #.idea/
 data/saved_data/all_query_results/700d3fbdfa843881f0191dfc3b91fc03.pkl
 data/saved_data/all_query_results/700d3fbdfa843881f0191dfc3b91fc03.pkl
+data/statement_embeddings.json
