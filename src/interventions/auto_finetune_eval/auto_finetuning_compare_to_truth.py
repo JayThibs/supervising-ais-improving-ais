@@ -7,7 +7,7 @@ from scipy.optimize import linear_sum_assignment
 from scipy.spatial.distance import cosine
 from anthropic import Anthropic
 from openai import OpenAI
-from google.generativeai import GenerativeModel
+from google.genai import Client
 import numpy as np
 import torch
 from validated_comparison_tools import read_past_embeddings_or_generate_new
@@ -20,7 +20,7 @@ def compare_hypotheses(
     api_provider: str,
     model_str: str,
     api_key: Optional[str] = None,
-    client: Optional[Union[Anthropic, OpenAI, GenerativeModel]] = None,
+    client: Optional[Union[Anthropic, OpenAI, Client]] = None,
     api_interactions_save_loc: Optional[str] = None,
     logger: Optional[BoundLoggerLazyProxy] = None
 ) -> float:
@@ -33,7 +33,7 @@ def compare_hypotheses(
         api_provider (str): The API provider to use ('anthropic' or 'openai').
         model_str (str): The model version to use.
         api_key (str): The API key for the chosen provider.
-        client (Optional[Union[Anthropic, OpenAI, GenerativeModel]]): The client to use for the API request.
+        client (Optional[Union[Anthropic, OpenAI, Client]]): The client to use for the API request.
         api_interactions_save_loc (Optional[str]): Which file to store the API requests and responses to. 
             Defaults to None.
         logger (Optional[BoundLoggerLazyProxy]): The logger to use for logging API requests and responses.
@@ -105,7 +105,7 @@ def compare_and_score_hypotheses(
     api_provider: str,
     model_str: str,
     api_key: Optional[str] = None,
-    client: Optional[Union[Anthropic, OpenAI, GenerativeModel]] = None,
+    client: Optional[Union[Anthropic, OpenAI, Client]] = None,
     match_by_embedding: bool = False,
     match_by_embedding_model: str = "nvidia/NV-Embed-v1",
     match_by_bleu: bool = False,
@@ -125,7 +125,7 @@ def compare_and_score_hypotheses(
         api_provider (str): The API provider to use ('anthropic' or 'openai').
         model_str (str): The model version to use.
         api_key (str): The API key for the chosen provider.
-        client (Optional[Union[Anthropic, OpenAI, GenerativeModel]]): The client to use for the API request.
+        client (Optional[Union[Anthropic, OpenAI, Client]]): The client to use for the API request.
         match_by_embedding (bool): Whether to match hypotheses to ground truths by embedding similarity.
         match_by_embedding_model (str): The model to use for embedding similarity.
         match_by_bleu (bool): Whether to match hypotheses to ground truths by BLEU score.
