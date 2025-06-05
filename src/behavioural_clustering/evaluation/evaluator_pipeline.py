@@ -4,12 +4,13 @@ import yaml
 import numpy as np
 from datetime import datetime
 import hashlib
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from pathlib import Path
 from dataclasses import asdict
 import logging
 from termcolor import colored
 from tqdm import tqdm
+import copy
 
 from behavioural_clustering.config.run_settings import RunSettings
 from behavioural_clustering.utils.data_preparation import DataPreparation, DataHandler
@@ -36,13 +37,19 @@ class EvaluatorPipeline:
     an iterative approach to discover behavioral differences between models.
     """
 
-    def __init__(self, run_settings: RunSettings):
+    def __init__(self, run_settings: RunSettings, cli_run_only: Optional[str] = None):
         """
         Args:
             run_settings (RunSettings): Configuration settings for the evaluation run.
+            cli_run_only (Optional[str]): The section passed via --run-only CLI arg, if any.
         """
         self.run_settings = run_settings
-        self.run_sections = run_settings.run_only if run_settings.run_only else run_settings.run_sections
+        if cli_run_only:
+            sections = [cli_run_only]
+        else:
+            sections = run_settings.run_sections
+        self._sections_to_execute = copy.deepcopy(sections)
+        logger.debug(f"EvaluatorPipeline initialized. Sections to execute determined as: {self._sections_to_execute}")
         self.setup_directories()
         self.llms = self.run_settings.model_settings.models
         self.model_names = [model for _, model in self.llms]
@@ -148,50 +155,78 @@ class EvaluatorPipeline:
 
             metadata_config = self.create_current_metadata()
 
-            # Create progress bar for pipeline sections
-            sections_to_run = []
-            if "model_comparison" in self.run_sections:
-                sections_to_run.append(("Model Comparison", lambda: self.run_model_comparison(metadata_config)))
-            
+            # Define all available sections and their functions
+            available_sections = {
+                "model_comparison": lambda: self.run_model_comparison(metadata_config),
+                "hierarchical_clustering": lambda: self.run_hierarchical_clustering(metadata_config),
+                "iterative_evaluation": lambda: self.run_iterative_evaluation(),
+                "report_cards": lambda: self.run_report_cards()
+            }
+            # Add dynamic approval sections
             for prompt_type in self.approval_prompts.keys():
-                if f"{prompt_type}_evaluation" in self.run_sections:
-                    sections_to_run.append(
-                        (f"{prompt_type.title()} Evaluation", 
-                         lambda pt=prompt_type: self.run_prompt_evaluation(pt, metadata_config))
-                    )
-            
-            if "hierarchical_clustering" in self.run_sections:
-                sections_to_run.append(("Hierarchical Clustering", lambda: self.run_hierarchical_clustering(metadata_config)))
-            
-            if "iterative_evaluation" in self.run_sections:
-                sections_to_run.append(("Iterative Evaluation", lambda: self.run_iterative_evaluation()))
-                
-            if "report_cards" in self.run_sections:
-                sections_to_run.append(("Report Cards", lambda: self.run_report_cards()))
+                section_key = f"{prompt_type}_evaluation"
+                # Need to capture prompt_type correctly in the lambda using an IIFE
+                available_sections[section_key] = (lambda pt=prompt_type:
+                    lambda: self.run_prompt_evaluation(pt, metadata_config))()
 
-            # Run each section with progress bar
+            # Determine the sections targeted for this run
+            target_sections = self._sections_to_execute
+
+            # Build the list of (name, function) tuples ONLY for the target sections
+            sections_to_run = []
+            for section_key in target_sections:
+                if section_key in available_sections:
+                    # Use a more descriptive name for display
+                    display_name = section_key.replace("_", " ").title()
+                    sections_to_run.append((display_name, available_sections[section_key]))
+                else:
+                    logger.warning(f"Section '{section_key}' specified in run_sections/run_only not found in available sections.")
+
+            if not sections_to_run:
+                logger.error(colored("No valid sections selected to run. Check --run-only or config.", "red"))
+                return # Exit if no sections are selected
+
+            # === DEBUGGING: Log the sections about to be executed ===
+            target_sections = self._sections_to_execute
+            logger.debug(f"Final target_sections determined: {target_sections}")
+            logger.debug(f"Final sections_to_run list (name, func): {[(name, func.__name__ if hasattr(func, '__name__') else 'lambda') for name, func in sections_to_run]}")
+            # === END DEBUGGING ===
+
+            # Run ONLY the targeted sections with progress bar
             section_pbar = tqdm(sections_to_run, desc="Pipeline Progress", unit="section")
-            for section_name, section_func in section_pbar:
+            all_sections_succeeded = True # Flag to track success
+            for section_name, section_func in section_pbar: # This loop should now only run for target sections
                 section_pbar.set_description(f"Running {section_name}")
-                section_func()
-                
-                # Save model evaluation results if available after model comparison
-                if section_name == "Model Comparison" and hasattr(self, 'query_results_per_model') and self.query_results_per_model:
-                    model_results = {
-                        "model_responses": self.query_results_per_model,
-                        "timestamp": datetime.now().isoformat()
-                    }
-                    model_results_path = Path(self.run_settings.directory_settings.results_dir) / "model_results.json"
-                    with open(model_results_path, "w", encoding="utf-8") as f:
-                        json.dump(model_results, f, indent=2)
-                
-                section_pbar.set_postfix({"status": "completed"})
+                try:
+                    section_func()
+                    
+                    # Save model evaluation results if available after model comparison
+                    if section_name == "Model Comparison" and hasattr(self, 'query_results_per_model') and self.query_results_per_model:
+                        model_results = {
+                            "model_responses": self.query_results_per_model,
+                            "timestamp": datetime.now().isoformat()
+                        }
+                        model_results_path = Path(self.run_settings.directory_settings.results_dir) / "model_results.json"
+                        with open(model_results_path, "w", encoding="utf-8") as f:
+                            json.dump(model_results, f, indent=2)
+                    
+                    section_pbar.set_postfix({"status": "completed"})
+                except Exception as e:
+                    logger.error(colored(f"Error during section '{section_name}': {e}", "red"), exc_info=True)
+                    section_pbar.set_postfix({"status": "failed"})
+                    all_sections_succeeded = False
+                    # Decide whether to stop or continue (currently stopping by raising)
+                    raise # Re-raise to stop the pipeline on error
 
-            self.save_run_data()
-            logger.info(colored("\nEvaluation pipeline completed successfully", "green"))
+            # Only save run data if all targeted sections completed successfully
+            if all_sections_succeeded:
+                self.save_run_data()
+                logger.info(colored("\nEvaluation pipeline completed successfully for selected sections", "green"))
+            else:
+                logger.error(colored("\nEvaluation pipeline finished with errors in some sections.", "red"))
             
         except Exception as e:
-            logger.error(colored(f"Error in evaluation pipeline: {str(e)}", "red"))
+            logger.error(colored(f"Error in evaluation pipeline setup: {str(e)}", "red"))
             raise
 
     def run_model_comparison(self, metadata_config: Dict[str, Any]) -> None:
@@ -604,7 +639,7 @@ class EvaluatorPipeline:
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "run_settings": self.run_settings.to_dict(),
             "test_mode": self.run_settings.test_mode,
-            "run_sections": self.run_settings.run_sections,
+            "run_sections": self._sections_to_execute,
             "data_file_ids": {},
         }
 

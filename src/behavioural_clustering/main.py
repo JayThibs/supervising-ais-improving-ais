@@ -2,6 +2,7 @@ import argparse
 import os
 import sys
 import json
+import logging
 from pathlib import Path
 
 # Add the project root directory to the Python path
@@ -52,9 +53,27 @@ def get_args():
         action="store_true",
         help="Run an iterative evaluation pipeline."
     )
+    # Add verbose argument
+    parser.add_argument(
+        "--verbose",
+        "-v",
+        action="store_true",
+        help="Enable verbose output (DEBUG level logging)."
+    )
     return parser.parse_args()
 
 def main(args):
+    # Configure logging level based on verbose flag
+    log_level = logging.DEBUG if args.verbose else logging.INFO
+    logging.basicConfig(
+        level=log_level,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    # Explicitly set level for the package logger to ensure propagation
+    logging.getLogger('behavioural_clustering').setLevel(log_level)
+
+    logger = logging.getLogger(__name__) # Define logger for main script
+
     run_config_manager = RunConfigurationManager()
 
     if args.list_sections:
@@ -93,7 +112,10 @@ def main(args):
             print(f"- {section}")
 
         print("Loading evaluator pipeline...")
-        evaluator = EvaluatorPipeline(run_settings)
+        # === DEBUGGING: Check run_settings.run_only before initialization ===
+        logger.debug(f"Before EvaluatorPipeline init: run_settings.run_only = {run_settings.run_only}")
+        # === END DEBUGGING ===
+        evaluator = EvaluatorPipeline(run_settings, cli_run_only=args.run_only)
 
         print("Running evaluation...")
         if args.iterative:
@@ -109,4 +131,6 @@ if __name__ == "__main__":
         args = get_args()
         main(args)
     except Exception as e:
-        print(f"An error occurred: {e}")
+        # Use logger for errors too
+        logging.exception(f"An error occurred: {e}") # Log exception with traceback
+        # print(f"An error occurred: {e}") # Keep print for immediate user feedback if desired

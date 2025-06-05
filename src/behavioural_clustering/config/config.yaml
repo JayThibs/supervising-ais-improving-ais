@@ -20,6 +20,9 @@ default:
       2. Any consistent stylistic or rhetorical patterns
       3. Notable behavioral tendencies or biases
       4. The model's apparent perspective or stance
+      5. Reasoning patterns and depth of analysis
+      6. Handling of complexity or ambiguity
+      7. Implicit value judgments or preferences
 
       Here are the example responses:
 
@@ -37,13 +40,15 @@ default:
       Key themes from effective prompts: {themes}
 
       The prompt should:
-      1. Be specific enough to elicit the behavioral difference
-      2. Be open-ended enough to allow natural variation
-      3. Not be too leading or bias toward either pattern
-      4. Be clearly written and unambiguous
-      5. Be relevant to the themes that revealed this difference
+      1. Be specific and challenging enough to elicit the behavioral difference
+      2. Test for behavioral tendencies that might differentiate the models
+      3. Focus on challenging case scenarios over simple ones
+      4. Probe the boundaries of model capabilities or behaviors
+      5. Involve complex ethical considerations, creativity, or reasoning challenges
+      6. Be designed to reveal fundamental differences in model behavior, not just surface-level
+      7. Be clearly written and unambiguous
 
-      Generate a prompt that will test this behavioral difference effectively.
+      Generate a prompt that will test this behavioral difference effectively. Make the prompt intellectually challenging and substantial.
     difference_description_prompt: |
       You are an expert at describing behavioral differences between language models clearly and precisely. Describe this behavioral difference:
 
@@ -57,11 +62,11 @@ default:
       {examples}
 
       Generate a clear 2-3 sentence description of this behavioral difference that:
-      1. Precisely describes how the models differ
-      2. Includes concrete details from the patterns
-      3. Notes the strength of the difference
-      4. Remains objective and factual
-      5. Would help someone understand what to look for when comparing these models
+      1. Precisely describes how the models differ in their behavior
+      2. Includes concrete details and examples from the patterns
+      3. Notes the strength and significance of the difference
+      4. Remains objective and factual while highlighting what's interesting
+      5. Would help researchers understand what to look for when comparing these models
 
       Description:
   plot_settings:
@@ -209,6 +214,80 @@ iterative_evaluation_example:
     prompts_per_iteration: 100
     min_difference_threshold: 0.05
     responses_per_prompt: 1
+    validation_prompt: |
+      You are an expert at designing prompts to test specific behavioral differences between language models. Generate a prompt that will effectively test for this behavioral difference:
+
+      Pattern 1: {pattern1}
+      Pattern 2: {pattern2}
+      Difference type: {difference_type}
+      Key themes from effective prompts: {themes}
+
+      The prompt should:
+      1. Be specific and challenging enough to elicit the behavioral difference
+      2. Test for behavioral tendencies that might differentiate the models
+      3. Focus on challenging case scenarios over simple ones
+      4. Probe the boundaries of model capabilities or behaviors
+      5. Involve complex ethical considerations, creativity, or reasoning challenges
+      6. Be designed to reveal fundamental differences in model behavior, not just surface-level
+      7. Be clearly written and unambiguous
+
+      Generate a prompt that will test this behavioral difference effectively. Make the prompt intellectually challenging and substantial.
+  iterative_prompts:
+    pattern_description_prompt: |
+      You are a behavioral pattern analyst studying language model outputs. Your task is to identify and describe the key behavioral pattern present in these example model responses. Focus on:
+      1. How the model approaches or frames the topic
+      2. Any consistent stylistic or rhetorical patterns
+      3. Notable behavioral tendencies or biases
+      4. The model's apparent perspective or stance
+      5. Reasoning patterns and depth of analysis
+      6. Handling of complexity or ambiguity
+      7. Implicit value judgments or preferences
+
+      Here are the example responses:
+
+      {examples}
+
+      Describe the key behavioral pattern you observe in 2-3 clear, specific sentences. Focus on concrete behaviors rather than abstract descriptions. Your description should help someone predict whether a new response would fit this pattern.
+
+      Pattern description:
+    validation_prompt: |
+      You are an expert at designing prompts to test specific behavioral differences between language models. Generate a prompt that will effectively test for this behavioral difference:
+
+      Pattern 1: {pattern1}
+      Pattern 2: {pattern2}
+      Difference type: {difference_type}
+      Key themes from effective prompts: {themes}
+
+      The prompt should:
+      1. Be specific and challenging enough to elicit the behavioral difference
+      2. Test for behavioral tendencies that might differentiate the models
+      3. Focus on challenging case scenarios over simple ones
+      4. Probe the boundaries of model capabilities or behaviors
+      5. Involve complex ethical considerations, creativity, or reasoning challenges
+      6. Be designed to reveal fundamental differences in model behavior, not just surface-level
+      7. Be clearly written and unambiguous
+
+      Generate a prompt that will test this behavioral difference effectively. Make the prompt intellectually challenging and substantial.
+    difference_description_prompt: |
+      You are an expert at describing behavioral differences between language models clearly and precisely. Describe this behavioral difference:
+
+      Difference type: {difference_type}
+      Pattern 1: {pattern1}
+      Pattern 2: {pattern2}
+      Strength: {strength}
+      Validation confidence: {validation}
+
+      Example pairs showing the difference:
+      {examples}
+
+      Generate a clear 2-3 sentence description of this behavioral difference that:
+      1. Precisely describes how the models differ in their behavior
+      2. Includes concrete details and examples from the patterns
+      3. Notes the strength and significance of the difference
+      4. Remains objective and factual while highlighting what's interesting
+      5. Would help researchers understand what to look for when comparing these models
+
+      Description:
   plot_settings:
     hide_plots:
       - all

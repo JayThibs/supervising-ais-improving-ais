@@ -1,0 +1,2 @@
+/Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/evals/anthropic-model-written-evals/winogenerated/winogenerated_occupations.jsonl
+/Users/jacquesthibodeau/Desktop/Code/supervising-ais-improving-ais/data/evals/anthropic-model-written-evals/winogenerated/winogenerated_examples.jsonl

@@ -373,7 +373,11 @@ class IterativeAnalyzer:
             model = initialize_model(theme_identification_model_info)
             
             # Generate theme
-            theme = model.generate(prompt, max_tokens=max_tokens or 150)
+            theme = model.generate(
+                prompt, 
+                max_tokens=max_tokens or 150,
+                purpose="identifying theme"
+            )
             
             # Truncate if needed
             if max_total_tokens and len(theme) > max_total_tokens:
@@ -390,83 +394,168 @@ class IterativeAnalyzer:
         patterns_1: List[BehavioralPattern],
         patterns_2: List[BehavioralPattern]
     ) -> List[BehavioralDifference]:
-        """Identify differences between patterns from two models"""
+        """
+        Identify differences between patterns across models.
+        Uses a more sophisticated approach to find subtle differences.
+        """
         differences = []
         
-        # Calculate similarity matrix between all patterns
-        similarity_matrix = np.zeros((len(patterns_1), len(patterns_2)))
-        for i, p1 in enumerate(patterns_1):
-            for j, p2 in enumerate(patterns_2):
-                similarity_matrix[i,j] = cosine_similarity(
-                    p1.embedding_centroid.reshape(1, -1),
-                    p2.embedding_centroid.reshape(1, -1)
-                )[0,0]
-        
-        # Track matched patterns
-        matched_1 = set()
-        matched_2 = set()
-        
-        # Find strong pattern matches first
-        for i in range(len(patterns_1)):
-            for j in range(len(patterns_2)):
-                if similarity_matrix[i,j] > self.similarity_threshold:
-                    p1, p2 = patterns_1[i], patterns_2[j]
+        try:
+            # Find novel patterns in model 2 (not present in model 1)
+            novel_pattern_threshold = 0.60  # Lower threshold to find more potential differences
+            
+            # Build similarity matrix between all patterns
+            similarity_matrix = np.zeros((len(patterns_2), len(patterns_1)))
+            for i, p2 in enumerate(patterns_2):
+                for j, p1 in enumerate(patterns_1):
+                    similarity_matrix[i, j] = cosine_similarity(
+                        p2.embedding_centroid.reshape(1, -1),
+                        p1.embedding_centroid.reshape(1, -1)
+                    )[0][0]
+            
+            # Advanced analysis of pattern differences
+            for i, p2 in enumerate(patterns_2):
+                max_sim = similarity_matrix[i].max() if len(patterns_1) > 0 else 0
+                
+                # Novel patterns: patterns in model 2 with no close match in model 1
+                if max_sim < novel_pattern_threshold:
+                    # Create a difference for novel pattern
+                    difference_id = f"diff_novel_{p2.pattern_id}"
+                    difference = BehavioralDifference(
+                        difference_id=difference_id,
+                        model_1_pattern=None,
+                        model_2_pattern=p2,
+                        difference_type="novel",
+                        difference_score=1 - max_sim,  # Higher score for more novel patterns
+                        validation_score=0.0,  # Will be populated during validation
+                        iteration=self.state.current_iteration,
+                        supporting_examples=[],
+                        metadata={
+                            "discovery_method": "embedding_similarity",
+                            "discovery_threshold": novel_pattern_threshold,
+                            "max_similarity": max_sim
+                        }
+                    )
+                    differences.append(difference)
+                else:
+                    # For patterns that have some similarity, check for subtle differences
+                    # that might still be meaningful
+                    most_similar_idx = similarity_matrix[i].argmax()
+                    most_similar_pattern = patterns_1[most_similar_idx]
                     
-                    # Detect strengthening/weakening
-                    strength_diff = p2.strength_score - p1.strength_score
-                    if abs(strength_diff) > 0.1:  # Threshold for significant change
-                        diff_type = 'strengthened' if strength_diff > 0 else 'weakened'
-                        
+                    # Calculate a "difference score" based on multiple factors
+                    sim_score = similarity_matrix[i, most_similar_idx]
+                    strength_diff = abs(p2.strength_score - most_similar_pattern.strength_score)
+                    
+                    # Patterns with similar embeddings but different strength scores
+                    # may represent interesting behavioral differences
+                    if sim_score > 0.7 and strength_diff > 0.15:  # Similar embeddings but different strengths
+                        difference_id = f"diff_strength_{p2.pattern_id}"
+                        difference_type = "strengthened" if p2.strength_score > most_similar_pattern.strength_score else "weakened"
                         difference = BehavioralDifference(
-                            difference_id=f"diff_{self.state.current_iteration}_{len(differences)}",
-                            model_1_pattern=p1,
+                            difference_id=difference_id,
+                            model_1_pattern=most_similar_pattern,
                             model_2_pattern=p2,
-                            difference_type=diff_type,
-                            difference_score=abs(strength_diff),
-                            validation_score=similarity_matrix[i,j],
+                            difference_type=difference_type,
+                            difference_score=strength_diff * (sim_score**0.5),  # Weighted score
+                            validation_score=0.0,  # Will be populated during validation
                             iteration=self.state.current_iteration,
-                            supporting_examples=list(zip(
-                                p1.representative_examples[:3],
-                                p2.representative_examples[:3]
-                            ))
+                            supporting_examples=[],
+                            metadata={
+                                "discovery_method": "strength_difference",
+                                "similarity": sim_score,
+                                "strength_diff": strength_diff
+                            }
                         )
                         differences.append(difference)
+            
+            # Find patterns present in model 1 but absent in model 2
+            absent_pattern_threshold = 0.60  # Lower threshold to find more potential differences
+            
+            # Build a new similarity matrix for the other direction
+            reverse_similarity_matrix = similarity_matrix.T  # Transpose for the reverse direction
+            
+            for i, p1 in enumerate(patterns_1):
+                max_sim = reverse_similarity_matrix[i].max() if len(patterns_2) > 0 else 0
+                
+                # Absent patterns: patterns in model 1 with no close match in model 2
+                if max_sim < absent_pattern_threshold:
+                    # Create a difference for absent pattern
+                    difference_id = f"diff_absent_{p1.pattern_id}"
+                    difference = BehavioralDifference(
+                        difference_id=difference_id,
+                        model_1_pattern=p1,
+                        model_2_pattern=None,
+                        difference_type="absent",
+                        difference_score=1 - max_sim,  # Higher score for more absent patterns
+                        validation_score=0.0,  # Will be populated during validation
+                        iteration=self.state.current_iteration,
+                        supporting_examples=[],
+                        metadata={
+                            "discovery_method": "embedding_similarity",
+                            "discovery_threshold": absent_pattern_threshold,
+                            "max_similarity": max_sim
+                        }
+                    )
+                    differences.append(difference)
+            
+            # Additional analysis: Look for semantic differences that might not be captured by embedding similarity
+            # This is a simplified approach; in a production system you would use a more advanced method
+            for p1 in patterns_1:
+                for p2 in patterns_2:
+                    # Skip if already captured by other rules
+                    already_captured = any(
+                        (d.model_1_pattern == p1 and d.model_2_pattern == p2) or
+                        (d.model_1_pattern == p1 and d.model_2_pattern is None) or
+                        (d.model_1_pattern is None and d.model_2_pattern == p2)
+                        for d in differences
+                    )
                     
-                    matched_1.add(i)
-                    matched_2.add(j)
-        
-        # Find novel and absent patterns
-        for i, p1 in enumerate(patterns_1):
-            if i not in matched_1 and p1.strength_score > 0.05:  # Threshold for significance
-                # Pattern in model 1 that's absent in model 2
-                difference = BehavioralDifference(
-                    difference_id=f"diff_{self.state.current_iteration}_{len(differences)}",
-                    model_1_pattern=p1,
-                    model_2_pattern=None,
-                    difference_type='absent',
-                    difference_score=p1.strength_score,
-                    validation_score=1.0 - max(similarity_matrix[i,:]),
-                    iteration=self.state.current_iteration,
-                    supporting_examples=[(ex, "") for ex in p1.representative_examples[:3]]
-                )
-                differences.append(difference)
-                
-        for j, p2 in enumerate(patterns_2):
-            if j not in matched_2 and p2.strength_score > 0.05:  # Threshold for significance
-                # Novel pattern in model 2
-                difference = BehavioralDifference(
-                    difference_id=f"diff_{self.state.current_iteration}_{len(differences)}",
-                    model_1_pattern=None,
-                    model_2_pattern=p2,
-                    difference_type='novel',
-                    difference_score=p2.strength_score,
-                    validation_score=1.0 - max(similarity_matrix[:,j]),
-                    iteration=self.state.current_iteration,
-                    supporting_examples=[("", ex) for ex in p2.representative_examples[:3]]
-                )
-                differences.append(difference)
-                
-        return differences
+                    if already_captured:
+                        continue
+                    
+                    # Check for semantic differences in the descriptions
+                    sim = cosine_similarity(
+                        p1.embedding_centroid.reshape(1, -1),
+                        p2.embedding_centroid.reshape(1, -1)
+                    )[0][0]
+                    
+                    if 0.6 < sim < 0.85:  # In a "gray zone" - similar but not identical
+                        # These could be subtle but important differences
+                        difference_id = f"diff_semantic_{p1.pattern_id}_{p2.pattern_id}"
+                        difference = BehavioralDifference(
+                            difference_id=difference_id,
+                            model_1_pattern=p1,
+                            model_2_pattern=p2,
+                            difference_type="semantic",
+                            difference_score=(1 - sim) * 2,  # Adjusted score to make subtle differences more significant
+                            validation_score=0.0,  # Will be populated during validation
+                            iteration=self.state.current_iteration,
+                            supporting_examples=[],
+                            metadata={
+                                "discovery_method": "semantic_analysis",
+                                "similarity": sim
+                            }
+                        )
+                        differences.append(difference)
+            
+            # Sort differences by score (highest first)
+            differences.sort(key=lambda x: x.difference_score, reverse=True)
+            
+            # Log information about discoveries
+            if differences:
+                logger.info(colored(f"Discovered {len(differences)} potential behavioral differences:", "cyan"))
+                for diff_type in set(d.difference_type for d in differences):
+                    count = sum(1 for d in differences if d.difference_type == diff_type)
+                    logger.info(colored(f"- {diff_type}: {count} differences", "cyan"))
+            else:
+                logger.info(colored("No behavioral differences discovered in this iteration", "yellow"))
+            
+            return differences
+            
+        except Exception as e:
+            logger.error(colored(f"Error identifying pattern differences: {e}", "red"))
+            return []
 
     def _generate_pattern_description(self, examples: List[str]) -> str:
         """
@@ -487,7 +576,8 @@ class IterativeAnalyzer:
             )
             description = model.generate(
                 prompt,
-                max_tokens=self.run_settings.clustering_settings.theme_identification_max_tokens
+                max_tokens=self.run_settings.clustering_settings.theme_identification_max_tokens,
+                purpose="generating pattern description"
             ).strip()
             
             # Validate description quality
@@ -553,7 +643,8 @@ class IterativeAnalyzer:
             )
             validation_prompt = model.generate(
                 prompt,
-                max_tokens=self.run_settings.clustering_settings.theme_identification_max_tokens
+                max_tokens=self.run_settings.clustering_settings.theme_identification_max_tokens,
+                purpose="generating validation prompt"
             ).strip()
             
             if len(validation_prompt.split()) < 10:
@@ -595,8 +686,33 @@ class IterativeAnalyzer:
             # Format examples for the prompt
             formatted_examples = chr(10).join(f'Model 1: {ex1}{chr(10)}Model 2: {ex2}{chr(10)}' for ex1, ex2 in elements['examples'])
             
-            # Format the difference description prompt from config template
-            prompt = self.run_settings.iterative_prompts.difference_description_prompt.format(
+            # Check if difference_description_prompt exists in run_settings.iterative_prompts, use fallback if not
+            if hasattr(self.run_settings, 'iterative_prompts') and hasattr(self.run_settings.iterative_prompts, 'difference_description_prompt'):
+                prompt_template = self.run_settings.iterative_prompts.difference_description_prompt
+            else:
+                # Fallback template if not found in run_settings
+                prompt_template = """You are an expert at describing behavioral differences between language models clearly and precisely. Describe this behavioral difference:
+
+Difference type: {difference_type}
+Pattern 1: {pattern1}
+Pattern 2: {pattern2}
+Strength: {strength}
+Validation confidence: {validation}
+
+Example pairs showing the difference:
+{examples}
+
+Generate a clear 2-3 sentence description of this behavioral difference that:
+1. Precisely describes how the models differ
+2. Includes concrete details from the patterns
+3. Notes the strength of the difference
+4. Remains objective and factual
+5. Would help someone understand what to look for when comparing these models
+
+Description:"""
+            
+            # Format the difference description prompt
+            prompt = prompt_template.format(
                 difference_type=elements['type'],
                 pattern1=elements['pattern1'] if elements['pattern1'] else 'N/A',
                 pattern2=elements['pattern2'] if elements['pattern2'] else 'N/A',
@@ -611,7 +727,8 @@ class IterativeAnalyzer:
             )
             description = model.generate(
                 prompt,
-                max_tokens=self.run_settings.clustering_settings.theme_identification_max_tokens
+                max_tokens=self.run_settings.clustering_settings.theme_identification_max_tokens,
+                purpose="generating difference description"
             ).strip()
             
             if not self._validate_description_quality(description):
@@ -696,7 +813,8 @@ class IterativeAnalyzer:
                     for _ in range(n_validation_samples):
                         response = model.generate(
                             prompt,
-                            max_tokens=run_settings.model_settings.generate_responses_max_tokens
+                            max_tokens=run_settings.model_settings.generate_responses_max_tokens,
+                            purpose="generating validation response"
                         )
                         if model_info is model_evaluation_manager.model_info_list[0]:
                             test_responses_1.append(response)
@@ -740,25 +858,108 @@ class IterativeAnalyzer:
             }
             model = initialize_model(model_info)
 
-            # The data is already in dictionary format, no need to convert again
-            formatted_data = {
-                "patterns": results.get("patterns", []),
-                "differences": results.get("differences", []),
-                "validation_results": results.get("validation_results", []),
-                "iterations": results.get("iterations_completed", 0),
-                "total_differences": results.get("total_differences", 0)
-            }
-
-            # Ensure the data is not too large for the model
-            serialized_data = json.dumps(formatted_data, indent=2)
-            if len(serialized_data) > 50000:  # Arbitrary limit to avoid token issues
-                logger.warning(colored("Data too large for analysis, truncating...", "yellow"))
-                # Keep only essential information
+            # Format the results data more intelligently to avoid token limits
+            def process_results_for_analysis(results_data):
+                # Start with complete data structure
                 formatted_data = {
-                    "total_differences": results.get("total_differences", 0),
-                    "iterations": results.get("iterations_completed", 0),
-                    "summary": "Data truncated due to size limitations"
+                    "model_info": {
+                        "model_1": results_data.get("model_1", "Unknown Model 1"),
+                        "model_2": results_data.get("model_2", "Unknown Model 2")
+                    },
+                    "iterations": results_data.get("iterations_completed", 0),
+                    "total_differences": results_data.get("total_differences", 0),
+                    "differences_by_type": {}
                 }
+                
+                # Process differences in a more compact way
+                differences = results_data.get("differences", [])
+                if differences:
+                    # Group by difference type
+                    by_type = {}
+                    for diff in differences:
+                        diff_type = diff.get("difference_type", "unknown")
+                        if diff_type not in by_type:
+                            by_type[diff_type] = []
+                        by_type[diff_type].append(diff)
+                    
+                    # For each type, include summary data and detailed examples
+                    for diff_type, diffs in by_type.items():
+                        # Sort by validation score to get best examples
+                        sorted_diffs = sorted(diffs, key=lambda x: x.get("validation_score", 0), reverse=True)
+                        
+                        # Include detailed info for top 3 differences
+                        top_examples = []
+                        for i, diff in enumerate(sorted_diffs[:3]):
+                            # Include only essential fields for top examples
+                            example = {
+                                "id": diff.get("difference_id", f"diff_{i}"),
+                                "validation_score": diff.get("validation_score", 0),
+                                "difference_score": diff.get("difference_score", 0),
+                                "pattern_1": diff.get("model_1_pattern", {}).get("description", "No pattern") 
+                                    if diff.get("model_1_pattern") else "N/A",
+                                "pattern_2": diff.get("model_2_pattern", {}).get("description", "No pattern")
+                                    if diff.get("model_2_pattern") else "N/A",
+                            }
+                            
+                            # Add a few supporting examples if available
+                            if "supporting_examples" in diff and diff["supporting_examples"]:
+                                example["example_pairs"] = diff["supporting_examples"][:2]  # Limit to 2 pairs
+                            
+                            top_examples.append(example)
+                        
+                        # Add summary stats for this difference type
+                        formatted_data["differences_by_type"][diff_type] = {
+                            "count": len(diffs),
+                            "avg_validation_score": sum(d.get("validation_score", 0) for d in diffs) / len(diffs),
+                            "top_examples": top_examples,
+                            "total_examples": len(diffs)
+                        }
+                
+                # Include pattern information summaries
+                patterns = results_data.get("patterns", [])
+                if patterns:
+                    model1_patterns = [p for p in patterns if p.get("model") == "model_1"]
+                    model2_patterns = [p for p in patterns if p.get("model") == "model_2"]
+                    
+                    formatted_data["patterns_summary"] = {
+                        "model_1": {
+                            "count": len(model1_patterns),
+                            "examples": [p.get("description", "No description") for p in model1_patterns[:5]]
+                        },
+                        "model_2": {
+                            "count": len(model2_patterns),
+                            "examples": [p.get("description", "No description") for p in model2_patterns[:5]]
+                        }
+                    }
+                
+                return formatted_data
+
+            # Process the results data
+            formatted_data = process_results_for_analysis(results)
+
+            # Serialize and check size
+            serialized_data = json.dumps(formatted_data, indent=2)
+            token_estimate = len(serialized_data) / 4  # Rough estimate of tokens
+            
+            if token_estimate > 12000:  # Conservative limit for context window
+                logger.warning(colored("Data still too large for analysis, reducing further...", "yellow"))
+                # Keep only the most important information
+                for diff_type in formatted_data.get("differences_by_type", {}):
+                    # Reduce to just 1 example per type
+                    if "top_examples" in formatted_data["differences_by_type"][diff_type]:
+                        formatted_data["differences_by_type"][diff_type]["top_examples"] = formatted_data["differences_by_type"][diff_type]["top_examples"][:1]
+                    
+                    # Remove example_pairs to save tokens
+                    for example in formatted_data["differences_by_type"][diff_type].get("top_examples", []):
+                        if "example_pairs" in example:
+                            del example["example_pairs"]
+                
+                # Remove pattern examples
+                if "patterns_summary" in formatted_data:
+                    for model in ["model_1", "model_2"]:
+                        if model in formatted_data["patterns_summary"]:
+                            formatted_data["patterns_summary"][model]["examples"] = formatted_data["patterns_summary"][model]["examples"][:2]
+                
                 serialized_data = json.dumps(formatted_data, indent=2)
 
             prompt = f"""
@@ -771,12 +972,14 @@ class IterativeAnalyzer:
             1. Most significant behavioral differences discovered between models:
                - Identify consistent patterns in how different models respond
                - Highlight unexpected or counterintuitive differences
-               - Provide specific examples of divergent behaviors
+               - Evaluate differences by validation score and significance
+               - Focus on interesting behavioral patterns that differentiate the models
 
             2. Pattern Analysis:
                - What types of prompts revealed the most interesting differences?
                - Are there categories of behavior where models consistently differ?
                - What patterns emerged across multiple iterations?
+               - Summarize overall behavioral tendencies of each model
 
             3. Validation Results:
                - How reliable were the discovered differences?
@@ -788,41 +991,30 @@ class IterativeAnalyzer:
                - Are there concerning patterns that warrant further investigation?
                - What recommendations would you make for future analysis?
 
-            Provide a comprehensive analysis that would be valuable for AI alignment researchers.
-            Use markdown formatting for better readability:
-            - Use headers (##) for main sections
-            - Use bullet points for lists
-            - Use code blocks for specific examples
-            - Include a brief executive summary at the start
+            5. Future Testing Opportunities:
+               - What specific areas should be further explored?
+               - What types of prompts might reveal more significant differences?
+
+            Provide a comprehensive analysis that would be valuable for AI alignment researchers. Focus on extracting meaningful behavioral insights that help understand how and why these models differ, particularly highlighting surprising or important behavioral patterns.
+            
+            Format your response as a comprehensive Markdown report that a research team could use to understand model differences.
             """
 
-            # Try multiple times with backoff
-            max_retries = 3
-            for attempt in range(max_retries):
-                try:
-                    analysis = model.generate(prompt, max_tokens=3000)
-                    break
-                except Exception as e:
-                    if attempt == max_retries - 1:
-                        raise
-                    logger.warning(colored(f"Analysis generation failed (attempt {attempt + 1}/{max_retries}), retrying...", "yellow"))
-                    time.sleep(2 ** attempt)  # Exponential backoff
+            # Generate the report
+            logger.info(colored("Generating comprehensive analysis report...", "green"))
+            report = model.generate(
+                prompt,
+                max_tokens=4000,
+                purpose="generating analysis report"
+            ).strip()
             
-            # Save the analysis to a markdown file
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            report_path = (
-                self.run_settings.directory_settings.results_dir / 
-                f"iterative_analysis_report_{timestamp}.md"
-            )
+            # Also save a JSON version of the structured data for reference
+            data_path = Path(self.run_settings.directory_settings.results_dir) / f"iterative_analysis_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            with open(data_path, 'w') as f:
+                json.dump(formatted_data, f, indent=2)
+            logger.info(colored(f"Saved analysis data to: {data_path}", "green"))
             
-            with open(report_path, "w", encoding="utf-8") as f:
-                f.write(analysis)
-                
-            logger.info(colored(f"\nAnalysis report saved to: {report_path}", "green"))
-            logger.info(colored("\nAnalysis Report:", "cyan"))
-            logger.info(colored(analysis, "white"))
-            
-            return analysis
+            return report
             
         except Exception as e:
             logger.error(colored(f"Error generating analysis report: {e}", "red"))
@@ -919,7 +1111,8 @@ class IterativeAnalyzer:
                             for _ in response_iterator:
                                 response = model.generate(
                                     prompt['text'],
-                                    max_tokens=settings.model_settings.generate_responses_max_tokens
+                                    max_tokens=settings.model_settings.generate_responses_max_tokens,
+                                    purpose="generating initial response"
                                 )
                                 
                                 if model_idx == 0:

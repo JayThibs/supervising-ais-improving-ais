@@ -4,6 +4,7 @@ from pathlib import Path
 import json
 from dataclasses import dataclass, field, asdict, fields
 from typing import List, Tuple, Dict, Any, Optional, Union
+import re
 
 
 # Define constants for available data types
@@ -24,6 +25,10 @@ HIDEABLE_PLOT_TYPES = [
     "hierarchical",
     "spectral",
 ]
+
+# Helper function to convert snake_case to PascalCase
+def snake_to_pascal(snake_str: str) -> str:
+    return "".join(word.capitalize() for word in snake_str.split('_'))
 
 
 @dataclass
@@ -466,26 +471,59 @@ class RunSettings:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'RunSettings':
+        # Helper function to handle path conversion within this method's scope
         def convert_to_path(item):
             if isinstance(item, dict):
-                if 'data_dir' in item or 'evals_dir' in item or 'results_dir' in item or 'pickle_dir' in item or 'viz_dir' in item or 'tables_dir' in item:
-                    return {k: Path(v) if isinstance(v, str) else convert_to_path(v) for k, v in item.items()}
+                # Check for keys that indicate DirectorySettings structure
+                dir_keys = {'data_dir', 'evals_dir', 'results_dir', 'pickle_dir', 'viz_dir', 'tables_dir'}
+                if any(k in item for k in dir_keys):
+                     # Convert string values associated with directory keys to Path objects
+                    return {k: Path(v) if k in dir_keys and isinstance(v, str) else convert_to_path(v) for k, v in item.items()}
+                # Recursively process other nested dictionaries
                 return {k: convert_to_path(v) for k, v in item.items()}
             elif isinstance(item, list):
+                # Recursively process items in lists
                 return [convert_to_path(i) for i in item]
+            # Return item unchanged if not a dict or list
             return item
 
-        # Convert string paths back to Path objects
+        # Convert string paths back to Path objects using the helper
         data = convert_to_path(data)
 
-        # Remove any unexpected keys
+        # Filter out keys not present in the RunSettings dataclass fields
         valid_keys = {f.name for f in fields(cls)}
         filtered_data = {k: v for k, v in data.items() if k in valid_keys}
 
-        # Convert nested dictionaries to appropriate dataclass objects
+        # Convert nested dictionaries ending with '_settings' to their respective dataclass objects
         for key, value in filtered_data.items():
             if key.endswith('_settings') and isinstance(value, dict):
-                setting_class = globals()[key.replace('_settings', '').capitalize() + 'Settings']
-                filtered_data[key] = setting_class(**value)
+                # Construct the PascalCase class name from the snake_case key
+                class_name_base = snake_to_pascal(key.replace('_settings', '')) # Use helper function
+                class_name = f"{class_name_base}Settings"
+                
+                # Attempt to find the class in the global scope
+                setting_class = globals().get(class_name)
+                
+                # If the class is found, instantiate it with the dictionary values
+                if setting_class and issubclass(setting_class, object): # Basic check if it's a class
+                    try:
+                        filtered_data[key] = setting_class(**value)
+                    except TypeError as e:
+                        # Log error if instantiation fails (e.g., unexpected arguments)
+                        print(f"Warning: Could not instantiate {class_name} with provided data for key '{key}'. Error: {e}")
+                        # Optionally keep the original dictionary or handle differently
+                        # filtered_data[key] = value 
+                else:
+                     # Log warning if the corresponding class is not found
+                    print(f"Warning: Settings class '{class_name}' not found for key '{key}'. Keeping raw dictionary.")
+                    # Keep the original dictionary if class not found
+                    # filtered_data[key] = value 
 
-        return cls(**filtered_data)
+        # Instantiate the main RunSettings class with the processed data
+        try:
+            return cls(**filtered_data)
+        except TypeError as e:
+            # Log error if final instantiation fails
+            print(f"Error: Failed to instantiate RunSettings. Error: {e}")
+            # Depending on desired behavior, could return a default instance or raise
+            raise # Re-raise the error to indicate failure
