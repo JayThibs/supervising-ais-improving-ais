@@ -40,9 +40,9 @@ class AutoFineTuningEvaluator:
         args (argparse.Namespace): Command-line arguments for the process.
         key (str): API key for the chosen provider.
         ground_truths_df (pd.DataFrame): DataFrame containing ground truths and associated data.
-        base_model (AutoModelForCausalLM): The base language model.
+        base_model (Union[AutoModelForCausalLM, str]): The base language model.
         tokenizer (AutoTokenizer): Tokenizer for the base model.
-        intervention_model (AutoModelForCausalLM): The intervention model.
+        intervention_model (Union[AutoModelForCausalLM, str]): The intervention model.
     """
 
     def __init__(self, args: argparse.Namespace):
@@ -60,6 +60,7 @@ class AutoFineTuningEvaluator:
         # Initialize the evaluator
         self.args = args
         self.key = load_api_key(args.key_path)
+        self.openrouter_api_key = load_api_key(args.openrouter_api_key_path) if args.openrouter_api_key_path else None
         self.instantiate_client()
         self.base_model = None
         self.tokenizer = None
@@ -208,122 +209,126 @@ class AutoFineTuningEvaluator:
 
     def run(self):
         """Execute the entire automated finetuning and evaluation process."""
-        self.load_base_model()
+        if not self.args.base_model.startswith("OR:") and not self.args.intervention_model.startswith("OR:"): # If we are not using an OpenRouter model, we need to load the base model
+            self.load_base_model()
 
-        if self.args.intervention_model:
-            print("Loading intervention model")
-            self.load_intervention_model()
-        
-        # If we are not loading a pre-existing intervention model, we need to generate 
-        # our own intervention model
-        else:
-            print("Generating new intervention model")
-            self.log.info("generating_new_intervention_model")
-
-            if self.args.decoded_texts_load_path and not path.exists(self.args.decoded_texts_load_path):
-                print(f"Alert: Decoded texts load path {self.args.decoded_texts_load_path} does not exist")
-                if self.args.decoded_texts_save_path:
-                    print("Will generate new decoded texts and save them to the specified path")
-                    self.args.decoded_texts_load_path = self.args.decoded_texts_save_path
-                else:
-                    raise ValueError(f"Decoded texts load path {self.args.decoded_texts_load_path} does not exist and no save path specified")
+            if self.args.intervention_model:
+                print("Loading intervention model")
+                self.load_intervention_model()
             
-            # Load ground truths and data if they exist
-            if not self.args.regenerate_ground_truths and self.args.ground_truth_file_path is not None and path.exists(self.args.ground_truth_file_path):
-                self.load_ground_truths_and_data()
-                self.ground_truths = self.ground_truths_df['ground_truth'].unique().tolist()
-                self.ground_truths = [gt for gt in self.ground_truths if gt is not None and gt != "" and gt != "Base model"]
-                print("ground_truths_df unique ground truths", self.ground_truths)
-            # Otherwise, enerate ground truths and data
-            elif self.args.num_ground_truths > 0:
-                if not self.args.regenerate_ground_truths and self.args.ground_truth_file_path is not None and not path.exists(self.args.ground_truth_file_path):
-                    print(f"Alert: Ground truths file {self.args.ground_truth_file_path} does not exist")
-                    print("Regenerating ground truths. This may be invalid behavior if you wanted to load existing ground truths.")
-                self.ground_truths = generate_ground_truths(
-                    self.args.num_ground_truths,
-                    self.args.api_provider,
-                    self.args.model_str,
-                    self.key,   
-                    self.client,
-                    self.args.focus_area,
-                    self.args.use_truthful_qa,
-                    self.args.api_interactions_save_loc,
-                    self.log,
-                    self.args.random_GT_sampling_seed
-                )
-                print("ground_truths", self.ground_truths)
-            # Check if we need to generate new training data
-            if (
-                self.args.regenerate_ground_truths or # Flag to regenerate new ground truths
-                self.args.ground_truth_file_path is None or # Means we didn't load existing ground truths
-                not path.exists(self.args.ground_truth_file_path) or # Also means we didn't load existing ground truths
-                self.args.regenerate_training_data # The flag to regenerate new training data
-            ):
-                # At least one of these must be > 0 to generate training data
-                if self.args.num_base_samples_for_training > 0 or self.args.num_samples > 0:
-                    print("Generating training data")
-                    self.ground_truths_df = generate_dataset(
-                        self.ground_truths,
-                        self.args.num_samples,
+            # If we are not loading a pre-existing intervention model, we need to generate 
+            # our own intervention model
+            else:
+                print("Generating new intervention model")
+                self.log.info("generating_new_intervention_model")
+
+                if self.args.decoded_texts_load_path and not path.exists(self.args.decoded_texts_load_path):
+                    print(f"Alert: Decoded texts load path {self.args.decoded_texts_load_path} does not exist")
+                    if self.args.decoded_texts_save_path:
+                        print("Will generate new decoded texts and save them to the specified path")
+                        self.args.decoded_texts_load_path = self.args.decoded_texts_save_path
+                    else:
+                        raise ValueError(f"Decoded texts load path {self.args.decoded_texts_load_path} does not exist and no save path specified")
+                
+                # Load ground truths and data if they exist
+                if not self.args.regenerate_ground_truths and self.args.ground_truth_file_path is not None and path.exists(self.args.ground_truth_file_path):
+                    self.load_ground_truths_and_data()
+                    self.ground_truths = self.ground_truths_df['ground_truth'].unique().tolist()
+                    self.ground_truths = [gt for gt in self.ground_truths if gt is not None and gt != "" and gt != "Base model"]
+                    print("ground_truths_df unique ground truths", self.ground_truths)
+                # Otherwise, enerate ground truths and data
+                elif self.args.num_ground_truths > 0:
+                    if not self.args.regenerate_ground_truths and self.args.ground_truth_file_path is not None and not path.exists(self.args.ground_truth_file_path):
+                        print(f"Alert: Ground truths file {self.args.ground_truth_file_path} does not exist")
+                        print("Regenerating ground truths. This may be invalid behavior if you wanted to load existing ground truths.")
+                    self.ground_truths = generate_ground_truths(
+                        self.args.num_ground_truths,
                         self.args.api_provider,
                         self.args.model_str,
-                        self.key,
+                        self.key,   
                         self.client,
-                        self.args.ground_truth_file_path,
-                        self.args.num_base_samples_for_training,
-                        self.base_model,
-                        self.tokenizer,
-                        self.args.finetuning_params.get("max_length", 64),
-                        self.args.decoding_batch_size,
+                        self.args.focus_area,
+                        self.args.use_truthful_qa,
                         self.args.api_interactions_save_loc,
-                        self.log
+                        self.log,
+                        self.args.random_GT_sampling_seed
                     )
-                print("ground_truths_df", self.ground_truths_df)
-                print("ground_truths", self.ground_truths)
-                if self.ground_truths and (self.ground_truths_df is None or self.ground_truths_df.empty):
-                    raise ValueError("No training data generated for the new ground truths")
+                    print("ground_truths", self.ground_truths)
+                # Check if we need to generate new training data
+                if (
+                    self.args.regenerate_ground_truths or # Flag to regenerate new ground truths
+                    self.args.ground_truth_file_path is None or # Means we didn't load existing ground truths
+                    not path.exists(self.args.ground_truth_file_path) or # Also means we didn't load existing ground truths
+                    self.args.regenerate_training_data # The flag to regenerate new training data
+                ):
+                    # At least one of these must be > 0 to generate training data
+                    if self.args.num_base_samples_for_training > 0 or self.args.num_samples > 0:
+                        print("Generating training data")
+                        self.ground_truths_df = generate_dataset(
+                            self.ground_truths,
+                            self.args.num_samples,
+                            self.args.api_provider,
+                            self.args.model_str,
+                            self.key,
+                            self.client,
+                            self.args.ground_truth_file_path,
+                            self.args.num_base_samples_for_training,
+                            self.base_model,
+                            self.tokenizer,
+                            self.args.finetuning_params.get("max_length", 64),
+                            self.args.decoding_batch_size,
+                            self.args.api_interactions_save_loc,
+                            self.log
+                        )
+                    print("ground_truths_df", self.ground_truths_df)
+                    print("ground_truths", self.ground_truths)
+                    if self.ground_truths and (self.ground_truths_df is None or self.ground_truths_df.empty):
+                        raise ValueError("No training data generated for the new ground truths")
 
-            # Check if we load a pre-existing finetuned model
-            if self.args.finetuning_load_path:
-                self.intervention_model = AutoModelForCausalLM.from_pretrained(self.args.finetuning_load_path)
-            # Otherwise, we finetune the model; first check if we have the training data
-            elif self.ground_truths_df is not None and not self.ground_truths_df.empty:
-                self.finetune_model()
-                # Save the finetuned model
-                if self.args.finetuning_save_path:
-                    self.intervention_model.save_pretrained(self.args.finetuning_save_path)
-                    print(f"Finetuned model saved to {self.args.finetuning_save_path}")
-            else:
-                print("Alert: Not finetuning model because no training data generated or loaded")
-                print("Should generate 'new' model by quantizing the base model")
+                # Check if we load a pre-existing finetuned model
+                if self.args.finetuning_load_path:
+                    self.intervention_model = AutoModelForCausalLM.from_pretrained(self.args.finetuning_load_path)
+                # Otherwise, we finetune the model; first check if we have the training data
+                elif self.ground_truths_df is not None and not self.ground_truths_df.empty:
+                    self.finetune_model()
+                    # Save the finetuned model
+                    if self.args.finetuning_save_path:
+                        self.intervention_model.save_pretrained(self.args.finetuning_save_path)
+                        print(f"Finetuned model saved to {self.args.finetuning_save_path}")
+                else:
+                    print("Alert: Not finetuning model because no training data generated or loaded")
+                    print("Should generate 'new' model by quantizing the base model")
 
-        # Reset the base model and quantize if necessary
-        if self.args.train_lora:
-            del self.base_model
-            self.load_base_model()
-        #else:
-        #    self.quantize_models()
-        
-        print("Base model:")
-        print(self.base_model)
-        print(f"  Parameter count: {sum(p.numel() for p in self.base_model.parameters())}")
-        print(f"  Quantization: {self.base_model.config.quantization_config if hasattr(self.base_model.config, 'quantization_config') else 'None'}")
-        
-        print("\nIntervention model:")
-        print(self.intervention_model)
-        print(f"  Parameter count: {sum(p.numel() for p in self.intervention_model.parameters())}")
-        print(f"  Quantization: {self.intervention_model.config.quantization_config if hasattr(self.intervention_model.config, 'quantization_config') else 'None'}")
+            # Reset the base model and quantize if necessary
+            if self.args.train_lora:
+                del self.base_model
+                self.load_base_model()
+            #else:
+            #    self.quantize_models()
+            
+            print("Base model:")
+            print(self.base_model)
+            print(f"  Parameter count: {sum(p.numel() for p in self.base_model.parameters())}")
+            print(f"  Quantization: {self.base_model.config.quantization_config if hasattr(self.base_model.config, 'quantization_config') else 'None'}")
+            
+            print("\nIntervention model:")
+            print(self.intervention_model)
+            print(f"  Parameter count: {sum(p.numel() for p in self.intervention_model.parameters())}")
+            print(f"  Quantization: {self.intervention_model.config.quantization_config if hasattr(self.intervention_model.config, 'quantization_config') else 'None'}")
 
-        if self.args.run_weight_analysis:
-            # Check that the weights of the base model and intervention model are different and analyze the differences
-            total_weight_diff = 0
-            for (base_name, base_param), (intervention_name, intervention_param) in zip(self.base_model.named_parameters(), self.intervention_model.named_parameters()):
-                weight_diff = torch.sum(torch.abs(base_param.data - intervention_param.data))
-                total_weight_diff += weight_diff
-                if weight_diff > 0.000001:
-                    print(f"Weight difference for {base_name}: {weight_diff}")
-                    analyze_weight_difference(base_param.data, intervention_param.data, base_name, self.args.run_prefix)
-            print(f"Total weight difference: {total_weight_diff}")
+            if self.args.run_weight_analysis:
+                # Check that the weights of the base model and intervention model are different and analyze the differences
+                total_weight_diff = 0
+                for (base_name, base_param), (intervention_name, intervention_param) in zip(self.base_model.named_parameters(), self.intervention_model.named_parameters()):
+                    weight_diff = torch.sum(torch.abs(base_param.data - intervention_param.data))
+                    total_weight_diff += weight_diff
+                    if weight_diff > 0.000001:
+                        print(f"Weight difference for {base_name}: {weight_diff}")
+                        analyze_weight_difference(base_param.data, intervention_param.data, base_name, self.args.run_prefix)
+                print(f"Total weight difference: {total_weight_diff}")
+        else:
+            self.base_model = self.args.base_model.split(":")[1]
+            self.intervention_model = self.args.intervention_model.split(":")[1]
 
         results, table_output, discovered_hypotheses = apply_interpretability_method_1_to_K(
             self.base_model, 
@@ -337,6 +342,7 @@ class AutoFineTuningEvaluator:
             api_model_str=self.args.model_str,
             api_stronger_model_str=self.args.stronger_model_str,
             auth_key=self.key,
+            openrouter_api_key=self.openrouter_api_key,
             client=self.client,
             local_embedding_model_str=self.args.local_embedding_model_str,
             local_embedding_api_key=None,
@@ -353,6 +359,7 @@ class AutoFineTuningEvaluator:
             min_cluster_size=self.args.min_cluster_size,
             max_cluster_size=self.args.max_cluster_size,
             sampled_comparison_texts_per_cluster=self.args.sampled_comparison_texts_per_cluster,
+            cross_validate_contrastive_labels=self.args.cross_validate_contrastive_labels,
             sampled_texts_per_cluster=self.args.sampled_texts_per_cluster,
             max_length=self.args.decoding_max_length,
             decoding_batch_size=self.args.decoding_batch_size,
@@ -372,6 +379,7 @@ class AutoFineTuningEvaluator:
             verified_diversity_promoter=self.args.verified_diversity_promoter,
             use_unitary_comparisons=self.args.use_unitary_comparisons,
             max_unitary_comparisons_per_label=self.args.max_unitary_comparisons_per_label,
+            additional_unitary_comparisons_per_label=self.args.additional_unitary_comparisons_per_label,
             match_cutoff=self.args.match_cutoff,
             discriminative_query_rounds=self.args.discriminative_query_rounds,
             discriminative_validation_runs=self.args.discriminative_validation_runs,
@@ -422,9 +430,9 @@ if __name__ == "__main__":
     parser.add_argument("--graph_load_path", type=str, default=None, help="Path to load the graph from")
     parser.add_argument("--scoring_results_load_path", type=str, default=None, help="Path to load the scoring results from")
     # Base model, device
-    parser.add_argument("--base_model", type=str, required=True, help="HuggingFace model ID for the base model")
+    parser.add_argument("--base_model", type=str, required=True, help="Either a HuggingFace model ID for the base model, a path to a local model directory, or \"OR:<model_str>\" for an OpenRouter model specified by <model_str>. If the latter, include an openrouter API key path via --openrouter_api_key_path")
     parser.add_argument("--base_model_revision", type=str, default=None, help="Revision of the base model to use")
-    parser.add_argument("--intervention_model", type=str, default=None, help="HuggingFace model ID for the intervention model. If not specified, we assume it is the same as the base model.")
+    parser.add_argument("--intervention_model", type=str, default=None, help="Either a HuggingFace model ID for the intervention model, a path to a local model directory, or \"OR:<model_str>\" for an OpenRouter model specified by <model_str>. If the latter, include an openrouter API key path via --openrouter_api_key_path")
     parser.add_argument("--intervention_model_revision", type=str, default=None, help="Revision of the intervention model to use")
     parser.add_argument("--device", type=str, default=None, help="Device to use for inference with the base and intervention models")
 
@@ -477,6 +485,7 @@ if __name__ == "__main__":
     parser.add_argument("--min_cluster_size", type=int, default=7, help="Minimum cluster size to use for clustering. Only matters when using HDBSCAN")
     parser.add_argument("--max_cluster_size", type=int, default=2000, help="Maximum cluster size to use for clustering. Only matters when using HDBSCAN")
     parser.add_argument("--sampled_comparison_texts_per_cluster", type=int, default=50, help="Number of texts to sample for each cluster when validating the contrastive discriminative score of labels between neighboring clusters")
+    parser.add_argument("--cross_validate_contrastive_labels", action="store_true", help="Flag to cross-validate the contrastive labels by testing the discriminative score of the labels on different clusters from which they were generated.")
     parser.add_argument("--sampled_texts_per_cluster", type=int, default=10, help="Number of texts to sample for each cluster when generating labels")
     parser.add_argument("--clustering_instructions", type=str, default="Identify the topic or theme of the given texts", help="Instructions provided to the local embedding model for clustering")
     parser.add_argument("--n_clustering_inits", type=int, default=10, help="Number of clustering initializations to use for clustering")
@@ -493,6 +502,7 @@ if __name__ == "__main__":
 
     parser.add_argument("--use_unitary_comparisons", action="store_true", help="Flag to use unitary comparisons")
     parser.add_argument("--max_unitary_comparisons_per_label", type=int, default=100, help="Maximum number of unitary comparisons to perform per label")
+    parser.add_argument("--additional_unitary_comparisons_per_label", type=int, default=0, help="Additional number of unitary comparisons to perform per label")
     parser.add_argument("--match_cutoff", type=float, default=0.69, help="Accuracy / AUC cutoff for determining matching/unmatching clusters")
     parser.add_argument("--discriminative_query_rounds", type=int, default=3, help="Number of rounds of discriminative queries to perform")
     parser.add_argument("--discriminative_validation_runs", type=int, default=5, help="Number of validation runs to perform for each model for each hypothesis")
@@ -507,6 +517,7 @@ if __name__ == "__main__":
     parser.add_argument("--model_str", type=str, required=True, help="Model version for the chosen API provider")
     parser.add_argument("--stronger_model_str", type=str, default=None, help="Model version for an optional second model more capable than the one indicated with model_str; can be used for key steps that are not repeated often")
     parser.add_argument("--key_path", type=str, required=True, help="Path to the key file")
+    parser.add_argument("--openrouter_api_key_path", type=str, default=None, help="Path to the openrouter API key file")
     parser.add_argument("--api_interactions_save_loc", type=str, default=None, help="File location to record any API model interactions. Defaults to None and no recording of interactions.")
 
     args = parser.parse_args()

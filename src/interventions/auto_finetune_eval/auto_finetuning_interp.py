@@ -18,7 +18,7 @@ from terminaltables import AsciiTable
 from tqdm import tqdm
 import re
 import pickle
-from auto_finetuning_helpers import plot_comparison_tsne, batch_decode_texts, load_statements_from_MWE_repo, load_statements_from_MPI_repo, load_statements_from_jailbreak_llms_repo
+from auto_finetuning_helpers import plot_comparison_tsne, batch_decode_texts, load_statements_from_MWE_repo, load_statements_from_MPI_repo, load_statements_from_jailbreak_llms_repo, parallel_make_api_requests
 from os import path
 
 from validated_comparison_tools import read_past_embeddings_or_generate_new, match_clusterings, get_validated_contrastive_cluster_labels, validated_assistant_generative_compare, build_contrastive_K_neighbor_similarity_graph, get_cluster_labels_random_subsets, evaluate_label_discrimination, validated_embeddings_discriminative_single_unknown_ICL, attach_cluster_metrics_to_graph, analyze_metric_differences_vs_similarity, analyze_node_metric_vs_neighbor_similarity, analyze_hypothesis_scores_vs_cluster_metrics
@@ -26,13 +26,14 @@ from structlog._config import BoundLoggerLazyProxy
 
 
 def setup_interpretability_method(
-        base_model: PreTrainedModel, 
-        finetuned_model: PreTrainedModel, 
+        base_model: Union[PreTrainedModel, str], 
+        finetuned_model: Union[PreTrainedModel, str], 
         tokenizer: PreTrainedTokenizer,
         n_decoded_texts: int = 2000, 
         decoding_prefix_file: Optional[str] = None, 
         use_decoding_prefixes_as_cluster_labels: bool = False,
         auth_key: Optional[str] = None,
+        openrouter_api_key: Optional[str] = None,
         client: Optional[Any] = None,
         local_embedding_model_str: str = "intfloat/multilingual-e5-large-instruct", 
         local_embedding_api_key: Optional[str] = None,
@@ -70,14 +71,17 @@ def setup_interpretability_method(
     containing the setup results for further analysis.
 
     Args:
-        base_model (PreTrainedModel): The original, pre-finetuned model.
-        finetuned_model (PreTrainedModel): The model after finetuning.
+        base_model (Union[PreTrainedModel, str]): The original, pre-finetuned model. Can also be a string,
+            in which case it references an openrouter model that will respond via the openrouter API.
+        finetuned_model (Union[PreTrainedModel, str]): The model after finetuning. Can also be a string,
+            in which case it references an openrouter model that will respond via the openrouter API.
         tokenizer (PreTrainedTokenizer): The tokenizer to use for text generation.
         n_decoded_texts (int): The number of texts to decode with each model.
         decoding_prefix_file (Optional[str]): The path to a file containing a set of prefixes to 
             prepend to the texts to be decoded.
         use_decoding_prefixes_as_cluster_labels (bool): Whether to use the decoding prefixes as cluster labels.
         auth_key (Optional[str]): The API key to use for clustering and analysis.
+        openrouter_api_key (Optional[str]): The API key to use for openrouter API calls.
         client (Optional[Any]): The client object for API calls.
         local_embedding_model_str (str): The name of the local embedding model to use.
         local_embedding_api_key (Optional[str]): The API key for the local embedding model.
@@ -130,8 +134,14 @@ def setup_interpretability_method(
         # Check if the path is to the anthropic evals repository
         if path_to_MWE_repo.endswith("evals"):
             print("Loading statements from MWE persona repository")
-            model_1_name = base_model.config._name_or_path
-            model_2_name = finetuned_model.config._name_or_path
+            if isinstance(base_model, str):
+                model_1_name = base_model
+            else:
+                model_1_name = base_model.config._name_or_path
+            if isinstance(finetuned_model, str):
+                model_2_name = finetuned_model
+            else:
+                model_2_name = finetuned_model.config._name_or_path
             statements = load_statements_from_MWE_repo(path_to_MWE_repo, num_statements_per_behavior, threshold, model_1_name, model_2_name)
             n_statements = len(statements)
             #statements = statements[n_statements // 2 + 10:]
@@ -236,26 +246,53 @@ def setup_interpretability_method(
         if isinstance(base_model, GPTNeoXForCausalLM) or isinstance(base_model, Qwen2ForCausalLM):
             logging.set_verbosity_error()
 
-        # Decode texts with both models
-        base_decoded_texts = batch_decode_texts(
-            base_model, 
-            tokenizer, 
-            prefixes, 
-            n_decoded_texts=n_decoded_texts,
-            texts_decoded_per_prefix=texts_decoded_per_prefix,
-            max_length=max_length,
-            batch_size=decoding_batch_size
-        )
-
-        finetuned_decoded_texts = batch_decode_texts(
-            finetuned_model, 
-            tokenizer, 
-            prefixes, 
-            n_decoded_texts=n_decoded_texts,
-            texts_decoded_per_prefix=texts_decoded_per_prefix,
-            max_length=max_length,
-            batch_size=decoding_batch_size
-        )
+        if isinstance(base_model, str):
+            duplicated_prefixes = [prefix for prefix in prefixes for _ in range(texts_decoded_per_prefix)]
+            base_decoded_texts = parallel_make_api_requests(
+                prompts=duplicated_prefixes,
+                api_provider="openrouter",
+                api_model_str=base_model,
+                auth_key=openrouter_api_key,
+                client=client,
+                api_interactions_save_loc=None,
+                logger=None,
+                request_info=None,
+                max_tokens=max_length
+            )
+        else:
+            # Decode texts with both models
+            base_decoded_texts = batch_decode_texts(
+                base_model, 
+                tokenizer, 
+                prefixes, 
+                n_decoded_texts=n_decoded_texts,
+                texts_decoded_per_prefix=texts_decoded_per_prefix,
+                max_length=max_length,
+                batch_size=decoding_batch_size
+            )
+        if isinstance(finetuned_model, str):
+            duplicated_prefixes = [prefix for prefix in prefixes for _ in range(texts_decoded_per_prefix)]
+            finetuned_decoded_texts = parallel_make_api_requests(
+                prompts=duplicated_prefixes,
+                api_provider="openrouter",
+                api_model_str=finetuned_model,
+                auth_key=openrouter_api_key,
+                client=client,
+                api_interactions_save_loc=None,
+                logger=None,
+                request_info=None,
+                max_tokens=max_length
+            )
+        else:
+            finetuned_decoded_texts = batch_decode_texts(
+                finetuned_model, 
+                tokenizer, 
+                prefixes, 
+                n_decoded_texts=n_decoded_texts,
+                texts_decoded_per_prefix=texts_decoded_per_prefix,
+                max_length=max_length,
+                batch_size=decoding_batch_size
+            )
 
     if decoded_texts_save_path is not None:
         # Create a list of tuples containing the model indicator and the decoded text
@@ -929,6 +966,7 @@ def apply_interpretability_method_1_to_K(
     api_model_str: str = "claude-3-haiku-20240307",
     api_stronger_model_str: Optional[str] = None,
     auth_key: Optional[str] = None,
+    openrouter_api_key: Optional[str] = None,
     client: Optional[Union[Anthropic, OpenAI, Client]] = None,
     local_embedding_model_str: str = "intfloat/multilingual-e5-large-instruct", 
     local_embedding_api_key: Optional[str] = None,
@@ -944,6 +982,7 @@ def apply_interpretability_method_1_to_K(
     max_cluster_size: int = 2000,
     sampled_texts_per_cluster: int = 10,
     sampled_comparison_texts_per_cluster: int = 50,
+    cross_validate_contrastive_labels: bool = False,
     K: int = 3,
     match_by_ids: bool = False,
     max_length: int = 32,
@@ -967,6 +1006,7 @@ def apply_interpretability_method_1_to_K(
     generate_individual_labels: bool = False,
     use_unitary_comparisons: bool = False,
     max_unitary_comparisons_per_label: int = 50,
+    additional_unitary_comparisons_per_label: int = 0,
     match_cutoff: float = 0.6,
     discriminative_query_rounds: int = 3,
     discriminative_validation_runs: int = 5,
@@ -1004,6 +1044,7 @@ def apply_interpretability_method_1_to_K(
         api_model_str (str): API model to use.
         api_stronger_model_str (Optional[str]): API model to use for stronger model, only used for the most important tasks.
         auth_key (Optional[str]): Authentication key for API calls.
+        openrouter_api_key (Optional[str]): API key for openrouter API calls.
         client (Optional[Any]): Client object for API calls.
         local_embedding_model_str (str): Name of local embedding model.
         local_embedding_api_key (Optional[str]): API key for local embedding model.
@@ -1019,6 +1060,8 @@ def apply_interpretability_method_1_to_K(
         max_cluster_size (int): Maximum cluster size.
         sampled_comparison_texts_per_cluster (int): Number of texts to sample per cluster for both evaluation
             of label accuracy / AUCs between clusters and for individual labels.
+        cross_validate_contrastive_labels (bool): Whether to cross-validate the contrastive labels by testing the 
+            discriminative score of the labels on different clusters from which they were generated.
         sampled_texts_per_cluster (int): Number of texts to sample per cluster when generating labels.
         K (int): Number of neighbors for K-neighbor similarity graph.
         match_by_ids (bool): Whether to match clusters by their IDs, not embedding distances.
@@ -1055,6 +1098,8 @@ def apply_interpretability_method_1_to_K(
         max_unitary_comparisons_per_label (int): Maximum number of unitary comparisons to perform per label.
             I.e., when validating the accuracy / AUC of a given label (either contrastive or individual), we will ask 
             the assistant to use the label to classify at most max_unitary_comparisons_per_label texts.
+        additional_unitary_comparisons_per_label (int): Additional number of unitary comparisons to perform per label.
+            These are run when a hypothesis passes the initial discriminative validation.
         match_cutoff (float): Accuracy / AUC cutoff for determining matching/unmatching clusters.
         discriminative_query_rounds (int): Number of rounds of discriminative queries to perform.
         discriminative_validation_runs (int): Number of validation runs to perform for each model for each hypothesis.
@@ -1081,6 +1126,7 @@ def apply_interpretability_method_1_to_K(
         n_decoded_texts=n_decoded_texts,
         decoding_prefix_file=decoding_prefix_file,
         auth_key=auth_key,
+        openrouter_api_key=openrouter_api_key,
         client=client,
         local_embedding_model_str=local_embedding_model_str,
         local_embedding_api_key=local_embedding_api_key,
@@ -1212,6 +1258,7 @@ def apply_interpretability_method_1_to_K(
             local_embedding_model_str=local_embedding_model_str,
             device=device,
             sampled_comparison_texts_per_cluster=sampled_comparison_texts_per_cluster,
+            cross_validate_contrastive_labels=cross_validate_contrastive_labels,
             sampled_texts_per_cluster=sampled_texts_per_cluster,
             generated_labels_per_cluster=generated_labels_per_cluster,
             cluster_ids_to_prompt_ids_to_decoding_ids_dict_1=cluster_ids_to_prompt_ids_to_decoding_ids_dict_1,
@@ -1270,6 +1317,7 @@ def apply_interpretability_method_1_to_K(
                 print(edge_data)
                 continue
             best_metric_score = max(edge_data['label_metric_scores'].values())
+            additional_best_metric_score = max(edge_data['additional_label_metric_scores'].values()) if edge_data['additional_label_metric_scores'] else -1.0
             best_label = max(edge_data['label_metric_scores'], key=edge_data['label_metric_scores'].get)
             best_p_value = edge_data['label_p_values'][best_label]
 
@@ -1280,6 +1328,7 @@ def apply_interpretability_method_1_to_K(
                 'label_metric_score': finetuned_labels[finetuned_cluster][1],
                 'contrastive_label': best_label,
                 'contrastive_metric_score': best_metric_score,
+                'additional_contrastive_metric_score': additional_best_metric_score,
                 'contrastive_p_value': best_p_value,
                 'all_contrastive_labels': list(edge_data['label_metric_scores'].keys()),
                 'all_contrastive_metric_scores': list(edge_data['label_metric_scores'].values()),
@@ -1328,6 +1377,7 @@ def apply_interpretability_method_1_to_K(
                 base_cluster = int(base_neighbor.split('_')[1])
                 edge_data = graph[f"2_{finetuned_cluster}"][base_neighbor]
                 best_metric_score = max(edge_data['label_metric_scores'].values())
+                additional_best_metric_score = max(edge_data['additional_label_metric_scores'].values()) if edge_data['additional_label_metric_scores'] else -1.0
                 best_label = max(edge_data['label_metric_scores'], key=edge_data['label_metric_scores'].get)
 
                 base_cluster_indices = [i for i, label in enumerate(base_clustering.labels_) if label == base_cluster]
@@ -1337,6 +1387,7 @@ def apply_interpretability_method_1_to_K(
                     'label_metric_score': base_labels[base_cluster][1],
                     'contrastive_label': best_label,
                     'contrastive_metric_score': best_metric_score,
+                    'additional_contrastive_metric_score': additional_best_metric_score,
                     'all_contrastive_labels': list(edge_data['label_metric_scores'].keys()),
                     'all_contrastive_metric_scores': list(edge_data['label_metric_scores'].values()),
                     'sample_texts': get_random_texts(base_decoded_texts, base_cluster_indices)
@@ -1349,6 +1400,7 @@ def apply_interpretability_method_1_to_K(
     # falls under.
     candidate_hypotheses = []
     candidate_hypothesis_contrastive_discriminative_scores = []
+    additional_candidate_hypothesis_contrastive_discriminative_scores = []
     candidate_hypothesis_contrastive_discriminative_p_values = []
     hypothesis_origin_clusters = []
     num_cluster_matches = 0
@@ -1391,6 +1443,7 @@ def apply_interpretability_method_1_to_K(
                     hypothesis = f"Model 1 is {magnitude} {direction} likely to generate content described as: '{base_cluster['label']}' compared to Model 2."
                     candidate_hypotheses.append(hypothesis)
                     candidate_hypothesis_contrastive_discriminative_scores.append(-1.0)
+                    additional_candidate_hypothesis_contrastive_discriminative_scores.append(-1.0)
                     candidate_hypothesis_contrastive_discriminative_p_values.append(1.0)
                     hypothesis_origin_clusters.append([base_cluster, match, 'matching'])
     # Case 2: Unmatching clusters (behavior in base model not found in finetuned model)
@@ -1400,6 +1453,7 @@ def apply_interpretability_method_1_to_K(
                 hypothesis = f"Model 2 is less likely to generate content described as: '{base_cluster['label']}' compared to Model 1."
                 candidate_hypotheses.append(hypothesis)
                 candidate_hypothesis_contrastive_discriminative_scores.append(-1.0)
+                additional_candidate_hypothesis_contrastive_discriminative_scores.append(-1.0)
                 candidate_hypothesis_contrastive_discriminative_p_values.append(1.0)
                 hypothesis_origin_clusters.append([base_cluster, -1, 'unmatching'])
             # Add hypotheses based on contrastive labels
@@ -1408,6 +1462,7 @@ def apply_interpretability_method_1_to_K(
                     contrastive_hypothesis = re.sub(r'[Cc]luster (\d)', lambda m: f"Model {m.group(1)}", label)
                     candidate_hypotheses.append(contrastive_hypothesis)
                     candidate_hypothesis_contrastive_discriminative_scores.append(unmatch['contrastive_metric_score'])
+                    additional_candidate_hypothesis_contrastive_discriminative_scores.append(unmatch['additional_contrastive_metric_score'])
                     candidate_hypothesis_contrastive_discriminative_p_values.append(unmatch['contrastive_p_value'])
                     hypothesis_origin_clusters.append([base_cluster, unmatch, 'unmatching'])
     # Case 3: New clusters in finetuned model
@@ -1416,6 +1471,7 @@ def apply_interpretability_method_1_to_K(
             hypothesis = f"Model 2 has developed a new behavior of generating content described as: '{new_cluster['label']}', which was not prominent in Model 1."
             candidate_hypotheses.append(hypothesis)
             candidate_hypothesis_contrastive_discriminative_scores.append(-1.0)
+            additional_candidate_hypothesis_contrastive_discriminative_scores.append(-1.0)
             candidate_hypothesis_contrastive_discriminative_p_values.append(1.0)
             hypothesis_origin_clusters.append([-1, new_cluster, 'new'])
         # Add hypotheses based on contrastive labels of nearest base neighbors
@@ -1424,6 +1480,7 @@ def apply_interpretability_method_1_to_K(
                 contrastive_hypothesis = re.sub(r'[Cc]luster (\d)', lambda m: f"Model {m.group(1)}", label)
                 candidate_hypotheses.append(contrastive_hypothesis)
                 candidate_hypothesis_contrastive_discriminative_scores.append(neighbor['contrastive_metric_score'])
+                additional_candidate_hypothesis_contrastive_discriminative_scores.append(neighbor['additional_contrastive_metric_score'])
                 candidate_hypothesis_contrastive_discriminative_p_values.append(neighbor['contrastive_p_value'])
                 hypothesis_origin_clusters.append([neighbor, new_cluster, 'new'])
 
@@ -1544,6 +1601,7 @@ def apply_interpretability_method_1_to_K(
         discriminative_accuracy = validated_discriminative_accuracies[i]
         discriminative_p_value = validated_discriminative_p_values[i]
         neighbor_discriminative_score = candidate_hypothesis_contrastive_discriminative_scores[i]
+        additional_neighbor_discriminative_score = candidate_hypothesis_contrastive_discriminative_scores[i]
         neighbor_discriminative_p_value = candidate_hypothesis_contrastive_discriminative_p_values[i]
         
         if True: #generative_score > 0.2 and generative_p_value < 0.1: 
@@ -1554,6 +1612,8 @@ def apply_interpretability_method_1_to_K(
                 # Show both raw and corrected p-values
                 corrected_p = corrected_neighbor_p_values.get(i, neighbor_discriminative_p_value)
                 validated_hypothesis = validated_hypothesis + f"\n(Neighbor Discriminative Score: {neighbor_discriminative_score:.4f}, Raw P-value: {neighbor_discriminative_p_value:.4f}, Corrected P-value: {corrected_p:.4f})"
+                if additional_neighbor_discriminative_score is not None and additional_neighbor_discriminative_score != -1.0:
+                    validated_hypothesis = validated_hypothesis + f"\n(Additional Neighbor Discriminative Score: {additional_neighbor_discriminative_score:.4f})"
             
             validated_hypotheses.append(validated_hypothesis)
             

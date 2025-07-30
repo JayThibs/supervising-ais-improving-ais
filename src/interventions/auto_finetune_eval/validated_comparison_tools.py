@@ -22,6 +22,7 @@ from sklearn.neighbors import NearestNeighbors
 import networkx as nx
 import traceback
 import pandas as pd
+from saffron_implementation import SAFFRON
 
 sys.path.append("..")
 sys.path.append("../interventions/auto_finetune_eval")
@@ -35,80 +36,80 @@ warnings.filterwarnings('ignore', message='You have modified the pretrained mode
 from structlog._config import BoundLoggerLazyProxy
 
 
-class SAFFRON:
-    """
-    SAFFRON: Serial Alpha Spending For FDR control Over a New hypothesis.
+# class SAFFRON:
+#     """
+#     SAFFRON: Serial Alpha Spending For FDR control Over a New hypothesis.
     
-    This implements an online multiple testing procedure that controls the false discovery rate (FDR)
-    in sequential hypothesis testing scenarios.
+#     This implements an online multiple testing procedure that controls the false discovery rate (FDR)
+#     in sequential hypothesis testing scenarios.
     
-    Reference: Ramdas et al. (2017) "SAFFRON: an adaptive algorithm for online control of the false discovery rate"
-    """
-    def __init__(self, alpha=0.05, lambda_param=0.5, gamma_param=0.5):
-        """
-        Initialize SAFFRON.
+#     Reference: Ramdas et al. (2017) "SAFFRON: an adaptive algorithm for online control of the false discovery rate"
+#     """
+#     def __init__(self, alpha=0.05, lambda_param=0.5, gamma_param=0.5):
+#         """
+#         Initialize SAFFRON.
         
-        Args:
-            alpha: Target FDR level (default 0.05)
-            lambda_param: Fraction of alpha to spend on each test (default 0.5)
-            gamma_param: Memory parameter - fraction of past to forget (default 0.5)
-        """
-        self.alpha = alpha
-        self.lambda_param = lambda_param  
-        self.gamma_param = gamma_param
-        self.wealth = alpha  # Initial wealth
-        self.candidates = []  # Store (time, p-value) pairs
-        self.t = 0  # Time counter
-        self.rejections = []  # Store rejected hypotheses info
+#         Args:
+#             alpha: Target FDR level (default 0.05)
+#             lambda_param: Fraction of alpha to spend on each test (default 0.5)
+#             gamma_param: Memory parameter - fraction of past to forget (default 0.5)
+#         """
+#         self.alpha = alpha
+#         self.lambda_param = lambda_param  
+#         self.gamma_param = gamma_param
+#         self.wealth = alpha  # Initial wealth
+#         self.candidates = []  # Store (time, p-value) pairs
+#         self.t = 0  # Time counter
+#         self.rejections = []  # Store rejected hypotheses info
         
-    def test_hypothesis(self, p_value, hypothesis_info=None):
-        """
-        Test a hypothesis using SAFFRON procedure.
+#     def test_hypothesis(self, p_value, hypothesis_info=None):
+#         """
+#         Test a hypothesis using SAFFRON procedure.
         
-        Args:
-            p_value: P-value of the hypothesis
-            hypothesis_info: Optional info about the hypothesis (for tracking)
+#         Args:
+#             p_value: P-value of the hypothesis
+#             hypothesis_info: Optional info about the hypothesis (for tracking)
             
-        Returns:
-            tuple: (is_rejected, alpha_threshold)
-        """
-        self.t += 1
+#         Returns:
+#             tuple: (is_rejected, alpha_threshold)
+#         """
+#         self.t += 1
         
-        # Add to candidates
-        self.candidates.append((self.t, p_value))
+#         # Add to candidates
+#         self.candidates.append((self.t, p_value))
         
-        # Remove old candidates based on gamma (forget old hypotheses)
-        cutoff_time = self.t * (1 - self.gamma_param)
-        self.candidates = [(t, p) for t, p in self.candidates if t >= cutoff_time]
+#         # Remove old candidates based on gamma (forget old hypotheses)
+#         cutoff_time = self.t * (1 - self.gamma_param)
+#         self.candidates = [(t, p) for t, p in self.candidates if t >= cutoff_time]
         
-        # Calculate rejection threshold
-        # Divide wealth among active candidates
-        alpha_t = self.lambda_param * self.wealth / max(1, len(self.candidates))
+#         # Calculate rejection threshold
+#         # Divide wealth among active candidates
+#         alpha_t = self.lambda_param * self.wealth / max(1, len(self.candidates))
         
-        # Check if we can reject
-        if p_value <= alpha_t:
-            # Reject null hypothesis
-            self.wealth += self.alpha * self.lambda_param  # Earn back some wealth
-            self.rejections.append({
-                'time': self.t,
-                'p_value': p_value,
-                'threshold': alpha_t,
-                'info': hypothesis_info
-            })
-            return True, alpha_t
-        else:
-            # Fail to reject
-            return False, alpha_t
+#         # Check if we can reject
+#         if p_value <= alpha_t:
+#             # Reject null hypothesis
+#             self.wealth += self.alpha * self.lambda_param  # Earn back some wealth
+#             self.rejections.append({
+#                 'time': self.t,
+#                 'p_value': p_value,
+#                 'threshold': alpha_t,
+#                 'info': hypothesis_info
+#             })
+#             return True, alpha_t
+#         else:
+#             # Fail to reject
+#             return False, alpha_t
     
-    def get_summary(self):
-        """Get summary statistics of the testing procedure."""
-        return {
-            'total_tests': self.t,
-            'total_rejections': len(self.rejections),
-            'current_wealth': self.wealth,
-            'active_candidates': len(self.candidates),
-            'rejection_rate': len(self.rejections) / max(1, self.t)
-        }
+#     def get_summary(self):
+#         """Get summary statistics of the testing procedure."""
+#         return {
+#             'total_tests': self.t,
+#             'total_rejections': len(self.rejections),
+#             'current_wealth': self.wealth,
+#             'active_candidates': len(self.candidates),
+#             'rejection_rate': len(self.rejections) / max(1, self.t)
+#         }
 
 
 def contrastive_label_double_cluster(
@@ -1442,6 +1443,7 @@ def get_validated_contrastive_cluster_labels(
         n_head_to_head_comparisons_per_text: Optional[int] = None,
         use_unitary_comparisons: bool = False,
         max_unitary_comparisons_per_label: int = 100,
+        additional_unitary_comparisons_per_label: int = 0,
         api_interactions_save_loc: Optional[str] = None,
         logger: Optional[BoundLoggerLazyProxy] = None,
         metric: str = "acc"
@@ -1510,6 +1512,9 @@ def get_validated_contrastive_cluster_labels(
             without considering another text for comparison. Defaults to False.
         max_unitary_comparisons_per_label (int, optional): Maximum number of unitary comparisons to perform 
             per label. Defaults to 100.
+        additional_unitary_comparisons_per_label (int, optional): Additional number of unitary comparisons to 
+            perform per label. These are run when a hypothesis passes the initial discriminative validation.
+            Defaults to 0.
         api_interactions_save_loc (Optional[str]): Which file to store the API requests and responses to. 
             Defaults to None.
         logger (Optional[BoundLoggerLazyProxy]): The logger to use for logging API requests and responses.
@@ -1585,6 +1590,30 @@ def get_validated_contrastive_cluster_labels(
         metric=metric
     )
 
+    # If additional_unitary_comparisons_per_label > 0, we run additional unitary comparisons for each label
+    if additional_unitary_comparisons_per_label > 0:
+        additional_cluster_pair_scores, additional_all_cluster_texts_used_for_validating_label_strs_ids = validate_cluster_label_comparative_discrimination_power(
+            decoded_strs_1, clustering_assignments_1, 
+            all_cluster_texts_used_for_label_strs_ids_1,
+            decoded_strs_2, clustering_assignments_2, 
+            all_cluster_texts_used_for_label_strs_ids_2,
+            cluster_label_strs, 
+            local_model, 
+            labeling_tokenizer, 
+            api_provider, 
+            api_model_str, 
+            auth_key, 
+            client=client,
+            device=device, 
+            sampled_comparison_texts_per_cluster=sampled_comparison_texts_per_cluster,
+            n_head_to_head_comparisons_per_text=n_head_to_head_comparisons_per_text,
+            use_unitary_comparisons=use_unitary_comparisons,
+            max_unitary_comparisons_per_label=additional_unitary_comparisons_per_label,
+            api_interactions_save_loc=api_interactions_save_loc,
+            logger=logger,
+            metric=metric
+        )
+
     if pick_top_n_labels is not None:
         # For each cluster, pick the top n labels based on accuracy / AUC score
         top_n_labels = {}
@@ -1621,6 +1650,19 @@ def get_validated_contrastive_cluster_labels(
                     p_values[cluster_pair][label] = p_value
                 else:
                     p_values[cluster_pair][label] = 1.0
+        if additional_unitary_comparisons_per_label > 0:
+            additional_p_values = {}
+            for cluster_pair, label_scores in additional_cluster_pair_scores.items():
+                additional_p_values[cluster_pair] = {}
+                for label, metric_score in label_scores.items():
+                    if metric_score > 0:
+                        num_correct = round(metric_score * additional_unitary_comparisons_per_label)
+                        result = binomtest(num_correct, additional_unitary_comparisons_per_label, p=0.5, alternative='greater')
+                        additional_p_values[cluster_pair][label] = result.pvalue
+                    else:
+                        additional_p_values[cluster_pair][label] = 1.0
+        else:
+            additional_p_values = None
     
     metric_str = "accuracy" if metric == "acc" else "AUC"
     # Print the aucs and p-values for each label in each cluster
@@ -1635,8 +1677,13 @@ def get_validated_contrastive_cluster_labels(
         "cluster_pair_scores": cluster_pair_scores,
         "all_cluster_texts_used_for_validating_label_strs_ids": all_cluster_texts_used_for_validating_label_strs_ids,
     }
+    if additional_unitary_comparisons_per_label > 0:
+        return_dict["additional_cluster_pair_scores"] = additional_cluster_pair_scores
+        return_dict["additional_all_cluster_texts_used_for_validating_label_strs_ids"] = additional_all_cluster_texts_used_for_validating_label_strs_ids
     if compute_p_values:
         return_dict["p_values"] = p_values
+        if additional_unitary_comparisons_per_label > 0:
+            return_dict["additional_p_values"] = additional_p_values
     return return_dict
 
 
@@ -1661,6 +1708,7 @@ def build_contrastive_K_neighbor_similarity_graph(
     local_embedding_model_str: str = "intfloat/multilingual-e5-large-instruct",
     device: str = "cuda:0",
     sampled_comparison_texts_per_cluster: int = 50,
+    cross_validate_contrastive_labels: bool = False,
     sampled_texts_per_cluster: int = 10,
     generated_labels_per_cluster: int = 3,
     cluster_ids_to_prompt_ids_to_decoding_ids_dict_1: Dict = None,
@@ -1673,6 +1721,7 @@ def build_contrastive_K_neighbor_similarity_graph(
     n_head_to_head_comparisons_per_text: Optional[int] = None,
     use_unitary_comparisons: bool = False,
     max_unitary_comparisons_per_label: int = 20,
+    additional_unitary_comparisons_per_label: int = 0,
     api_interactions_save_loc: Optional[str] = None,
     logger: Optional[BoundLoggerLazyProxy] = None,
     tsne_save_path: str = "diversity_labels_tsne/",
@@ -1705,6 +1754,8 @@ def build_contrastive_K_neighbor_similarity_graph(
             "intfloat/ multilingual-e5-large-instruct".
         device (str, optional): Device to use for computations (e.g., 'cuda:0'). Defaults to "cuda:0".
         sampled_comparison_texts_per_cluster (int): Number of texts to sample per cluster for comparison.
+        cross_validate_contrastive_labels (bool): Whether to cross-validate the contrastive labels by testing the 
+            discriminative score of the labels on different clusters from which they were generated.
         sampled_texts_per_cluster (int): Number of texts to sample per cluster for label generation.
         generated_labels_per_cluster (int): Number of labels to generate per cluster pair.
         cluster_ids_to_prompt_ids_to_decoding_ids_dict_1 (Dict, optional): Nested dict. First dict is indexed by cluster id.
@@ -1725,6 +1776,8 @@ def build_contrastive_K_neighbor_similarity_graph(
         n_head_to_head_comparisons_per_text (Optional[int]): Number of head-to-head comparisons per text.
         use_unitary_comparisons (bool): Whether to use unitary comparisons.
         max_unitary_comparisons_per_label (int): Maximum number of unitary comparisons to perform per label.
+        additional_unitary_comparisons_per_label (int): Additional number of unitary comparisons to perform per label.
+            These are run when a hypothesis passes the initial discriminative validation.
         api_interactions_save_loc (Optional[str]): Which file to store the API requests and responses to. 
             Defaults to None.
         logger (Optional[BoundLoggerLazyProxy]): The logger to use for logging API requests and responses.
@@ -1750,12 +1803,14 @@ def build_contrastive_K_neighbor_similarity_graph(
     prior_labels_for_diversification = []
     verified_diversity_promoter_labels = []
     label_diversification_str_instructions = ""
+    metric_cross_validation_scores = []
+    metric_validation_scores = []
 
     # Initialize SAFFRON for multiple comparison correction
     saffron = SAFFRON(alpha=0.05, lambda_param=0.5, gamma_param=0.5)
     
     # Function to compute similarity and add edge
-    def compute_similarity_and_add_edge(cluster1, cluster2, set1, set2, prior_labels_for_diversification, diversify_contrastive_labels, label_diversification_str_instructions, verified_diversity_promoter_labels, saffron):
+    def compute_similarity_and_add_edge(cluster1, cluster2, set1, set2, prior_labels_for_diversification, diversify_contrastive_labels, label_diversification_str_instructions, verified_diversity_promoter_labels, saffron, metric_cross_validation_scores, metric_validation_scores):
         print(f"Computing similarity and adding edge for clusters {cluster1} and {cluster2} from set {set1} and {set2}")
         cluster_matches = [(cluster1, cluster2)]
 
@@ -1801,6 +1856,7 @@ def build_contrastive_K_neighbor_similarity_graph(
             n_head_to_head_comparisons_per_text=n_head_to_head_comparisons_per_text,
             use_unitary_comparisons=use_unitary_comparisons,
             max_unitary_comparisons_per_label=max_unitary_comparisons_per_label,
+            additional_unitary_comparisons_per_label=additional_unitary_comparisons_per_label,
             label_diversification_str_instructions=label_diversification_str_instructions,
             verified_diversity_promoter_labels=verified_diversity_promoter_labels,
             api_interactions_save_loc=api_interactions_save_loc,
@@ -1808,6 +1864,12 @@ def build_contrastive_K_neighbor_similarity_graph(
             metric=metric
         )
         p_values = result['p_values']
+        if additional_unitary_comparisons_per_label > 0:
+            additional_p_values = result['additional_p_values']
+            additional_label_metric_scores = result['additional_cluster_pair_scores'][(cluster1, cluster2)]
+        else:
+            additional_p_values = None
+            additional_label_metric_scores = None
         
         labels_and_metric_scores = result['cluster_pair_scores'][(cluster1, cluster2)]
         similarity_score = np.mean([1 - metric_score for metric_score in labels_and_metric_scores.values()])
@@ -1818,6 +1880,8 @@ def build_contrastive_K_neighbor_similarity_graph(
             'labels': list(labels_and_metric_scores.keys()),
             'label_metric_scores': labels_and_metric_scores,
             'label_p_values': p_values[(cluster1, cluster2)],
+            'additional_label_p_values': additional_p_values[(cluster1, cluster2)] if additional_p_values else None,
+            'additional_label_metric_scores': additional_label_metric_scores,
             'significant_labels': []  # Will be populated by SAFFRON
         }
         
@@ -1860,13 +1924,56 @@ def build_contrastive_K_neighbor_similarity_graph(
         max_metric_score_idx = np.argmax(metric_scores)
         new_label = labels[max_metric_score_idx]
         prior_labels_for_diversification.append(new_label)
-        
+        metric_cross_validation_scores.append(metric_scores[max_metric_score_idx])
+
+        if cross_validate_contrastive_labels:
+            # Cross-validate the contrastive labels by testing the discriminative score of the labels on different clusters from which they were generated. Choose a random cluster, then test new_label on that cluster. Print the result.
+            possible_pairs = [(c1, c2) for c1 in unique_clusters_1 for c2 in unique_clusters_2 if (c1 != cluster1 or c2 != cluster2)]
+            if not possible_pairs:
+                print("Warning: No other cluster pairs available for cross-validation.")
+            else:
+                val_cluster1, val_cluster2 = random.choice(possible_pairs)
+                print(f"Cross-validating label '{new_label.replace(chr(10), ' ')}' on cluster pair ({val_cluster1}, {val_cluster2})")
+                val_cluster_1_indices = [i for i, x in enumerate(clustering_assignments_1) if x == val_cluster1]
+                val_cluster_2_indices = [i for i, x in enumerate(clustering_assignments_2) if x == val_cluster2]
+                if len(val_cluster_1_indices) < sampled_comparison_texts_per_cluster or len(val_cluster_2_indices) < sampled_comparison_texts_per_cluster:
+                    print(f"Warning: Not enough texts for cross-validation on cluster pair ({val_cluster1}, {val_cluster2}). Required {sampled_comparison_texts_per_cluster} texts per cluster. Got {len(val_cluster_1_indices)} and {len(val_cluster_2_indices)}. Skipping.")
+                    metric_cross_validation_scores.append(-1.0)
+                else:
+                    sampled_texts_1 = random.sample(val_cluster_1_indices, sampled_comparison_texts_per_cluster)
+                    sampled_texts_2 = random.sample(val_cluster_2_indices, sampled_comparison_texts_per_cluster)
+                    metric_score = evaluate_label_discrimination(
+                        new_label,
+                        sampled_texts_1,
+                        sampled_texts_2,
+                        decoded_strs_1,
+                        decoded_strs_2,
+                        local_model,
+                        labeling_tokenizer,
+                        api_provider,
+                        api_model_str,
+                        auth_key,
+                        client=client,
+                        device=device,
+                        mode="contrastive",
+                        n_head_to_head_comparisons_per_text=n_head_to_head_comparisons_per_text,
+                        use_unitary_comparisons=use_unitary_comparisons,
+                        max_unitary_comparisons_per_label=max_unitary_comparisons_per_label,
+                        api_interactions_save_loc=api_interactions_save_loc,
+                        logger=logger,
+                        cluster_id_1=val_cluster1,
+                        cluster_id_2=val_cluster2,
+                        metric=metric
+                    )
+                    print(f"Cross-validation {metric} for label on pair ({val_cluster1}, {val_cluster2}): {metric_score:.4f}")
+                    metric_cross_validation_scores.append(metric_score)
+
         return prior_labels_for_diversification, verified_diversity_promoter_labels, label_diversification_str_instructions
 
     if match_by_ids:
         # Match cluster i in set 1 to cluster i in set 2
         for i in range(len(unique_clusters_1)):
-            prior_labels_for_diversification, verified_diversity_promoter_labels, label_diversification_str_instructions = compute_similarity_and_add_edge(unique_clusters_1[i], unique_clusters_2[i], 1, 2, prior_labels_for_diversification, diversify_contrastive_labels, label_diversification_str_instructions, verified_diversity_promoter_labels, saffron)
+            prior_labels_for_diversification, verified_diversity_promoter_labels, label_diversification_str_instructions = compute_similarity_and_add_edge(unique_clusters_1[i], unique_clusters_2[i], 1, 2, prior_labels_for_diversification, diversify_contrastive_labels, label_diversification_str_instructions, verified_diversity_promoter_labels, saffron, metric_cross_validation_scores, metric_validation_scores)
     else:
         # Find the K nearest neighbors for each cluster in set 1 from set 2
         centroids_1 = []
@@ -1897,14 +2004,30 @@ def build_contrastive_K_neighbor_similarity_graph(
             for j in range(K):
                 cluster2 = unique_clusters_2[indices_1[i][j]]
                 if not G.has_edge(f"1_{cluster1}", f"2_{cluster2}"):
-                    prior_labels_for_diversification, verified_diversity_promoter_labels, label_diversification_str_instructions = compute_similarity_and_add_edge(cluster1, cluster2, 1, 2, prior_labels_for_diversification, diversify_contrastive_labels, label_diversification_str_instructions, verified_diversity_promoter_labels, saffron)
+                    prior_labels_for_diversification, verified_diversity_promoter_labels, label_diversification_str_instructions = compute_similarity_and_add_edge(cluster1, cluster2, 1, 2, prior_labels_for_diversification, diversify_contrastive_labels, label_diversification_str_instructions, verified_diversity_promoter_labels, saffron, metric_cross_validation_scores, metric_validation_scores)
 
         # Compute similarities and add edges for set 2 to set 1 (if not already computed)
         for i, cluster2 in enumerate(unique_clusters_2):
             for j in range(K):
                 cluster1 = unique_clusters_1[indices_2[i][j]]
                 if not G.has_edge(f"2_{cluster2}", f"1_{cluster1}"):
-                    prior_labels_for_diversification, verified_diversity_promoter_labels, label_diversification_str_instructions = compute_similarity_and_add_edge(cluster1, cluster2, 1, 2, prior_labels_for_diversification, diversify_contrastive_labels, label_diversification_str_instructions, verified_diversity_promoter_labels, saffron)
+                    prior_labels_for_diversification, verified_diversity_promoter_labels, label_diversification_str_instructions = compute_similarity_and_add_edge(cluster1, cluster2, 1, 2, prior_labels_for_diversification, diversify_contrastive_labels, label_diversification_str_instructions, verified_diversity_promoter_labels, saffron, metric_cross_validation_scores, metric_validation_scores)
+        if cross_validate_contrastive_labels:
+            print(f"Cross-validation scores: {metric_cross_validation_scores}")
+            print(f"Validation scores: {metric_validation_scores}")
+            print(f"Mean cross-validation score: {np.mean(metric_cross_validation_scores)}")
+            print(f"Mean validation score: {np.mean(metric_validation_scores)}")
+            print(f"Standard deviation of cross-validation scores: {np.std(metric_cross_validation_scores)}")
+            print(f"Standard deviation of validation scores: {np.std(metric_validation_scores)}")
+            print(f"Max cross-validation score: {np.max(metric_cross_validation_scores)}")
+            print(f"Max validation score: {np.max(metric_validation_scores)}")
+            print(f"Min cross-validation score: {np.min(metric_cross_validation_scores)}")
+            # create a histogram of the metric_cross_validation_scores and metric_validation_scores
+            plt.hist(metric_cross_validation_scores, bins=20, alpha=0.5, label='Cross-validation')
+            plt.hist(metric_validation_scores, bins=20, alpha=0.5, label='Validation')
+            plt.legend()
+            plt.savefig(f"{tsne_save_path}/metric_cross_validation_scores_and_metric_validation_scores_histogram_{metric}.png")
+            plt.close()
 
     # Add SAFFRON summary to graph attributes
     saffron_summary = saffron.get_summary()
@@ -1920,17 +2043,17 @@ def build_contrastive_K_neighbor_similarity_graph(
     print(f"Active candidates: {saffron_summary['active_candidates']}")
     
     # Print significant labels found
-    if saffron.rejections:
-        print("\nSignificant contrastive labels found:")
-        for i, rejection in enumerate(saffron.rejections):
-            info = rejection['info']
-            print(f"\n{i+1}. Clusters {info['set1']}_{info['clusters'][0]} vs {info['set2']}_{info['clusters'][1]}")
-            print(f"   Label: {info['label']}")
-            print(f"   Metric score: {info['metric_score']:.3f}")
-            print(f"   P-value: {rejection['p_value']:.4e} < α_t = {rejection['threshold']:.4e}")
-    else:
-        print("\nNo labels reached statistical significance after correction.")
-    print("=" * 60 + "\n")
+    # if saffron.rejections:
+    #     print("\nSignificant contrastive labels found:")
+    #     for i, rejection in enumerate(saffron.rejections):
+    #         info = rejection['info']
+    #         print(f"\n{i+1}. Clusters {info['set1']}_{info['clusters'][0]} vs {info['set2']}_{info['clusters'][1]}")
+    #         print(f"   Label: {info['label']}")
+    #         print(f"   Metric score: {info['metric_score']:.3f}")
+    #         print(f"   P-value: {rejection['p_value']:.4e} < α_t = {rejection['threshold']:.4e}")
+    # else:
+    #     print("\nNo labels reached statistical significance after correction.")
+    # print("=" * 60 + "\n")
 
     return G
 
@@ -2524,6 +2647,151 @@ def assistant_generative_compare(
         print("AUCs:", per_label_scores)
 
     return per_label_scores, generated_texts_1, generated_texts_2
+
+
+def _compute_avg_kl_divergence(
+    assistant_model: AutoModel,
+    target_model: AutoModel,
+    tokenizer: AutoTokenizer,
+    texts: List[str],
+    device: str,
+    batch_size: int = 8,
+    prompt_template: Optional[str] = None,
+    hypothesis: Optional[str] = None
+) -> float:
+    """
+    Helper to compute the average KL divergence KL(target_model || assistant_model)
+    over a list of texts, with optional prompting for the assistant model.
+    """
+    total_kl_div = 0
+    num_texts = len(texts)
+    if num_texts == 0:
+        return 0.0
+
+    assistant_model.eval()
+    target_model.eval()
+    kl_loss_fn = torch.nn.KLDivLoss(reduction="batchmean", log_target=True)
+
+    with torch.no_grad():
+        for i in tqdm(range(0, num_texts, batch_size), desc="Computing KL Divergence", leave=False):
+            batch_texts = texts[i:i+batch_size]
+            
+            # Tokenize for target model (no prompt)
+            target_inputs = tokenizer(batch_texts, return_tensors='pt', padding=True, truncation=True)
+            target_input_ids = target_inputs.input_ids.to(device)
+            target_attention_mask = target_inputs.attention_mask.to(device)
+
+            # Get target model logits
+            target_logits = target_model(target_input_ids, attention_mask=target_attention_mask).logits
+
+            # Get assistant model logits
+            if prompt_template and hypothesis:
+                prompt = prompt_template.format(hypothesis=hypothesis)
+                prompt_ids = tokenizer(prompt, return_tensors='pt').input_ids.to(device)
+                prompt_len = prompt_ids.shape[1]
+
+                # Combine prompt with each text in the batch
+                full_texts = [prompt + text for text in batch_texts]
+                assistant_inputs = tokenizer(full_texts, return_tensors='pt', padding=True, truncation=True)
+                assistant_input_ids = assistant_inputs.input_ids.to(device)
+                assistant_attention_mask = assistant_inputs.attention_mask.to(device)
+                
+                assistant_logits_full = assistant_model(assistant_input_ids, attention_mask=assistant_attention_mask).logits
+                # Align logits: remove prompt part from assistant logits
+                assistant_logits = assistant_logits_full[:, prompt_len:prompt_len + target_logits.shape[1], :]
+            else:
+                assistant_logits = assistant_model(target_input_ids, attention_mask=target_attention_mask).logits
+
+            # Align sequence lengths if they differ after slicing
+            min_seq_len = min(target_logits.shape[1], assistant_logits.shape[1])
+            target_logits = target_logits[:, :min_seq_len, :]
+            assistant_logits = assistant_logits[:, :min_seq_len, :]
+
+            # Mask out padding tokens from KL calculation
+            # We use the target mask, shifted to align with logits (predicting next token)
+            mask = target_attention_mask[:, 1:min_seq_len + 1].unsqueeze(-1).expand_as(target_logits)
+            
+            # Log-softmax the logits for KLDivLoss
+            log_p_target = torch.nn.functional.log_softmax(target_logits, dim=-1)
+            log_p_assistant = torch.nn.functional.log_softmax(assistant_logits, dim=-1)
+
+            # Apply mask
+            masked_log_p_target = log_p_target * mask
+            masked_log_p_assistant = log_p_assistant * mask
+
+            kl_div = kl_loss_fn(masked_log_p_assistant, masked_log_p_target)
+            total_kl_div += kl_div.item() * len(batch_texts)
+
+    return total_kl_div / num_texts
+
+
+def assistant_generative_compare_KL_div(
+        difference_descriptions: List[str],
+        models_generated_strs: List[Tuple[List[str], List[str]]],
+        local_model: AutoModel,
+        labeling_tokenizer: AutoTokenizer,
+        starting_model: AutoModel,
+        comparison_model: AutoModel,
+        device: str = "cuda:0",
+        batch_size: int = 8,
+) -> List[float]:
+    """
+    Measures the information content of hypotheses by evaluating how much they help an assistant
+    model imitate a starting and a comparison model.
+
+    The score for each hypothesis is based on the change in KL divergence between the assistant
+    and the target models when the assistant is prompted with the hypothesis.
+
+    Args:
+        difference_descriptions (List[str]): List of hypotheses to evaluate.
+        models_generated_strs (List[Tuple[List[str], List[str]]]): For each hypothesis, a tuple
+            containing a list of strings from the starting model and a list from the comparison model.
+        local_model (AutoModel): The assistant model to be tested.
+        labeling_tokenizer (AutoTokenizer): The tokenizer for all models.
+        starting_model (AutoModel): The first model to be imitated.
+        comparison_model (AutoModel): The second model to be imitated.
+        device (str, optional): Device to run the models on. Defaults to "cuda:0".
+        batch_size (int, optional): Batch size for loss computation. Defaults to 8.
+
+    Returns:
+        List[float]: A list of scores, one for each hypothesis.
+    """
+    if labeling_tokenizer.pad_token is None:
+        labeling_tokenizer.pad_token = labeling_tokenizer.eos_token
+        labeling_tokenizer.pad_token_id = labeling_tokenizer.eos_token_id
+
+    all_scores = []
+
+    for i, hypothesis in enumerate(tqdm(difference_descriptions, desc="Evaluating hypotheses with KL divergence")):
+        starting_model_texts, comparison_model_texts = models_generated_strs[i]
+        
+        prompt_template_S = "Use the following hypothesis to imitate the starting model: {hypothesis}. Now complete the text: "
+        prompt_template_C = "Use the following hypothesis to imitate the comparison model: {hypothesis}. Now complete the text: "
+
+        # 1. KL(P_C || P_A) on D_C
+        kl_C_no_h = _compute_avg_kl_divergence(local_model, comparison_model, labeling_tokenizer, comparison_model_texts, device, batch_size)
+        
+        # 2. KL(P_C || P_A_h_C) on D_C
+        kl_C_with_h = _compute_avg_kl_divergence(local_model, comparison_model, labeling_tokenizer, comparison_model_texts, device, batch_size, prompt_template_C, hypothesis)
+        
+        # Improvement in imitating comparison model (lower KL is better)
+        delta_C = kl_C_no_h - kl_C_with_h
+
+        # 3. KL(P_S || P_A) on D_S
+        kl_S_no_h = _compute_avg_kl_divergence(local_model, starting_model, labeling_tokenizer, starting_model_texts, device, batch_size)
+
+        # 4. KL(P_S || P_A_h_S) on D_S
+        kl_S_with_h = _compute_avg_kl_divergence(local_model, starting_model, labeling_tokenizer, starting_model_texts, device, batch_size, prompt_template_S, hypothesis)
+        
+        # Improvement in imitating starting model
+        delta_S = kl_S_no_h - kl_S_with_h
+
+        score = (delta_S + delta_C) / 2
+        all_scores.append(score)
+
+    return all_scores
+
+
 
 # Uses assistant_generative_compare to generate the correlation coefficients / AUCs representing how well LM scores function to differentiate between the texts generated for one model and the other using the different descriptions. Optionally computes p-values for the descriptions scores.
 def validated_assistant_generative_compare(
