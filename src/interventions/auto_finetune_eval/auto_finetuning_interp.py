@@ -1556,29 +1556,37 @@ def apply_interpretability_method_1_to_K(
 
     if scoring_results_load_path is None:
         # Validate the candidate hypotheses using the validated_assistant_generative_compare function
-        validated_results = validated_assistant_generative_compare(
-            candidate_hypotheses,
-            None,
-            None,
-            api_provider=api_provider,
-            api_model_str=api_model_str,
-            auth_key=auth_key,
-            api_stronger_model_str=api_stronger_model_str,
-            client=client,
-            starting_model_str=None,
-            comparison_model_str=None,
-            common_tokenizer_str=base_model.name_or_path,
-            starting_model=base_model,
-            comparison_model=finetuned_model,
-            device=device,
-            use_normal_distribution_for_p_values=True,
-            num_generated_texts_per_description=num_generated_texts_per_description,
-            num_rephrases_for_validation=num_rephrases_for_validation,
-            bnb_config=setup["bnb_config"],
-            use_correlation_coefficient=True,
-            api_interactions_save_loc=api_interactions_save_loc,
-            logger=logger
-        )
+        if api_provider != 'openrouter':
+            validated_results = validated_assistant_generative_compare(
+                candidate_hypotheses,
+                None,
+                None,
+                api_provider=api_provider,
+                api_model_str=api_model_str,
+                auth_key=auth_key,
+                api_stronger_model_str=api_stronger_model_str,
+                client=client,
+                starting_model_str=None,
+                comparison_model_str=None,
+                common_tokenizer_str=base_model.name_or_path,
+                starting_model=base_model,
+                comparison_model=finetuned_model,
+                device=device,
+                use_normal_distribution_for_p_values=True,
+                num_generated_texts_per_description=num_generated_texts_per_description,
+                num_rephrases_for_validation=num_rephrases_for_validation,
+                bnb_config=setup["bnb_config"],
+                use_correlation_coefficient=True,
+                api_interactions_save_loc=api_interactions_save_loc,
+                logger=logger
+            )
+        else:
+            print("Unable to perform generative comparison with OpenRouter models. Assigning all scores to 0.0.")
+            validated_results = (
+                [[0.0] * len(candidate_hypotheses)], # all_validated_scores
+                [[1.0] * len(candidate_hypotheses)], # all_validated_p_values
+                [[hypothesis] for hypothesis in candidate_hypotheses] # all_validated_hypotheses
+            )
 
         all_validated_scores, all_validated_p_values, all_validated_hypotheses = validated_results
         pickle.dump(validated_results, open(f"pkl_results/{run_prefix}{save_addon_str}_validated_results.pkl", "wb"))

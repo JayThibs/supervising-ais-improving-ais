@@ -20,7 +20,6 @@ import sys
 from scipy.spatial.distance import cdist
 from sklearn.neighbors import NearestNeighbors
 import networkx as nx
-import traceback
 import pandas as pd
 from saffron_implementation import SAFFRON
 

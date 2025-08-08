@@ -80,7 +80,7 @@ def make_api_request(
                     temperature=temperature
                 )
                 result = response.content[0].text
-            elif api_provider == 'openai':
+            elif api_provider == 'openai' or api_provider == 'openrouter':
                 if client is None:
                     client = OpenAI(api_key=api_key)
                 response = client.chat.completions.create(
@@ -215,6 +215,8 @@ def parallel_make_api_requests(
                 return OpenAI(api_key=auth_key)
             elif api_provider == 'gemini':
                 return genai.Client(api_key=auth_key)
+            elif api_provider == 'openrouter':
+                return OpenAI(api_key=auth_key, base_url="https://openrouter.ai/api/v1")
             else:
                 raise ValueError(f"Unsupported API provider: {api_provider}")
         except Exception as e:
