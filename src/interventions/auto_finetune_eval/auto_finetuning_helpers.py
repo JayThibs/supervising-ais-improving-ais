@@ -615,6 +615,137 @@ def load_statements_from_MPI_repo(
     
     return statements
 
+def load_statements_from_truthfulqa(
+    truthfulqa_variant: str = "truthfulqa/truthful_qa",
+    subset: str = "generation", 
+    split: str = "validation",
+    num_questions_to_load: Optional[int] = None
+) -> List[str]:
+    """
+    Load questions from the TruthfulQA dataset as statements.
+    
+    Args:
+        truthfulqa_variant (str): The TruthfulQA variant to use. Options include:
+            - "truthfulqa/truthful_qa" (main dataset, ~817 questions)
+            - "rahmanidashti/tiny-truthful-qa" (smaller version, ~95 questions)  
+            - "lauritowal/truthful_qa" (alternative version)
+        subset (str): The subset to load. Options: "generation", "multiple_choice". 
+            Default: "generation"
+        split (str): The data split to load. Default: "validation"
+        num_questions_to_load (Optional[int]): Number of questions to load. If None, loads all.
+    
+    Returns:
+        List[str]: A list of TruthfulQA questions as statements.
+    
+    Raises:
+        ImportError: If the datasets library is not installed.
+        ValueError: If the specified variant, subset, or split is not found.
+    """
+    try:
+        from datasets import load_dataset
+    except ImportError:
+        raise ImportError("The 'datasets' library is required to load TruthfulQA. Install it with: pip install datasets")
+    
+    try:
+        # Load the dataset
+        if subset and subset != "default":
+            dataset = load_dataset(truthfulqa_variant, subset)[split]
+        else:
+            dataset = load_dataset(truthfulqa_variant)[split]
+        
+        # Extract questions
+        questions = []
+        for item in dataset:
+            if 'question' in item:
+                questions.append(item['question'])
+            else:
+                # Fallback for datasets that might have different field names
+                print(f"Warning: 'question' field not found in item. Available fields: {list(item.keys())}")
+                # Try common alternative field names
+                for field_name in ['prompt', 'text', 'input']:
+                    if field_name in item:
+                        questions.append(item[field_name])
+                        break
+                else:
+                    print(f"Could not find question field in item: {item}")
+                    continue
+        
+        if not questions:
+            raise ValueError(f"No questions found in dataset {truthfulqa_variant}")
+        
+        # Shuffle for variety but maintain reproducibility
+        random.seed(42)
+        random.shuffle(questions)
+        
+        # Limit the number of questions if specified
+        if num_questions_to_load is not None:
+            questions = questions[:num_questions_to_load]
+        
+        print(f"Loaded {len(questions)} questions from TruthfulQA variant: {truthfulqa_variant}")
+        return questions
+        
+    except Exception as e:
+        raise ValueError(f"Error loading TruthfulQA dataset '{truthfulqa_variant}' with subset '{subset}' and split '{split}': {str(e)}")
+    
+def load_statements_from_amazon_bold(
+        num_questions_to_load: Optional[int] = None
+) -> List[str]:
+    """
+    Load questions from the Amazon Bold dataset as statements.
+
+    Args:
+        num_questions_to_load (Optional[int]): Number of questions to load. If None, loads all.
+
+    Returns:
+        List[str]: A list of Amazon Bold prompts as statements.
+    """
+    try:
+        from datasets import load_dataset
+    except ImportError:
+        raise ImportError("The 'datasets' library is required to load Amazon BOLD. Install it with: pip install datasets")
+    
+    try:
+        # Load the dataset
+        dataset = load_dataset("AmazonScience/bold")["train"]
+        
+        # Extract prompts
+        prompts = []
+        for item in dataset:
+            if 'prompts' in item and item['prompts']:
+                # The prompts field contains a list of prompts for each item
+                prompts.extend(item['prompts'])
+            else:
+                # Fallback for datasets that might have different field names
+                print(f"Warning: 'prompts' field not found in item. Available fields: {list(item.keys())}")
+                # Try common alternative field names
+                for field_name in ['prompt', 'text', 'input']:
+                    if field_name in item:
+                        if isinstance(item[field_name], list):
+                            prompts.extend(item[field_name])
+                        else:
+                            prompts.append(item[field_name])
+                        break
+                else:
+                    print(f"Could not find prompt field in item: {item}")
+                    continue
+        
+        if not prompts:
+            raise ValueError("No prompts found in Amazon BOLD dataset")
+        
+        # Shuffle for variety but maintain reproducibility
+        random.seed(42)
+        random.shuffle(prompts)
+        
+        # Limit the number of prompts if specified
+        if num_questions_to_load is not None:
+            prompts = prompts[:num_questions_to_load]
+        
+        print(f"Loaded {len(prompts)} prompts from Amazon BOLD dataset")
+        return prompts
+        
+    except Exception as e:
+        raise ValueError(f"Error loading Amazon BOLD dataset: {str(e)}")
+
 def load_statements_from_jailbreak_llms_repo(
     path_to_jailbreak_llms_repo_target: str,
     num_items_to_load: int = None
