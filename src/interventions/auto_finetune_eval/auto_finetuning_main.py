@@ -334,10 +334,13 @@ class AutoFineTuningEvaluator:
             self.base_model, 
             self.intervention_model,
             self.tokenizer,
+            base_model_prefix=self.args.base_model_prefix,
+            intervention_model_prefix=self.args.intervention_model_prefix,
             K=self.args.K,
             match_by_ids=self.args.match_by_ids,
             n_decoded_texts=self.args.num_decoded_texts,
-            decoding_prefix_file=self.args.decoding_prefix_file,
+            decoding_prompt_file=self.args.decoding_prompt_file,
+            max_number_of_prompts=self.args.max_number_of_prompts,
             api_provider=self.args.api_provider,
             api_model_str=self.args.model_str,
             api_stronger_model_str=self.args.stronger_model_str,
@@ -433,6 +436,8 @@ if __name__ == "__main__":
     parser.add_argument("--base_model", type=str, required=True, help="Either a HuggingFace model ID for the base model, a path to a local model directory, or \"OR:<model_str>\" for an OpenRouter model specified by <model_str>. If the latter, include an openrouter API key path via --openrouter_api_key_path")
     parser.add_argument("--base_model_revision", type=str, default=None, help="Revision of the base model to use")
     parser.add_argument("--intervention_model", type=str, default=None, help="Either a HuggingFace model ID for the intervention model, a path to a local model directory, or \"OR:<model_str>\" for an OpenRouter model specified by <model_str>. If the latter, include an openrouter API key path via --openrouter_api_key_path")
+    parser.add_argument("--base_model_prefix", type=str, default="", help="Prefix to add to all prompts for the base model")
+    parser.add_argument("--intervention_model_prefix", type=str, default="", help="Prefix to add to all prompts for the intervention model")
     parser.add_argument("--intervention_model_revision", type=str, default=None, help="Revision of the intervention model to use")
     parser.add_argument("--device", type=str, default=None, help="Device to use for inference with the base and intervention models")
 
@@ -464,7 +469,8 @@ if __name__ == "__main__":
     parser.add_argument("--num_decoded_texts", type=int, default=5000, help="Number of decoded texts to use for clustering")
     parser.add_argument("--decoding_max_length", type=int, default=48, help="Maximum length of the decoded texts")
     parser.add_argument("--decoding_batch_size", type=int, default=32, help="Batch size to use for decoding")
-    parser.add_argument("--decoding_prefix_file", type=str, default=None, help="Path to a file containing a set of prefixes to prepend to the texts to be decoded")
+    parser.add_argument("--decoding_prompt_file", type=str, default=None, help="Path to a file containing a set of prefixes to prepend to the texts to be decoded")
+    parser.add_argument("--max_number_of_prompts", type=int, default=None, help="Maximum number of prompts to use for decoding")
     parser.add_argument("--decoded_texts_save_path", type=str, default=None, help="Path to save the decoded texts to. Must specify a single file.")
     parser.add_argument("--decoded_texts_load_path", type=str, default=None, help="Path to load the decoded texts from. Must specify a single file.")
     parser.add_argument("--loaded_texts_subsample", type=int, default=None, help="If specified, will randomly subsample the loaded decoded texts to this number. Take care not to accidentally mess up the correspondence between the decoded texts and the loaded embeddings. Recompute the embeddings if in doubt.")
