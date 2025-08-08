@@ -18,7 +18,7 @@ from terminaltables import AsciiTable
 from tqdm import tqdm
 import re
 import pickle
-from auto_finetuning_helpers import plot_comparison_tsne, batch_decode_texts, load_statements_from_MWE_repo, load_statements_from_MPI_repo, load_statements_from_jailbreak_llms_repo, parallel_make_api_requests
+from auto_finetuning_helpers import plot_comparison_tsne, batch_decode_texts, load_statements_from_MWE_repo, load_statements_from_MPI_repo, load_statements_from_truthfulqa, load_statements_from_amazon_bold, load_statements_from_jailbreak_llms_repo, parallel_make_api_requests
 from os import path
 
 from validated_comparison_tools import read_past_embeddings_or_generate_new, match_clusterings, get_validated_contrastive_cluster_labels, validated_assistant_generative_compare, build_contrastive_K_neighbor_similarity_graph, get_cluster_labels_random_subsets, evaluate_label_discrimination, validated_embeddings_discriminative_single_unknown_ICL, attach_cluster_metrics_to_graph, analyze_metric_differences_vs_similarity, analyze_node_metric_vs_neighbor_similarity, analyze_hypothesis_scores_vs_cluster_metrics
@@ -29,9 +29,12 @@ def setup_interpretability_method(
         base_model: Union[PreTrainedModel, str], 
         finetuned_model: Union[PreTrainedModel, str], 
         tokenizer: PreTrainedTokenizer,
+        base_model_prefix: Optional[str] = None,
+        intervention_model_prefix: Optional[str] = None,
         n_decoded_texts: int = 2000, 
-        decoding_prefix_file: Optional[str] = None, 
-        use_decoding_prefixes_as_cluster_labels: bool = False,
+        decoding_prompt_file: Optional[str] = None, 
+        max_number_of_prompts: Optional[int] = None,
+        use_decoding_prompts_as_cluster_labels: bool = False,
         auth_key: Optional[str] = None,
         openrouter_api_key: Optional[str] = None,
         client: Optional[Any] = None,
@@ -76,10 +79,13 @@ def setup_interpretability_method(
         finetuned_model (Union[PreTrainedModel, str]): The model after finetuning. Can also be a string,
             in which case it references an openrouter model that will respond via the openrouter API.
         tokenizer (PreTrainedTokenizer): The tokenizer to use for text generation.
+        base_model_prefix (Optional[str]): Prefix to add to all prompts for the base model.
+        intervention_model_prefix (Optional[str]): Prefix to add to all prompts for the intervention model.
         n_decoded_texts (int): The number of texts to decode with each model.
-        decoding_prefix_file (Optional[str]): The path to a file containing a set of prefixes to 
+        decoding_prompt_file (Optional[str]): The path to a file containing a set of prompts to 
             prepend to the texts to be decoded.
-        use_decoding_prefixes_as_cluster_labels (bool): Whether to use the decoding prefixes as cluster labels.
+        max_number_of_prompts (Optional[int]): The maximum number of prompts to use for decoding. None by default.
+        use_decoding_prompts_as_cluster_labels (bool): Whether to use the decoding prompts as cluster labels.
         auth_key (Optional[str]): The API key to use for clustering and analysis.
         openrouter_api_key (Optional[str]): The API key to use for openrouter API calls.
         client (Optional[Any]): The client object for API calls.
@@ -129,7 +135,7 @@ def setup_interpretability_method(
         raise ValueError("If path_to_MWE_repo is provided, num_statements_per_behavior and num_responses_per_statement must also be provided.")
     if path_to_MWE_repo is not None:
         # Check if the path exists
-        if not path.exists(path_to_MWE_repo):
+        if not path.exists(path_to_MWE_repo) and not "truthfulqa" in path_to_MWE_repo:
             raise FileNotFoundError(f"Path to MWE persona repository does not exist: {path_to_MWE_repo}")
         # Check if the path is to the anthropic evals repository
         if path_to_MWE_repo.endswith("evals"):
@@ -148,29 +154,45 @@ def setup_interpretability_method(
 
             print("Number of statements loaded:", len(statements))
             print("Example statement:", statements[0])
-            # Now format the statements into a list of prefixes for decoding
-            prefixes = [f"Is the following statement something you would say?\n\"{statement}\"\nResponse: \"" for statement in statements]
+            # Now format the statements into a list of prompts for decoding
+            prompts = [f"Is the following statement something you would say?\n\"{statement}\"\nResponse: \"" for statement in statements]
         elif path_to_MWE_repo.endswith("MPI"):
             # Loading from the MPI repository
             print("Loading statements from MPI repository")
             statements = load_statements_from_MPI_repo(path_to_MWE_repo, num_statements_per_behavior)
             print("Number of statements loaded:", len(statements))
             print("Example statement:", statements[0])
-            # Now format the statements into a list of prefixes for decoding
-            prefixes = [f"Prompt: {statement}.\nResponse:" for statement in statements]
+            # Now format the statements into a list of prompts for decoding
+            prompts = [f"Prompt: {statement}.\nResponse:" for statement in statements]
         elif 'jailbreak_llms' in path_to_MWE_repo:
             # Loading from the jailbreak_llms repository
             print("Loading statements from jailbreak_llms repository")
             statements = load_statements_from_jailbreak_llms_repo(path_to_MWE_repo, num_statements_per_behavior)
             print("Number of statements loaded:", len(statements))
             print("Example statement:", statements[0])
-            prefixes = [f"Prompt: {statement}.\nResponse:" for statement in statements]
+            prompts = [f"Prompt: {statement}.\nResponse:" for statement in statements]
+        elif 'truthfulqa' in path_to_MWE_repo:
+            # Loading from the truthfulqa repository
+            print("Loading statements from truthfulqa dataset")
+            statements = load_statements_from_truthfulqa(num_questions_to_load = max_number_of_prompts)
+            print("Number of statements loaded:", len(statements))
+            print("Example statement:", statements[0])
+            prompts = [f"Question: {statement}.\nResponse:" for statement in statements]
+        elif 'bold' in path_to_MWE_repo:
+            # Loading from the bold repository
+            print("Loading statements from Amazon bold dataset")
+            statements = load_statements_from_amazon_bold(num_questions_to_load = max_number_of_prompts)
+            print("Number of statements loaded:", len(statements))
+            print("Example statement:", statements[0])
+            prompts = [f"Finish the following sentence: {statement}" for statement in statements]
         else:
             raise ValueError(f"Path to repository ({path_to_MWE_repo}) does not point to a known external dataset of prompts.")
-        texts_decoded_per_prefix = num_responses_per_statement
+        texts_decoded_per_prompt = num_responses_per_statement
         n_decoded_texts = None
+        if max_number_of_prompts is not None:
+            prompts = prompts[:max_number_of_prompts]
     else:
-        texts_decoded_per_prefix = None
+        texts_decoded_per_prompt = None
     
             # Initialize all cluster-related variables to None
     (base_loaded_cluster_indices, finetuned_loaded_cluster_indices,
@@ -181,6 +203,10 @@ def setup_interpretability_method(
 
     # Load the decoded texts from a prior run
     if decoded_texts_load_path is not None:
+        if base_model_prefix is not None:
+            print("Alert: base_model_prefix is not None, but we are loading decoded texts from a prior run, so it will not be used.")
+        if intervention_model_prefix is not None:
+            print("Alert: intervention_model_prefix is not None, but we are loading decoded texts from a prior run, so it will not be used.")
         if path_to_MWE_repo is not None:
             # Provided both a prior result from decodings and a repository from another source, raise an error
             print("Provided both a prior result from decodings and a repository from another source. Will currently only load the prior result.")
@@ -231,25 +257,27 @@ def setup_interpretability_method(
             print(f"Error loading decoded texts from {decoded_texts_load_path}: {e}")
             raise e
     else:
-        # Load decoding prefixes
-        if decoding_prefix_file and path.exists(decoding_prefix_file):
+        # Load decoding prompts
+        if decoding_prompt_file and path.exists(decoding_prompt_file):
             if path_to_MWE_repo is not None:
-                # Provided both a decoding prefix file and a repository from another source, raise an error
-                raise ValueError("Provided both a decoding prefix file and a repository from another source, please provide only one, as it is unclear which one to use.")
-            with open(decoding_prefix_file, 'r') as f:
-                prefixes = [line.strip() for line in f.readlines()]
+                # Provided both a decoding prompt file and a repository from another source, raise an error
+                raise ValueError("Provided both a decoding prompt file and a repository from another source, please provide only one, as it is unclear which one to use.")
+            with open(decoding_prompt_file, 'r') as f:
+                prompts = [line.strip() for line in f.readlines()]
         elif path_to_MWE_repo is None:
-            # Didn't load any prefixes, so we will be decoding from the empty string
-            prefixes = None
+            # Didn't load any prompts, so we will be decoding from the empty string
+            prompts = None
             print("Decoding from empty string.")
 
         if isinstance(base_model, GPTNeoXForCausalLM) or isinstance(base_model, Qwen2ForCausalLM):
             logging.set_verbosity_error()
 
         if isinstance(base_model, str):
-            duplicated_prefixes = [prefix for prefix in prefixes for _ in range(texts_decoded_per_prefix)]
+            duplicated_prompts = [prompt for prompt in prompts for _ in range(texts_decoded_per_prompt)]
+            if base_model_prefix is not None:
+                duplicated_prompts = [base_model_prefix + prompt for prompt in duplicated_prompts]
             base_decoded_texts = parallel_make_api_requests(
-                prompts=duplicated_prefixes,
+                prompts=duplicated_prompts,
                 api_provider="openrouter",
                 api_model_str=base_model,
                 auth_key=openrouter_api_key,
@@ -261,19 +289,27 @@ def setup_interpretability_method(
             )
         else:
             # Decode texts with both models
+            if base_model_prefix is not None:
+                base_prompts = [base_model_prefix + prompt for prompt in prompts]
+                base_prefix_length = len(tokenizer.encode(base_model_prefix, add_special_tokens=False))
+            else:
+                base_prompts = prompts
+                base_prefix_length = 0
             base_decoded_texts = batch_decode_texts(
                 base_model, 
                 tokenizer, 
-                prefixes, 
+                base_prompts, 
                 n_decoded_texts=n_decoded_texts,
-                texts_decoded_per_prefix=texts_decoded_per_prefix,
-                max_length=max_length,
+                texts_decoded_per_prefix=texts_decoded_per_prompt,
+                max_length=max_length + base_prefix_length,
                 batch_size=decoding_batch_size
             )
         if isinstance(finetuned_model, str):
-            duplicated_prefixes = [prefix for prefix in prefixes for _ in range(texts_decoded_per_prefix)]
+            duplicated_prompts = [prompt for prompt in prompts for _ in range(texts_decoded_per_prompt)]
+            if intervention_model_prefix is not None:
+                duplicated_prompts = [intervention_model_prefix + prompt for prompt in duplicated_prompts]
             finetuned_decoded_texts = parallel_make_api_requests(
-                prompts=duplicated_prefixes,
+                prompts=duplicated_prompts,
                 api_provider="openrouter",
                 api_model_str=finetuned_model,
                 auth_key=openrouter_api_key,
@@ -284,13 +320,19 @@ def setup_interpretability_method(
                 max_tokens=max_length
             )
         else:
+            if intervention_model_prefix is not None:
+                finetuned_prompts = [intervention_model_prefix + prompt for prompt in prompts]
+                intervention_prefix_length = len(tokenizer.encode(intervention_model_prefix, add_special_tokens=False))
+            else:
+                finetuned_prompts = prompts
+                intervention_prefix_length = 0
             finetuned_decoded_texts = batch_decode_texts(
                 finetuned_model, 
                 tokenizer, 
-                prefixes, 
+                finetuned_prompts, 
                 n_decoded_texts=n_decoded_texts,
-                texts_decoded_per_prefix=texts_decoded_per_prefix,
-                max_length=max_length,
+                texts_decoded_per_prefix=texts_decoded_per_prompt,
+                max_length=max_length + intervention_prefix_length,
                 batch_size=decoding_batch_size
             )
 
@@ -305,6 +347,15 @@ def setup_interpretability_method(
         df.to_csv(decoded_texts_save_path, index=False, escapechar='\\')
         
         print(f"Decoded texts saved to: {decoded_texts_save_path}")
+    
+    if base_model_prefix is not None and base_model_prefix != "":
+        base_decoded_texts = [text.replace(base_model_prefix, "") for text in base_decoded_texts]
+        print("Removed base model prefix from base decoded texts")
+        print("Removed prefix:", base_model_prefix)
+    if intervention_model_prefix is not None and intervention_model_prefix != "":
+        finetuned_decoded_texts = [text.replace(intervention_model_prefix, "") for text in finetuned_decoded_texts]
+        print("Removed intervention model prefix from finetuned decoded texts")
+        print("Removed prefix:", intervention_model_prefix)
 
     # Print out 50 randomly sampled decoded texts
     print("Base decoded texts:")
@@ -325,7 +376,7 @@ def setup_interpretability_method(
         prompt_embeddings = read_past_embeddings_or_generate_new(
             "pkl_embeddings/prompt_" + embeddings_save_str,
             None,
-            prefixes,
+            prompts,
             local_embedding_model_str=local_embedding_model_str,
             device=device,
             recompute_embeddings=False,
@@ -400,14 +451,14 @@ def setup_interpretability_method(
         
         if path_to_MWE_repo is not None:
             # We know how many statements/prompts we have and how many responses per statement
-            n_clusters = len(prefixes)
+            n_clusters = len(prompts)
             
             # Create cluster assignments where all decodings from the same prompt go to the same cluster
             base_clustering_assignments = np.array([i // num_responses_per_statement for i in range(len(base_decoded_texts))])
             finetuned_clustering_assignments = np.array([i // num_responses_per_statement for i in range(len(finetuned_decoded_texts))])
             
             # Track prompt-to-cluster mapping
-            deduplicated_prompts = prefixes
+            deduplicated_prompts = prompts
             deduplicated_prompt_index_to_cluster_indices = {
                 i: [i * num_responses_per_statement + j for j in range(num_responses_per_statement)]
                 for i in range(n_clusters)
@@ -472,10 +523,10 @@ def setup_interpretability_method(
         # First, derive the cluster assignments: a list that maps each decoding to the cluster of its prompt
         base_decoding_to_prompt_cluster = []
         finetuned_decoding_to_prompt_cluster = []
-        for i in range(len(prefixes)):
+        for i in range(len(prompts)):
             current_prompt_cluster = prompt_clustering.labels_[i]
-            # Assume we have texts_decoded_per_prefix texts decoded for each prefix
-            for _ in range(texts_decoded_per_prefix):
+            # Assume we have texts_decoded_per_prompt texts decoded for each prompt
+            for _ in range(texts_decoded_per_prompt):
                 base_decoding_to_prompt_cluster.append(current_prompt_cluster)
                 finetuned_decoding_to_prompt_cluster.append(current_prompt_cluster)
 
@@ -511,8 +562,8 @@ def setup_interpretability_method(
         })
         
     else:
-        # Perform clustering on both sets of embeddings (if not using decoding prefixes as cluster labels)
-        if not use_decoding_prefixes_as_cluster_labels:
+        # Perform clustering on both sets of embeddings (if not using decoding prompts as cluster labels)
+        if not use_decoding_prompts_as_cluster_labels:
             if cluster_method == "kmeans":
                 if len(base_embeddings) > 10000:  # threshold for switching to MiniBatch
                     base_clustering = MiniBatchKMeans(
@@ -546,21 +597,21 @@ def setup_interpretability_method(
             print("Found", len(set(finetuned_clustering.labels_)), "clusters for finetuned model")
         
         else:
-            # Create cluster assignments from decoding prefixes, matching the expected format
-            texts_per_prefix = n_decoded_texts // len(prefixes)
+            # Create cluster assignments from decoding prompts, matching the expected format
+            texts_per_prompt = n_decoded_texts // len(prompts)
             
-            # Create cluster assignments based on prefix order
-            base_clustering_assignments = np.array([i // texts_per_prefix for i in range(n_decoded_texts)])
-            finetuned_clustering_assignments = np.array([i // texts_per_prefix for i in range(n_decoded_texts)])
+            # Create cluster assignments based on prompt order
+            base_clustering_assignments = np.array([i // texts_per_prompt for i in range(n_decoded_texts)])
+            finetuned_clustering_assignments = np.array([i // texts_per_prompt for i in range(n_decoded_texts)])
             
             # Calculate cluster centers as the mean of embeddings for each cluster
             cluster_centers_base = np.array([
                 np.mean(base_embeddings[base_clustering_assignments == i], axis=0)
-                for i in range(len(prefixes))
+                for i in range(len(prompts))
             ])
             cluster_centers_finetuned = np.array([
                 np.mean(finetuned_embeddings[finetuned_clustering_assignments == i], axis=0)
-                for i in range(len(prefixes))
+                for i in range(len(prompts))
             ])
             
             # Create mock clustering objects to match the expected format
@@ -960,8 +1011,11 @@ def apply_interpretability_method_1_to_K(
     base_model: PreTrainedModel, 
     finetuned_model: PreTrainedModel, 
     tokenizer: PreTrainedTokenizer,
+    base_model_prefix: Optional[str] = None,
+    intervention_model_prefix: Optional[str] = None,
     n_decoded_texts: int = 2000, 
-    decoding_prefix_file: Optional[str] = None, 
+    decoding_prompt_file: Optional[str] = None, 
+    max_number_of_prompts: Optional[int] = None,
     api_provider: str = "anthropic",
     api_model_str: str = "claude-3-haiku-20240307",
     api_stronger_model_str: Optional[str] = None,
@@ -1038,8 +1092,11 @@ def apply_interpretability_method_1_to_K(
         base_model (PreTrainedModel): The original, pre-finetuned model.
         finetuned_model (PreTrainedModel): The model after finetuning.
         tokenizer (PreTrainedTokenizer): The tokenizer for text generation.
+        base_model_prefix (Optional[str]): Prefix to add to all prompts for the base model.
+        intervention_model_prefix (Optional[str]): Prefix to add to all prompts for the intervention model.
         n_decoded_texts (int): Number of texts to decode from each model.
-        decoding_prefix_file (Optional[str]): File containing prefixes for text generation.
+        decoding_prompt_file (Optional[str]): File containing prefixes for text generation.
+        max_number_of_prompts (Optional[int]): The maximum number of prompts to use for decoding. None by default.
         api_provider (str): API provider for clustering and analysis.
         api_model_str (str): API model to use.
         api_stronger_model_str (Optional[str]): API model to use for stronger model, only used for the most important tasks.
@@ -1123,8 +1180,11 @@ def apply_interpretability_method_1_to_K(
         base_model=base_model,
         finetuned_model=finetuned_model,
         tokenizer=tokenizer,
+        base_model_prefix=base_model_prefix,
+        intervention_model_prefix=intervention_model_prefix,
         n_decoded_texts=n_decoded_texts,
-        decoding_prefix_file=decoding_prefix_file,
+        decoding_prompt_file=decoding_prompt_file,
+        max_number_of_prompts=max_number_of_prompts,
         auth_key=auth_key,
         openrouter_api_key=openrouter_api_key,
         client=client,
@@ -1379,6 +1439,7 @@ def apply_interpretability_method_1_to_K(
                 best_metric_score = max(edge_data['label_metric_scores'].values())
                 additional_best_metric_score = max(edge_data['additional_label_metric_scores'].values()) if edge_data['additional_label_metric_scores'] else -1.0
                 best_label = max(edge_data['label_metric_scores'], key=edge_data['label_metric_scores'].get)
+                best_p_value = edge_data['label_p_values'][best_label]
 
                 base_cluster_indices = [i for i, label in enumerate(base_clustering.labels_) if label == base_cluster]
                 new_cluster_info['nearest_base_neighbors'].append({
@@ -1388,6 +1449,7 @@ def apply_interpretability_method_1_to_K(
                     'contrastive_label': best_label,
                     'contrastive_metric_score': best_metric_score,
                     'additional_contrastive_metric_score': additional_best_metric_score,
+                    'contrastive_p_value': best_p_value,
                     'all_contrastive_labels': list(edge_data['label_metric_scores'].keys()),
                     'all_contrastive_metric_scores': list(edge_data['label_metric_scores'].values()),
                     'sample_texts': get_random_texts(base_decoded_texts, base_cluster_indices)
