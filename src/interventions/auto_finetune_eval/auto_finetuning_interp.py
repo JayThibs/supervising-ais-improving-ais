@@ -111,7 +111,8 @@ def setup_interpretability_method(
         decoded_texts_load_path (Optional[str]): The path to load the decoded texts from. None by default.
         loaded_texts_subsample (Optional[int]): If specified, will randomly subsample the loaded decoded 
             texts to this number. None by default.
-        path_to_MWE_repo (Optional[str]): Path to the Anthropic evals repository.
+        path_to_MWE_repo (Optional[str]): Path to the an external repository of prompts corresponding to some
+            benchmarking dataset.
         num_statements_per_behavior (Optional[int]): Number of statements per behavior to read from the evals 
             repository and then generate responses from.
         num_responses_per_statement (Optional[int]): Number of responses per statement to generate from the statements 
@@ -203,10 +204,10 @@ def setup_interpretability_method(
 
     # Load the decoded texts from a prior run
     if decoded_texts_load_path is not None:
-        if base_model_prefix is not None:
-            print("Alert: base_model_prefix is not None, but we are loading decoded texts from a prior run, so it will not be used.")
-        if intervention_model_prefix is not None:
-            print("Alert: intervention_model_prefix is not None, but we are loading decoded texts from a prior run, so it will not be used.")
+        if base_model_prefix is not None and base_model_prefix != "":
+            print("Alert: base_model_prefix is not None or empty, but we are loading decoded texts from a prior run, so it will not be used.")
+        if intervention_model_prefix is not None and intervention_model_prefix != "":
+            print("Alert: intervention_model_prefix is not None or empty, but we are loading decoded texts from a prior run, so it will not be used.")
         if path_to_MWE_repo is not None:
             # Provided both a prior result from decodings and a repository from another source, raise an error
             print("Provided both a prior result from decodings and a repository from another source. Will currently only load the prior result.")
@@ -214,9 +215,88 @@ def setup_interpretability_method(
         try:
             decoded_texts = pd.read_csv(decoded_texts_load_path, escapechar='\\')
             print("decoded_texts.shape:", decoded_texts.shape)
+            if "prompt" not in decoded_texts.columns:
+                print("No prompt column found in loaded data. Will infer prompts and decodings-per-prompt from the loaded data.")
+                # Assume the loaded texts each start with a prompt, which has n different continuations:
+                # prompt_1 + continuation_1, prompt_1 + continuation_2, ..., prompt_1 + continuation_n
+                # prompt_2 + continuation_1, prompt_2 + continuation_2, ..., prompt_2 + continuation_n
+                # ...
+                # prompt_m + continuation_1, prompt_m + continuation_2, ..., prompt_m + continuation_n
+                # We want to extract the prompts (which may be of different lengths).
+
+                # Infer prompts and decodings-per-prompt from loaded data
+                base_texts_all = decoded_texts[decoded_texts["model"] == "base"]["text"].tolist()
+                finetuned_texts_all = decoded_texts[decoded_texts["model"] == "finetuned"]["text"].tolist()
+
+                def _lcp_two(a: str, b: str) -> str:
+                    i = 0
+                    L = min(len(a), len(b))
+                    while i < L and a[i] == b[i]:
+                        i += 1
+                    return a[:i]
+
+                def _lcp_many(arr: List[str]) -> str:
+                    if not arr:
+                        return ""
+                    p = arr[0]
+                    for t in arr[1:]:
+                        p = _lcp_two(p, t)
+                        if not p:
+                            break
+                    return p
+
+                def _best_group_size(texts: List[str], max_k: int = 1500, min_k: int = 50, min_lcp: int = 10) -> Optional[int]:
+                    # Try candidate group sizes; pick the one with the highest median LCP across chunks
+                    best_k, best_score = None, -1
+                    max_k = min(max_k, len(texts))
+                    for k in range(min_k, max_k + 1):
+                        chunks = [texts[i:i+k] for i in range(0, len(texts), k)]
+                        if not chunks or len(chunks[-1]) != k:
+                            chunks = chunks[:-1]
+                        if not chunks:
+                            continue
+                        lcp_lengths = [len(_lcp_many(c)) for c in chunks]
+                        score = float(np.median(lcp_lengths))
+                        if score >= best_score:
+                            best_score, best_k = score, k
+                    return best_k if best_score >= min_lcp else None
+
+                k_base = _best_group_size(base_texts_all[:10000], max_k=1500, min_k=50, min_lcp=5)
+                k_ft = _best_group_size(finetuned_texts_all[:10000], max_k=1500, min_k=50, min_lcp=5)
+                k = k_base
+                if k is None:
+                    raise ValueError("Could not infer the number of decodings per prompt from loaded texts.")
+                if k_base != k_ft:
+                    print("k_base != k_ft. Will use k_base.")
+
+                # Build prompts from base chunks (finetuned uses the same prompt order)
+                base_chunks = [base_texts_all[i:i+k] for i in range(0, len(base_texts_all), k)]
+                if base_chunks and len(base_chunks[-1]) != k:
+                    base_chunks = base_chunks[:-1]
+                finetuned_chunks = [finetuned_texts_all[i:i+k] for i in range(0, len(finetuned_texts_all), k)]
+                if finetuned_chunks and len(finetuned_chunks[-1]) != k:
+                    finetuned_chunks = finetuned_chunks[:-1]
+
+                base_prompts = [_lcp_many(chunk) for chunk in base_chunks]
+                finetuned_prompts = [_lcp_many(chunk) for chunk in finetuned_chunks]
+                base_decoded_texts = [chunk[0] for chunk in base_chunks]
+                finetuned_decoded_texts = [chunk[0] for chunk in finetuned_chunks]
+                prompts = base_prompts
+                texts_decoded_per_prompt = k
+                print("texts_decoded_per_prompt:", texts_decoded_per_prompt)
+                print("k:", k)
+                print("len(base_chunks):", len(base_chunks))
+                print("len(base_texts_all):", len(base_texts_all))
+                print("len(finetuned_texts_all):", len(finetuned_texts_all))
+                print("len(prompts):", len(prompts))
+                print("Example prompts:", prompts[:10])
+            
+
             if loaded_texts_subsample is not None:
                 decoded_texts = decoded_texts.sample(n=loaded_texts_subsample, random_state=0)
+                prompts = prompts.sample(n=loaded_texts_subsample, random_state=0)
             if include_prompts_in_decoded_texts:
+                # For when the saved data include explicit formatting of the prompts and texts
                 # Get the prompts and texts from the loaded data
                 base_prompts = decoded_texts[decoded_texts["model"] == "base"]["prompt"].tolist()
                 finetuned_prompts = decoded_texts[decoded_texts["model"] == "finetuned"]["prompt"].tolist()
@@ -373,6 +453,7 @@ def setup_interpretability_method(
         embeddings_save_str = "model"
 
     if cluster_on_prompts:
+        # (We assume base and finetuned have the same prompts, so we can use the same embeddings for both)
         prompt_embeddings = read_past_embeddings_or_generate_new(
             "pkl_embeddings/prompt_" + embeddings_save_str,
             None,
@@ -449,24 +530,23 @@ def setup_interpretability_method(
         if decoded_texts_load_path is None and path_to_MWE_repo is None:
             raise ValueError("use_prompts_as_clusters requires either decoded_texts_load_path or path_to_MWE_repo to be set")
         
-        if path_to_MWE_repo is not None:
+        if path_to_MWE_repo is not None and "prompt" not in decoded_texts.columns or decoded_texts_load_path is not None:
+            # We either decoded texts from prompts in the MWE repository or inferred prompts from the loaded data
             # We know how many statements/prompts we have and how many responses per statement
             n_clusters = len(prompts)
             
             # Create cluster assignments where all decodings from the same prompt go to the same cluster
-            base_clustering_assignments = np.array([i // num_responses_per_statement for i in range(len(base_decoded_texts))])
-            finetuned_clustering_assignments = np.array([i // num_responses_per_statement for i in range(len(finetuned_decoded_texts))])
+            base_clustering_assignments = np.array([i // texts_decoded_per_prompt for i in range(len(base_decoded_texts))])
+            finetuned_clustering_assignments = np.array([i // texts_decoded_per_prompt for i in range(len(finetuned_decoded_texts))])
             
             # Track prompt-to-cluster mapping
             deduplicated_prompts = prompts
             deduplicated_prompt_index_to_cluster_indices = {
-                i: [i * num_responses_per_statement + j for j in range(num_responses_per_statement)]
+                i: [i * texts_decoded_per_prompt + j for j in range(texts_decoded_per_prompt)]
                 for i in range(n_clusters)
             }
-        else:
+        elif "prompt" in decoded_texts.columns:
             # Working with loaded data that has prompt information
-            if "prompt" not in decoded_texts.columns:
-                raise ValueError("use_prompts_as_clusters requires prompt column in loaded data")
             
             # Get unique prompts
             base_prompts = decoded_texts[decoded_texts["model"] == "base"]["prompt"].tolist()

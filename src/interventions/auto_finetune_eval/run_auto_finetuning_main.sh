@@ -1186,7 +1186,7 @@ elif [ "$1" = "llama3.1-8B_instruct_vs_llama3.1-70B_instruct_free_truthfulqa_gem
 # bash run_auto_finetuning_main.sh llama3.1-8B_vs_llama3.1-8B_R1_distill_load_and_cluster &> runtime_logs/intervention_llama3.1-8B_vs_llama3.1-8B_R1_distill_gpt_4.1_gpt_4.1_nano_load_and_cluster_no_diversity_promoter_runtime_log.txt
 elif [ "$1" = "llama3.1-8B_vs_llama3.1-8B_R1_distill_load_and_cluster" ]; then
     # Run auto-finetuning without changing the model
-    CUDA_VISIBLE_DEVICES=0 python auto_finetuning_main.py \
+    CUDA_VISIBLE_DEVICES=1 python auto_finetuning_main.py \
         --base_model "NousResearch/Meta-Llama-3-8B" \
         --intervention_model "deepseek-ai/DeepSeek-R1-Distill-Llama-8B" \
         --num_samples 0 \
@@ -1194,6 +1194,7 @@ elif [ "$1" = "llama3.1-8B_vs_llama3.1-8B_R1_distill_load_and_cluster" ]; then
         --num_decoded_texts 2000000 \
         --decoding_max_length 112 \
         --num_clusters 200 \
+        --cluster_on_prompts \
         --n_clustering_inits 10 \
         --K 1 \
         --match_by_ids \
