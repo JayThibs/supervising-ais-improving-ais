@@ -336,6 +336,12 @@ class AutoFineTuningEvaluator:
             self.tokenizer,
             base_model_prefix=self.args.base_model_prefix,
             intervention_model_prefix=self.args.intervention_model_prefix,
+            cot_start_token_base=self.args.cot_start_token_base,
+            cot_end_token_base=self.args.cot_end_token_base,
+            cot_max_length_base=self.args.cot_max_length_base,
+            cot_start_token_intervention=self.args.cot_start_token_intervention,
+            cot_end_token_intervention=self.args.cot_end_token_intervention,
+            cot_max_length_intervention=self.args.cot_max_length_intervention,
             K=self.args.K,
             match_by_ids=self.args.match_by_ids,
             n_decoded_texts=self.args.num_decoded_texts,
@@ -356,6 +362,7 @@ class AutoFineTuningEvaluator:
             n_clustering_inits=self.args.n_clustering_inits,
             use_prompts_as_clusters=self.args.use_prompts_as_clusters,
             cluster_on_prompts=self.args.cluster_on_prompts,
+            use_anthropic_evals_clusters=self.args.use_anthropic_evals_clusters,
             device=self.device,
             cluster_method=self.args.cluster_method,
             n_clusters=self.args.num_clusters,
@@ -387,6 +394,7 @@ class AutoFineTuningEvaluator:
             discriminative_query_rounds=self.args.discriminative_query_rounds,
             discriminative_validation_runs=self.args.discriminative_validation_runs,
             metric=self.args.metric,
+            split_clusters_by_prompt=self.args.split_clusters_by_prompt,
             tsne_save_path=self.args.tsne_save_path,
             tsne_title=self.args.tsne_title,
             tsne_perplexity=self.args.tsne_perplexity,
@@ -438,6 +446,12 @@ if __name__ == "__main__":
     parser.add_argument("--intervention_model", type=str, default=None, help="Either a HuggingFace model ID for the intervention model, a path to a local model directory, or \"OR:<model_str>\" for an OpenRouter model specified by <model_str>. If the latter, include an openrouter API key path via --openrouter_api_key_path")
     parser.add_argument("--base_model_prefix", type=str, default="", help="Prefix to add to all prompts for the base model")
     parser.add_argument("--intervention_model_prefix", type=str, default="", help="Prefix to add to all prompts for the intervention model")
+    parser.add_argument("--cot_start_token_base", type=str, default=None, help="Token to start the chain of thought for the base model")
+    parser.add_argument("--cot_end_token_base", type=str, default=None, help="Token to end the chain of thought for the base model")
+    parser.add_argument("--cot_max_length_base", type=int, default=512, help="Max new tokens for CoT phase before continuation for the base model")
+    parser.add_argument("--cot_start_token_intervention", type=str, default=None, help="Token to start the chain of thought for the intervention model")
+    parser.add_argument("--cot_end_token_intervention", type=str, default=None, help="Token to end the chain of thought for the intervention model")
+    parser.add_argument("--cot_max_length_intervention", type=int, default=512, help="Max new tokens for CoT phase before continuation for the intervention model")
     parser.add_argument("--intervention_model_revision", type=str, default=None, help="Revision of the intervention model to use")
     parser.add_argument("--device", type=str, default=None, help="Device to use for inference with the base and intervention models")
 
@@ -497,6 +511,7 @@ if __name__ == "__main__":
     parser.add_argument("--n_clustering_inits", type=int, default=10, help="Number of clustering initializations to use for clustering")
     parser.add_argument("--use_prompts_as_clusters", action="store_true", help="Flag to use the prompts to determine the clusters")
     parser.add_argument("--cluster_on_prompts", action="store_true", help="Flag to perform clustering on the prompts, then use those to determine the clusters")
+    parser.add_argument("--use_anthropic_evals_clusters", action="store_true", help="Flag to use the cluster assignments from the Anthropic evals repository")
     parser.add_argument("--local_embedding_model_str", type=str, default="intfloat/multilingual-e5-large-instruct", help="Model version for the local embedding model")
     parser.add_argument("--K", type=int, default=3, help="Number of neighbors to connect each cluster to")
     parser.add_argument("--match_by_ids", action="store_true", help="Flag to match clusters by their IDs, not embedding distances.")
@@ -513,6 +528,7 @@ if __name__ == "__main__":
     parser.add_argument("--discriminative_query_rounds", type=int, default=3, help="Number of rounds of discriminative queries to perform")
     parser.add_argument("--discriminative_validation_runs", type=int, default=5, help="Number of validation runs to perform for each model for each hypothesis")
     parser.add_argument("--metric", type=str, default="acc", choices=["acc", "auc"], help="Metric to use for validation of labels")
+    parser.add_argument("--split_clusters_by_prompt", action="store_true", help="Flag to split the clusters by prompt during discriminative evaluation of the labels")
     # t-SNE
     parser.add_argument("--tsne_save_path", type=str, default=None, help="Path to save the t-SNE plot to")
     parser.add_argument("--tsne_title", type=str, default=None, help="Title for the t-SNE plot")
