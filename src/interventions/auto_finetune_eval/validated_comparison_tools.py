@@ -21,6 +21,7 @@ from scipy.spatial.distance import cdist
 from sklearn.neighbors import NearestNeighbors
 import networkx as nx
 import pandas as pd
+import copy
 from saffron_implementation import SAFFRON
 
 sys.path.append("..")
@@ -134,7 +135,10 @@ def contrastive_label_double_cluster(
         label_diversification_str_instructions: Optional[str] = None,
         verified_diversity_promoter_labels: List[str] = None,
         api_interactions_save_loc: Optional[str] = None,
-        logger: Optional[BoundLoggerLazyProxy] = None
+        logger: Optional[BoundLoggerLazyProxy] = None,
+        split_clusters_by_prompt: bool = False,
+        base_decoded_texts_prompt_ids: List[int] = None,
+        finetuned_decoded_texts_prompt_ids: List[int] = None
         ) -> Tuple[List[str], List[int], List[int]]:
     """
     Generate contrastive labels for two clusters of texts using either a local model or an API.
@@ -182,6 +186,13 @@ def contrastive_label_double_cluster(
         api_interactions_save_loc (Optional[str]): Which file to store the API requests and responses to. 
             Defaults to None.
         logger (Optional[BoundLoggerLazyProxy]): The logger to use for logging API requests and responses.
+        split_clusters_by_prompt (bool, optional): Whether to split the clusters by prompt during discriminative 
+            evaluation of the labels. If True, we will ensure no overlap in prompts between the label generation 
+            and evaluation splits of each cluster. Defaults to False.
+        base_decoded_texts_prompt_ids (List[int], optional): List of prompt IDs for the base decoded texts.
+            Defaults to None.
+        finetuned_decoded_texts_prompt_ids (List[int], optional): List of prompt IDs for the finetuned decoded texts.
+            Defaults to None.
     Returns:
         Tuple[List[str], List[int], List[int]]: A tuple containing:
             - List of generated contrastive labels
@@ -208,6 +219,9 @@ def contrastive_label_double_cluster(
             print(f"Warning: Sampling {actual_samples} texts instead of {sampled_texts_per_cluster} due to cluster size limitations.")
 
         if not cluster_ids_to_prompt_ids_to_decoding_ids_dict_1 is None and not cluster_ids_to_prompt_ids_to_decoding_ids_dict_2 is None and not num_decodings_per_prompt is None:
+            # TODO: Implement this with split_clusters_by_prompt
+            if split_clusters_by_prompt:
+                raise NotImplementedError("split_clusters_by_prompt is not implemented for contrastive label generation when using cluster_ids_to_prompt_ids_to_decoding_ids_dict.")
             # For cluster 1
             num_prompts_to_sample = int(sampled_texts_per_cluster / num_decodings_per_prompt)
             prompt_ids_to_decoding_ids_dict_1 = cluster_ids_to_prompt_ids_to_decoding_ids_dict_1[cluster_id_1]
@@ -260,10 +274,45 @@ def contrastive_label_double_cluster(
 
         else:
             # Sample different texts for each label
-            selected_text_indices_1 = np.random.choice(cluster_indices_1, actual_samples, replace=False)
-            selected_text_indices_2 = np.random.choice(cluster_indices_2, actual_samples, replace=False)
-            all_selected_indices_1.append(selected_text_indices_1)
-            all_selected_indices_2.append(selected_text_indices_2)
+            if split_clusters_by_prompt:
+                # First get the set of prompt IDs for the current clusters
+                print(f"len(base_decoded_texts_prompt_ids): {len(base_decoded_texts_prompt_ids)}, len(finetuned_decoded_texts_prompt_ids): {len(finetuned_decoded_texts_prompt_ids)}")
+                print(f"len(cluster_indices_1): {len(cluster_indices_1)}, len(cluster_indices_2): {len(cluster_indices_2)}")
+                prompt_ids_1 = set([base_decoded_texts_prompt_ids[i] for i in cluster_indices_1])
+                prompt_ids_2 = set([finetuned_decoded_texts_prompt_ids[i] for i in cluster_indices_2])
+                # Then, assign half the texts to label generation and half to label validation
+                num_base_prompts_for_label_generation = len(prompt_ids_1) // 2
+                num_finetuned_prompts_for_label_generation = len(prompt_ids_2) // 2
+                selected_prompt_ids_1 = np.random.choice(list(prompt_ids_1), num_base_prompts_for_label_generation, replace=False)
+                selected_prompt_ids_2 = np.random.choice(list(prompt_ids_2), num_finetuned_prompts_for_label_generation, replace=False)
+                # Then, split the cluster indices into two lists based on the prompt IDs. 
+                # We only want indices that correspond to the prompt IDs for the label generation.
+                valid_cluster_indices_1 = [i for i in cluster_indices_1 if base_decoded_texts_prompt_ids[i] in selected_prompt_ids_1]
+                valid_cluster_indices_2 = [i for i in cluster_indices_2 if finetuned_decoded_texts_prompt_ids[i] in selected_prompt_ids_2]
+                print(f"cluster_id_1: {cluster_id_1}, cluster_id_2: {cluster_id_2}, num_base_prompts_for_label_generation: {num_base_prompts_for_label_generation}, num_finetuned_prompts_for_label_generation: {num_finetuned_prompts_for_label_generation}, len(cluster_indices_1): {len(cluster_indices_1)}, len(cluster_indices_2): {len(cluster_indices_2)}, len(valid_cluster_indices_1): {len(valid_cluster_indices_1)}, len(valid_cluster_indices_2): {len(valid_cluster_indices_2)}")
+                try:
+                    selected_text_indices_1 = np.random.choice(valid_cluster_indices_1, actual_samples, replace=False)
+                except Exception as e:
+                    print(f"Error: {e}")
+                    print(f"valid_cluster_indices_1: {valid_cluster_indices_1}")
+                    print(f"cluster_indices_1: {cluster_indices_1}")
+                    print(f"selected_prompt_ids_1: {selected_prompt_ids_1}")
+                try:
+                    selected_text_indices_2 = np.random.choice(valid_cluster_indices_2, actual_samples, replace=False)
+                except Exception as e:
+                    print(f"Error: {e}")
+                    print(f"valid_cluster_indices_2: {valid_cluster_indices_2}")
+                    print(f"cluster_indices_2: {cluster_indices_2}")
+                    print(f"selected_prompt_ids_2: {selected_prompt_ids_2}")
+                # We'll also add all the indices of selected_prompt_ids_1 and selected_prompt_ids_2 to the all_selected_indices lists
+                # so that we don't use them for label validation
+                all_selected_indices_1.append(np.array(valid_cluster_indices_1))
+                all_selected_indices_2.append(np.array(valid_cluster_indices_2))
+            else:
+                selected_text_indices_1 = np.random.choice(cluster_indices_1, actual_samples, replace=False)
+                selected_text_indices_2 = np.random.choice(cluster_indices_2, actual_samples, replace=False)
+                all_selected_indices_1.append(selected_text_indices_1)
+                all_selected_indices_2.append(selected_text_indices_2)
 
         selected_texts_1 = [decoded_strs_1[i] for i in selected_text_indices_1]
         selected_texts_2 = [decoded_strs_2[i] for i in selected_text_indices_2]
@@ -284,7 +333,7 @@ def contrastive_label_double_cluster(
             str_instruction_to_assistant_model = str_instruction_to_assistant_model + "\n\n" + "Avoid generating labels that are similar to the following labels in content:\n" + "\n".join(verified_diversity_promoter_labels)
             str_instruction_to_assistant_model = str_instruction_to_assistant_model + "\nThe above labels have already been generated, so look for novel ways to describe the differences between the two sets of texts."
         
-        str_instruction_to_assistant_model = str_instruction_to_assistant_model + "\n\nKeep the answer short and concise, under 100 words."
+        str_instruction_to_assistant_model = str_instruction_to_assistant_model + "\n\nKeep the answer short and concise."
 
         
         if i > 0:
@@ -441,7 +490,7 @@ def label_single_cluster(
         decoded_labels = [labeling_tokenizer.decode(output[0][inputs_length:], skip_special_tokens=True) for output in outputs]
     else:
         if single_cluster_label_instruction is None:
-            str_instruction_to_assistant_model = str_instruction_to_assistant_model + "\n\nKeep the answer short and concise, under 100 words."
+            str_instruction_to_assistant_model = str_instruction_to_assistant_model + "\n\nKeep the answer short and concise."
         decoded_labels = [
             make_api_request(
                 str_instruction_to_assistant_model, 
@@ -922,7 +971,10 @@ def validate_cluster_label_comparative_discrimination_power(
         max_unitary_comparisons_per_label: int = 100,
         api_interactions_save_loc: Optional[str] = None,
         logger: Optional[BoundLoggerLazyProxy] = None,
-        metric: str = "acc"
+        metric: str = "acc",
+        split_clusters_by_prompt: bool = False,
+        base_decoded_texts_prompt_ids: List[int] = None,
+        finetuned_decoded_texts_prompt_ids: List[int] = None
         ) -> Tuple[Dict[Tuple[int, int], Dict[str, float]], Dict[Tuple[int, int], Tuple[List[int], List[int]]]]:
     """
     Validate the discrimination power of contrastive labels for pairs of clusters.
@@ -966,6 +1018,13 @@ def validate_cluster_label_comparative_discrimination_power(
             Defaults to None.
         logger (Optional[BoundLoggerLazyProxy]): The logger to use for logging API requests and responses.
         metric (str): The metric to use for evaluation. Defaults to "acc". Set to "auc" to use AUC.
+        split_clusters_by_prompt (bool, optional): Whether to split the clusters by prompt during discriminative
+            evaluation of the labels. If True, we will ensure no overlap in prompts between the label generation
+            and evaluation splits of each cluster. Defaults to False.
+        base_decoded_texts_prompt_ids (List[int], optional): List of prompt IDs for the base decoded texts.
+            Defaults to None.
+        finetuned_decoded_texts_prompt_ids (List[int], optional): List of prompt IDs for the finetuned decoded texts.
+            Defaults to None.
     Returns:
         Tuple[
             Dict[Tuple[int, int], Dict[str, float]], 
@@ -1399,7 +1458,7 @@ def update_diversification_instructions(
         
         # 5. Update label_diversification_str_instructions
         label_diversification_str_instructions = (
-            f"Prior labels have already covered the following themes as distinguishing features between the two models: {theme_summary.strip()}\n"
+            f"Prior labels have already covered the following themes as distinguishing features between the two models, so your proposed label should focus on different features from the following: {theme_summary.strip()}\n"
             "To maintain diversity, please focus on different features to distinguish the current sets of texts."
         )
         
@@ -1445,7 +1504,10 @@ def get_validated_contrastive_cluster_labels(
         additional_unitary_comparisons_per_label: int = 0,
         api_interactions_save_loc: Optional[str] = None,
         logger: Optional[BoundLoggerLazyProxy] = None,
-        metric: str = "acc"
+        metric: str = "acc",
+        split_clusters_by_prompt: bool = False,
+        base_decoded_texts_prompt_ids: List[int] = None,
+        finetuned_decoded_texts_prompt_ids: List[int] = None
         ) ->  Dict[str, Union[
                 Dict[Tuple[int, int], Dict[str, float]], # (cluster_1_id, cluster_2_id), label, accuracy/AUC
                 Dict[Tuple[int, int], Tuple[List[int], List[int]]], # (cluster_1_id, cluster_2_id), list of text ids used for generating labels, list of text ids used for validating labels
@@ -1518,6 +1580,13 @@ def get_validated_contrastive_cluster_labels(
             Defaults to None.
         logger (Optional[BoundLoggerLazyProxy]): The logger to use for logging API requests and responses.
         metric (str, optional): Metric to use for label validation. Defaults to "acc".
+        split_clusters_by_prompt (bool, optional): Whether to split the clusters by prompt during discriminative 
+            evaluation of the labels. If True, we will ensure no overlap in prompts between the label generation 
+            and evaluation splits of each cluster. Defaults to False.
+        base_decoded_texts_prompt_ids (List[int], optional): List of prompt IDs for the base decoded texts.
+            Defaults to None.
+        finetuned_decoded_texts_prompt_ids (List[int], optional): List of prompt IDs for the finetuned decoded texts.
+            Defaults to None.
     Returns:
         dict: A dictionary containing the following key / value pairs:
             - 'cluster_pair_scores': (Dict[Tuple[int, int], Dict[str, float]]) accuracy / AUC scores for each label 
@@ -1558,7 +1627,10 @@ def get_validated_contrastive_cluster_labels(
             label_diversification_str_instructions=label_diversification_str_instructions,
             verified_diversity_promoter_labels=verified_diversity_promoter_labels,
             api_interactions_save_loc=api_interactions_save_loc,
-            logger=logger
+            logger=logger,
+            split_clusters_by_prompt=split_clusters_by_prompt,
+            base_decoded_texts_prompt_ids=base_decoded_texts_prompt_ids,
+            finetuned_decoded_texts_prompt_ids=finetuned_decoded_texts_prompt_ids
         )
         
         # Store the generated labels and the indices of texts used for label generation
@@ -1586,16 +1658,47 @@ def get_validated_contrastive_cluster_labels(
         max_unitary_comparisons_per_label=max_unitary_comparisons_per_label,
         api_interactions_save_loc=api_interactions_save_loc,
         logger=logger,
-        metric=metric
+        metric=metric,
+        split_clusters_by_prompt=split_clusters_by_prompt,
+        base_decoded_texts_prompt_ids=base_decoded_texts_prompt_ids,
+        finetuned_decoded_texts_prompt_ids=finetuned_decoded_texts_prompt_ids
     )
 
     # If additional_unitary_comparisons_per_label > 0, we run additional unitary comparisons for each label
     if additional_unitary_comparisons_per_label > 0:
+        # First, need to update the dictionary of prior texts used for generating / validating labels
+        # Don't want to reuse the same texts for the additional comparisons as were used to either generate or validate the labels
+        # 'all_cluster_texts_used_for_validating_label_strs_ids': 
+        # (Dict[Tuple[int, int], Tuple[List[int], List[int]]]) Indices of texts used for validating labels.
+        all_cluster_texts_used_for_generating_or_validating_labels_1 = {}
+        all_cluster_texts_used_for_generating_or_validating_labels_2 = {}
+        # First, we need to get the texts used for generating labels
+        for pair_ids, text_indices_1 in all_cluster_texts_used_for_label_strs_ids_1.items():
+            all_cluster_texts_used_for_generating_or_validating_labels_1[pair_ids] = [l.tolist() for l in text_indices_1]
+        for pair_ids, text_indices_2 in all_cluster_texts_used_for_label_strs_ids_2.items():
+            all_cluster_texts_used_for_generating_or_validating_labels_2[pair_ids] = [l.tolist() for l in text_indices_2]
+        # Then, we need to add in the texts used for validating labels
+        # print("all_cluster_texts_used_for_validating_label_strs_ids:", all_cluster_texts_used_for_validating_label_strs_ids)
+        # print("all_cluster_texts_used_for_generating_or_validating_labels_1:", all_cluster_texts_used_for_generating_or_validating_labels_1)
+
+        for pair_ids, text_indices_list in all_cluster_texts_used_for_validating_label_strs_ids.items():
+            if pair_ids in all_cluster_texts_used_for_generating_or_validating_labels_1:
+                for label_index, (text_indices_1, text_indices_2) in enumerate(text_indices_list):
+                    all_cluster_texts_used_for_generating_or_validating_labels_1[pair_ids][label_index] = list(set(all_cluster_texts_used_for_generating_or_validating_labels_1[pair_ids][label_index] + text_indices_1))
+            else:
+                all_cluster_texts_used_for_generating_or_validating_labels_1[pair_ids] = text_indices_list
+        for pair_ids, text_indices_list in all_cluster_texts_used_for_validating_label_strs_ids.items():
+            if pair_ids in all_cluster_texts_used_for_generating_or_validating_labels_2:
+                for label_index, (text_indices_1, text_indices_2) in enumerate(text_indices_list):
+                    all_cluster_texts_used_for_generating_or_validating_labels_2[pair_ids][label_index] = list(set(all_cluster_texts_used_for_generating_or_validating_labels_2[pair_ids][label_index] + text_indices_2))
+            else:
+                all_cluster_texts_used_for_generating_or_validating_labels_2[pair_ids] = text_indices_list
+        #print("all_cluster_texts_used_for_generating_or_validating_labels_1:", all_cluster_texts_used_for_generating_or_validating_labels_1)
         additional_cluster_pair_scores, additional_all_cluster_texts_used_for_validating_label_strs_ids = validate_cluster_label_comparative_discrimination_power(
             decoded_strs_1, clustering_assignments_1, 
-            all_cluster_texts_used_for_label_strs_ids_1,
+            all_cluster_texts_used_for_generating_or_validating_labels_1,
             decoded_strs_2, clustering_assignments_2, 
-            all_cluster_texts_used_for_label_strs_ids_2,
+            all_cluster_texts_used_for_generating_or_validating_labels_2,
             cluster_label_strs, 
             local_model, 
             labeling_tokenizer, 
@@ -1610,7 +1713,10 @@ def get_validated_contrastive_cluster_labels(
             max_unitary_comparisons_per_label=additional_unitary_comparisons_per_label,
             api_interactions_save_loc=api_interactions_save_loc,
             logger=logger,
-            metric=metric
+            metric=metric,
+            split_clusters_by_prompt=split_clusters_by_prompt,
+            base_decoded_texts_prompt_ids=base_decoded_texts_prompt_ids,
+            finetuned_decoded_texts_prompt_ids=finetuned_decoded_texts_prompt_ids
         )
 
     if pick_top_n_labels is not None:
@@ -1671,6 +1777,10 @@ def get_validated_contrastive_cluster_labels(
             metric_score = cluster_pair_scores[cluster_pair][label]
             outstr_label = label.replace("\n", "\\n")
             print(f"{metric_str}: {metric_score:.4f}, P-value: {p_value:.4f}, Label: {outstr_label}")
+            if additional_unitary_comparisons_per_label > 0:
+                additional_metric_score = additional_cluster_pair_scores[cluster_pair][label]
+                additional_p_value = additional_p_values[cluster_pair][label]
+                print(f"Additional {metric_str}: {additional_metric_score:.4f}, P-value: {additional_p_value:.4f}, Label: {outstr_label}")
 
     return_dict = {
         "cluster_pair_scores": cluster_pair_scores,
@@ -1725,7 +1835,10 @@ def build_contrastive_K_neighbor_similarity_graph(
     logger: Optional[BoundLoggerLazyProxy] = None,
     tsne_save_path: str = "diversity_labels_tsne/",
     run_prefix: str = "",
-    metric: str = "acc"
+    metric: str = "acc",
+    split_clusters_by_prompt: bool = False,
+    base_decoded_texts_prompt_ids: List[int] = None,
+    finetuned_decoded_texts_prompt_ids: List[int] = None
 ) -> nx.Graph:
     """
     Build a K-nearest neighbor similarity graph between two sets of clusters based on contrastive labels.
@@ -1783,6 +1896,13 @@ def build_contrastive_K_neighbor_similarity_graph(
         tsne_save_path (str): Path to save the t-SNE plot of the label embeddings.
         run_prefix (str): Prefix to use for the t-SNE plot file name. Defaults to \"\".
         metric (str): Metric to use for label validation. Defaults to "acc".
+        split_clusters_by_prompt (bool): Whether to split the clusters by prompt during discriminative evaluation of the labels.
+            If True, we will ensure no overlap in prompts between the label generation and evaluation splits of each cluster.
+            Defaults to False.
+        base_decoded_texts_prompt_ids (List[int], optional): List of prompt IDs for the base decoded texts.
+            Defaults to None.
+        finetuned_decoded_texts_prompt_ids (List[int], optional): List of prompt IDs for the finetuned decoded texts.
+            Defaults to None.
     Returns:
         nx.Graph: A graph where nodes are clusters from both sets and edge attributes include
             similarity scores, labels, and per-label accuracy / AUC scores.
@@ -1860,7 +1980,10 @@ def build_contrastive_K_neighbor_similarity_graph(
             verified_diversity_promoter_labels=verified_diversity_promoter_labels,
             api_interactions_save_loc=api_interactions_save_loc,
             logger=logger,
-            metric=metric
+            metric=metric,
+            split_clusters_by_prompt=split_clusters_by_prompt,
+            base_decoded_texts_prompt_ids=base_decoded_texts_prompt_ids if set1 == 1 else finetuned_decoded_texts_prompt_ids,
+            finetuned_decoded_texts_prompt_ids=finetuned_decoded_texts_prompt_ids if set1 == 1 else base_decoded_texts_prompt_ids
         )
         p_values = result['p_values']
         if additional_unitary_comparisons_per_label > 0:
@@ -1962,7 +2085,7 @@ def build_contrastive_K_neighbor_similarity_graph(
                         logger=logger,
                         cluster_id_1=val_cluster1,
                         cluster_id_2=val_cluster2,
-                        metric=metric
+                        metric=metric,
                     )
                     print(f"Cross-validation {metric} for label on pair ({val_cluster1}, {val_cluster2}): {metric_score:.4f}")
                     metric_cross_validation_scores.append(metric_score)
@@ -2481,7 +2604,7 @@ def assistant_generative_compare(
         if api_provider is None:
             prompt = f"Given the following description of how the texts generated by Model 1 differ from those generated by Model 2: {description}, generate a new text that is closer to Model 1."
         else:
-            prompt = f'Given the following description of how the texts generated by Model 1 differ from those generated by Model 2: {description}, generate 5 short texts that are closer to Model 1. Format your response as a JSON array of strings, where each string is a new text. Example response format: ["Text 1", "Text 2", ..., "Text 3"]. Aim for about 100 words per text.'
+            prompt = f'Given the following description of how the texts generated by Model 1 differ from those generated by Model 2: {description}, generate two short texts that are closer to Model 1. Format your response as a JSON array of strings, where each string is a new text. Example response format: ["Text 1", "Text 2"]. Aim for about 100 words per text.'
         prompts_1.append(prompt)
     # Now, compile the list of prompts that encourage the assistant to generate texts attributed to the cluster 2 model.
     prompts_2 = []
