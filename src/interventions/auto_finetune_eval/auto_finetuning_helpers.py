@@ -41,7 +41,8 @@ def make_api_request(
         max_tokens: int = 1000,
         n_local_retries: int = 5,
         request_info: Optional[Dict[str, str]] = {"pipeline_stage": "unknown"},
-        temperature: float = 1.0
+        temperature: float = 1.0,
+        cot_end_token: Optional[str] = None
     ) -> str:
     """
     Make an API request to the specified provider.
@@ -59,6 +60,8 @@ def make_api_request(
         n_local_retries (int): The number of retries to make if the API request fails.
         request_info (Optional[Dict[str, str]]): Information about the request to be recorded in the API
             interactions file. Defaults to {"pipeline_stage": "unknown"}.
+        temperature (float): The temperature to use for the API request.
+        cot_end_token (Optional[str]): Token to end the chain of thought. Not yet implemented.
 
     Returns:
         str: The response from the API.
@@ -81,8 +84,10 @@ def make_api_request(
                 )
                 result = response.content[0].text
             elif api_provider == 'openai' or api_provider == 'openrouter':
-                if client is None:
+                if client is None and api_provider == 'openai':
                     client = OpenAI(api_key=api_key)
+                elif client is None and api_provider == 'openrouter':
+                    client = OpenAI(api_key=api_key, base_url="https://openrouter.ai/api/v1")
                 response = client.chat.completions.create(
                     model=model_str,
                     max_completion_tokens=max_tokens,
@@ -175,7 +180,9 @@ def parallel_make_api_requests(
         request_info: Optional[Dict[str, str]] = None,
         max_retries: int = 3,
         max_tokens: int = 1000,
-        temperature: float = 1.0
+        temperature: float = 1.0,
+        cot_end_token: Optional[str] = None,
+        cot_max_length: int = 512
     ) -> List[str]:
     """
     Execute API requests in parallel using a thread pool to improve performance.
@@ -192,6 +199,9 @@ def parallel_make_api_requests(
         request_info (Optional[Dict[str, str]]): Information about the request.
         max_retries (int): Maximum number of retries for failed requests.
         max_tokens (int): The maximum number of tokens to generate per request.
+        temperature (float): The temperature to use for the API request.
+        cot_end_token (Optional[str]): Token to end the chain of thought. Not yet implemented.
+        cot_max_length (int): Max new tokens for CoT phase before continuation. Defaults to 512.
     Returns:
         List[str]: A list of responses corresponding to each prompt.
 
@@ -241,7 +251,8 @@ def parallel_make_api_requests(
                     logger=logger,
                     request_info=request_info,
                     max_tokens=max_tokens,
-                    temperature=temperature
+                    temperature=temperature,
+                    cot_end_token=cot_end_token
                 )
                 return index, response
                 
@@ -517,7 +528,7 @@ def load_statements_from_MWE_repo(
     model_1_name: str = "NousResearch/Meta-Llama-3-8B",
     model_2_name: str = "NousResearch/Meta-Llama-3-8B-Instruct",
     pickle_path: str = "anthropics-evals-result-extended.pickle"
-) -> List[str]:
+) -> Tuple[List[str], List[int]]:
     """
     Load statements from the MWE persona repository.
 
@@ -531,6 +542,7 @@ def load_statements_from_MWE_repo(
         pickle_path (str): The path to the pickle file containing the anthropics evals result.
     Returns:
         List[str]: A list of statements.
+        List[int]: A list of cluster assignments based on the Anthropic evals behavior categories.
     """
     path_to_MWE_repo = Path(path_to_MWE_repo)
     persona_dir = path_to_MWE_repo / "persona"
@@ -539,7 +551,7 @@ def load_statements_from_MWE_repo(
         raise FileNotFoundError(f"Persona directory not found at {persona_dir}")
     
     all_statements = []
-    
+    all_cluster_assignments = []
     # Get all jsonl files in the persona directory
     jsonl_files = list(persona_dir.glob("*.jsonl"))
     
@@ -551,13 +563,15 @@ def load_statements_from_MWE_repo(
         print(f"Target keys: {target_keys}")
     # Process each behavior file with a fixed random seed for reproducibility
     random.seed(42)
+
+    behavior_categories_loaded = []
     
-    for jsonl_file in jsonl_files:
+    for i, jsonl_file in enumerate(jsonl_files):
         if threshold != 0:
             if jsonl_file.stem not in target_keys:
                 print(f"Skipping {jsonl_file.stem} because it is not in the target keys")
                 continue
-
+        behavior_categories_loaded.append(jsonl_file.stem)
         statements = []
         
         # Read the JSONL file
@@ -578,12 +592,16 @@ def load_statements_from_MWE_repo(
         if statements:
             if len(statements) <= num_statements_per_behavior:
                 selected_statements = statements
+
             else:
                 selected_statements = random.sample(statements, num_statements_per_behavior)
             
             all_statements.extend(selected_statements)
+            all_cluster_assignments.extend([i] * len(selected_statements))
     
-    return all_statements
+    print(f"Loaded {len(all_statements)} statements from {len(behavior_categories_loaded)} behavior categories")
+    print(f"Behavior categories loaded: {behavior_categories_loaded}")
+    return all_statements, all_cluster_assignments
 
 def load_statements_from_MPI_repo(
     path_to_MPI_repo: str,
@@ -802,7 +820,51 @@ def load_statements_from_jailbreak_llms_repo(
     
     return statements
 
-
+def generate_new_prompts(
+    categories_of_interest: List[str],
+    num_prompts_to_generate: int,
+    api_provider: str,
+    api_model_str: str,
+    auth_key: str,
+    client: Optional[Union[Anthropic, OpenAI, Client]] = None,
+    max_retries: int = 12,
+    max_tokens: int = 2500,
+    api_interactions_save_loc: Optional[str] = None,
+    logger: Optional[BoundLoggerLazyProxy] = None,
+    request_info: Optional[Dict[str, str]] = {"pipeline_stage": "generating new prompts"},
+    max_prompt_words: int = 50
+) -> List[str]:
+    """
+    Generate new prompts using an API assistant model via collect_dataset_from_api. Assume the provider is OpenRouter. 
+    """
+    if categories_of_interest is None or len(categories_of_interest) == 0:
+        print("No categories of interest provided. Using default categories of interest.")
+        #instruction_to_generate_categories = "We are comparing the behaviors and attributes of two different LLM models. We want to produce a broad range of different prompts on which to evaluate their behaviors. To start with, please generate a list of 20 categories of different relevant topics that we could use to generate prompts. Format them as a comma-separated list of strings. E.g., 'politics, science, history, ...'"
+        categories_of_interest = ["politics", "science", "history", "art", "music", "literature", "philosophy", "religion", "culture", "sports", "entertainment", "technology", "business", "economics", "environment", "health", "education", "social", "family", "personal"]
+    
+    print(f"Generating {num_prompts_to_generate} prompts for the following categories of interest: {categories_of_interest}")
+    # Generate a list of prompts for each category of interest
+    number_of_prompts_per_category = num_prompts_to_generate // len(categories_of_interest)
+    prompts = []
+    for category in tqdm(categories_of_interest):
+        dataset_generation_string = f"We are comparing the behaviors and attributes of two different LLM models, and need a bank of prompts on which to evaluate their behaviors. Generate a list of five evaluation prompts that are relevant to the following topic: {category}.  Keep each response short, no more than 50 words. Format your response as a JSON array of strings, where each string is a new prompt. Example response format: ['Prompt 1', 'Prompt 2', 'Prompt 3', 'Prompt 4', 'Prompt 5']."
+        #dataset_generation_strings_list = [dataset_generation_string] * (number_of_prompts_per_category // 5)
+        new_prompts = collect_dataset_from_api(
+            prompt = dataset_generation_string,
+            api_provider = api_provider,
+            model_str = api_model_str,
+            api_key = auth_key,
+            client = None,
+            api_interactions_save_loc = api_interactions_save_loc,
+            logger = logger,
+            num_datapoints = number_of_prompts_per_category,
+            request_info = request_info,
+            max_tokens = max_tokens,
+            max_retries = max_retries,
+        )
+        new_prompts = [p for p in new_prompts if len(p.split()) <= max_prompt_words]
+        prompts.extend(new_prompts)
+    return prompts
 
 
 def batch_decode_texts(
@@ -813,7 +875,9 @@ def batch_decode_texts(
         texts_decoded_per_prefix: Optional[int] = None,
         batch_size: int = 32,
         max_length: int = 32,
-        temperature: float = 1.0
+        temperature: float = 1.0,
+        cot_end_token: Optional[str] = None,
+        cot_max_length: int = 512
     ) -> List[str]:
     """
     Decode texts in batches using the given model.
@@ -827,6 +891,8 @@ def batch_decode_texts(
         batch_size (int): Number of texts to generate in each batch.
         max_length (int): The maximum length of the decoded texts.
         temperature (float): The temperature to use for text generation.
+        cot_end_token (Optional[str]): Token to end the chain of thought.
+        cot_max_length (int): Max new tokens for CoT phase before continuation. Defaults to 512.
     Returns:
         List[str]: List of generated texts.
     """
@@ -872,17 +938,62 @@ def batch_decode_texts(
         inputs = {key: value.to(model.device) for key, value in inputs.items()}
         
         with torch.no_grad():
-            outputs = model.generate(
-                **inputs,
-                max_length=max_length,
-                num_return_sequences=1,
-                no_repeat_ngram_size=2,
-                pad_token_id=tokenizer.eos_token_id,
-                temperature=temperature,
-                do_sample=True
-            )
-        
-        batch_decoded = tokenizer.batch_decode(outputs, skip_special_tokens=True)
+            if cot_end_token is not None:
+                # Stage 1: CoT phase up to cot_max_length tokens
+                cot_outputs = model.generate(
+                    **inputs,
+                    max_new_tokens=cot_max_length,
+                    num_return_sequences=1,
+                    no_repeat_ngram_size=2,
+                    pad_token_id=tokenizer.eos_token_id,
+                    temperature=temperature,
+                    do_sample=True
+                )
+                cot_decoded = tokenizer.batch_decode(cot_outputs, skip_special_tokens=True)
+
+                # Trim to cot_end_token if present; otherwise append it
+                stage2_prompts = []
+                for text in cot_decoded:
+                    idx = text.find(cot_end_token)
+                    if idx != -1:
+                        cot_text = text[: idx + len(cot_end_token)]
+                    else:
+                        cot_text = text + cot_end_token
+                    stage2_prompts.append(cot_text)
+
+                # Stage 2: continue from after CoT for additional max_length tokens
+                stage2_inputs = tokenizer(
+                    stage2_prompts,
+                    return_tensors="pt",
+                    padding=True,
+                    truncation=False  # avoid truncating the CoT context
+                )
+                stage2_inputs = {k: v.to(model.device) for k, v in stage2_inputs.items()}
+
+                final_outputs = model.generate(
+                    **stage2_inputs,
+                    max_new_tokens=max_length,
+                    num_return_sequences=1,
+                    no_repeat_ngram_size=2,
+                    pad_token_id=tokenizer.eos_token_id,
+                    temperature=temperature,
+                    do_sample=True
+                )
+                
+                batch_decoded = tokenizer.batch_decode(final_outputs, skip_special_tokens=True)
+            else:
+                # Original single-stage generation if cot_end_token is not provided
+                outputs = model.generate(
+                    **inputs,
+                    max_length=max_length,
+                    num_return_sequences=1,
+                    no_repeat_ngram_size=2,
+                    pad_token_id=tokenizer.eos_token_id,
+                    temperature=temperature,
+                    do_sample=True
+                )
+                batch_decoded = tokenizer.batch_decode(outputs, skip_special_tokens=True)
+
         # Add each decoded text to the appropriate prefix's list
         for text, prefix_idx in zip(batch_decoded, prefix_indices):
             decoded_texts_by_prefix[prefix_idx].append(text)
@@ -892,159 +1003,6 @@ def batch_decode_texts(
     for prefix_texts in decoded_texts_by_prefix:
         decoded_texts.extend(prefix_texts[:texts_per_prefix])
     return decoded_texts 
-
-
-
-# def batch_decode_texts(
-#         model: PreTrainedModel, 
-#         tokenizer: PreTrainedTokenizer,
-#         prefixes: Optional[List[str]], 
-#         n_decoded_texts: Optional[int] = None,
-#         texts_decoded_per_prefix: Optional[int] = None,
-#         batch_size: int = 32,
-#         max_length: int = 32,
-#         temperature: float = 1.0
-#     ) -> List[str]:
-#     """
-#     Decode texts in batches using the given model.
-
-#     Args:
-#         model (PreTrainedModel): The model to use for text generation.
-#         tokenizer (PreTrainedTokenizer): The tokenizer to use for text generation.
-#         prefixes (List[str]): List of prefixes to use for text generation.
-#         n_decoded_texts (Optional[int]): Total number of texts to generate.
-#         texts_decoded_per_prefix (Optional[int]): Number of texts to generate per prefix.
-#         batch_size (int): Number of texts to generate in each batch.
-#         max_length (int): The maximum length of the decoded texts.
-#         temperature (float): The temperature to use for text generation.
-#     Returns:
-#         List[str]: List of generated texts.
-#     """
-#     if n_decoded_texts is None and texts_decoded_per_prefix is None:
-#         raise ValueError("Either n_decoded_texts or texts_decoded_per_prefix must be provided")
-#     if n_decoded_texts is not None and texts_decoded_per_prefix is not None:
-#         raise ValueError("Either n_decoded_texts or texts_decoded_per_prefix must be provided, but not both")
-    
-#     if prefixes is None:
-#         if isinstance(model, GPTNeoXForCausalLM) or \
-#             isinstance(model, Qwen2ForCausalLM) or \
-#             isinstance(model, GPT2LMHeadModel) or \
-#             isinstance(model, LlamaForCausalLM) or \
-#             isinstance(model, Phi3ForCausalLM):
-#             if tokenizer.bos_token is None:
-#                 prefixes = [tokenizer.eos_token]
-#             else:
-#                 prefixes = [tokenizer.bos_token]
-#         else:
-#             prefixes = [""]
-    
-#     if not prefixes:
-#         return []
-
-#     # Set padding token to eos token
-#     if tokenizer.pad_token is None:
-#         tokenizer.pad_token = tokenizer.eos_token
-#         tokenizer.pad_token_id = tokenizer.eos_token_id
-
-#     num_original_prefixes = len(prefixes)
-    
-#     if texts_decoded_per_prefix is not None:
-#         counts_per_prefix = [texts_decoded_per_prefix] * num_original_prefixes
-#         total_target_decodings = texts_decoded_per_prefix * num_original_prefixes
-#     elif n_decoded_texts is not None:
-#         if num_original_prefixes == 0: # Should be caught by `if not prefixes` earlier, but as a safeguard
-#              if n_decoded_texts > 0:
-#                  raise ValueError("n_decoded_texts > 0 but no prefixes provided or prefixes became empty.")
-#              return []
-#         base_count = n_decoded_texts // num_original_prefixes
-#         remainder = n_decoded_texts % num_original_prefixes
-#         counts_per_prefix = [base_count + 1 if i < remainder else base_count for i in range(num_original_prefixes)]
-#         total_target_decodings = n_decoded_texts
-#     else:
-#         # This case is theoretically covered by the initial checks, but to be safe:
-#         raise ValueError("Logical error: n_decoded_texts and texts_decoded_per_prefix are both None.")
-
-#     if total_target_decodings == 0:
-#         return []
-
-#     prefix_data_map = {}
-#     for i, p_str in enumerate(prefixes):
-#         prefix_data_map[i] = {
-#             'prefix_str': p_str,
-#             'token_len': len(tokenizer.encode(p_str)),
-#             'num_to_gen': counts_per_prefix[i],
-#             'generated_count': 0
-#         }
-
-#     decoded_results_for_original_prefixes = [[] for _ in range(num_original_prefixes)]
-#     generated_total = 0
-    
-#     with tqdm(total=total_target_decodings, desc="Batch Decoding") as pbar:
-#         while generated_total < total_target_decodings:
-#             candidate_tasks = [] # Stores (token_len, original_idx, prefix_str)
-#             for original_idx, data in prefix_data_map.items():
-#                 if data['generated_count'] < data['num_to_gen']:
-#                     candidate_tasks.append((data['token_len'], original_idx, data['prefix_str']))
-            
-#             if not candidate_tasks:
-#                 break # All tasks completed
-
-#             candidate_tasks.sort(key=lambda x: x[0], reverse=True) # Sort by token_len
-
-#             num_tasks_for_batch = min(batch_size, len(candidate_tasks), total_target_decodings - generated_total)
-#             current_batch_tasks_info = candidate_tasks[:num_tasks_for_batch]
-
-#             if not current_batch_tasks_info:
-#                 break # No tasks to form a batch from
-
-#             batch_prompts = [info[2] for info in current_batch_tasks_info]
-#             batch_original_indices = [info[1] for info in current_batch_tasks_info]
-#             batch_prompt_lengths = [info[0] for info in current_batch_tasks_info]
-#             #print(f"Batch prompts: {batch_prompts}")
-#             #print(f"Batch prompt lengths: {batch_prompt_lengths}")
-
-#             inputs = tokenizer(
-#                 batch_prompts, 
-#                 return_tensors="pt", 
-#                 padding=True, 
-#                 truncation=True,
-#                 max_length=max_length
-#             )
-#             inputs = {key: value.to(model.device) for key, value in inputs.items()}
-#             #print(f"Inputs: {inputs}")
-            
-#             with torch.no_grad():
-#                 outputs = model.generate(
-#                     **inputs,
-#                     max_length=max_length,
-#                     num_return_sequences=1,
-#                     no_repeat_ngram_size=2,
-#                     pad_token_id=tokenizer.eos_token_id,
-#                     temperature=temperature,
-#                     do_sample=True
-#                 )
-            
-#             batch_decoded_texts = tokenizer.batch_decode(outputs, skip_special_tokens=True)
-
-#             for text, original_idx in zip(batch_decoded_texts, batch_original_indices):
-#                 if prefix_data_map[original_idx]['generated_count'] < prefix_data_map[original_idx]['num_to_gen']:
-#                     decoded_results_for_original_prefixes[original_idx].append(text)
-#                     prefix_data_map[original_idx]['generated_count'] += 1
-#                     generated_total += 1
-#                     pbar.update(1)
-#                 # If generated_total reaches total_target_decodings, inner loops might still run,
-#                 # but new items won't exceed num_to_gen for that prefix or total_target_decodings.
-#                 if generated_total >= total_target_decodings:
-#                     break 
-#             if generated_total >= total_target_decodings:
-#                     break 
-
-#     final_decoded_texts = []
-#     for i in range(num_original_prefixes):
-#         final_decoded_texts.extend(decoded_results_for_original_prefixes[i])
-    
-#     return final_decoded_texts
-
 
 def parse_dict(s: str) -> Dict[str, str]:
     """
