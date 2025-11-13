@@ -26,7 +26,8 @@ from saffron_implementation import SAFFRON
 
 sys.path.append("..")
 sys.path.append("../interventions/auto_finetune_eval")
-from auto_finetuning_helpers import make_api_request, extract_json_from_string, collect_dataset_from_api, rephrase_description, parallel_make_api_requests
+from auto_finetuning_helpers import make_api_request, extract_json_from_string, collect_dataset_from_api, rephrase_description, parallel_make_api_requests, permutation_test_auc
+from baseline_discriminator import baseline_discrimination, LogisticBoWDiscriminator
 
 from typing import List, Tuple, Dict, Optional, Union, Any
 
@@ -36,81 +37,48 @@ warnings.filterwarnings('ignore', message='You have modified the pretrained mode
 from structlog._config import BoundLoggerLazyProxy
 
 
-# class SAFFRON:
-#     """
-#     SAFFRON: Serial Alpha Spending For FDR control Over a New hypothesis.
-    
-#     This implements an online multiple testing procedure that controls the false discovery rate (FDR)
-#     in sequential hypothesis testing scenarios.
-    
-#     Reference: Ramdas et al. (2017) "SAFFRON: an adaptive algorithm for online control of the false discovery rate"
-#     """
-#     def __init__(self, alpha=0.05, lambda_param=0.5, gamma_param=0.5):
-#         """
-#         Initialize SAFFRON.
-        
-#         Args:
-#             alpha: Target FDR level (default 0.05)
-#             lambda_param: Fraction of alpha to spend on each test (default 0.5)
-#             gamma_param: Memory parameter - fraction of past to forget (default 0.5)
-#         """
-#         self.alpha = alpha
-#         self.lambda_param = lambda_param  
-#         self.gamma_param = gamma_param
-#         self.wealth = alpha  # Initial wealth
-#         self.candidates = []  # Store (time, p-value) pairs
-#         self.t = 0  # Time counter
-#         self.rejections = []  # Store rejected hypotheses info
-        
-#     def test_hypothesis(self, p_value, hypothesis_info=None):
-#         """
-#         Test a hypothesis using SAFFRON procedure.
-        
-#         Args:
-#             p_value: P-value of the hypothesis
-#             hypothesis_info: Optional info about the hypothesis (for tracking)
-            
-#         Returns:
-#             tuple: (is_rejected, alpha_threshold)
-#         """
-#         self.t += 1
-        
-#         # Add to candidates
-#         self.candidates.append((self.t, p_value))
-        
-#         # Remove old candidates based on gamma (forget old hypotheses)
-#         cutoff_time = self.t * (1 - self.gamma_param)
-#         self.candidates = [(t, p) for t, p in self.candidates if t >= cutoff_time]
-        
-#         # Calculate rejection threshold
-#         # Divide wealth among active candidates
-#         alpha_t = self.lambda_param * self.wealth / max(1, len(self.candidates))
-        
-#         # Check if we can reject
-#         if p_value <= alpha_t:
-#             # Reject null hypothesis
-#             self.wealth += self.alpha * self.lambda_param  # Earn back some wealth
-#             self.rejections.append({
-#                 'time': self.t,
-#                 'p_value': p_value,
-#                 'threshold': alpha_t,
-#                 'info': hypothesis_info
-#             })
-#             return True, alpha_t
-#         else:
-#             # Fail to reject
-#             return False, alpha_t
-    
-#     def get_summary(self):
-#         """Get summary statistics of the testing procedure."""
-#         return {
-#             'total_tests': self.t,
-#             'total_rejections': len(self.rejections),
-#             'current_wealth': self.wealth,
-#             'active_candidates': len(self.candidates),
-#             'rejection_rate': len(self.rejections) / max(1, self.t)
-#         }
+def seed_everything(seed: int) -> None:
+    """
+    Seed Python, NumPy and (optionally) PyTorch. Call once, early.
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+        # Optional: stricter determinism (slower; may error on some ops)
+        #torch.backends.cudnn.deterministic = True
+        #torch.backends.cudnn.benchmark = False
 
+def get_max_labeling_tokens(api_provider: str, api_model_str: str) -> int:
+    """
+    Get the maximum number of tokens allowed for labeling a single contrastive label. Weaker models will have a lower maximum number of tokens.
+    """
+    if api_provider == "gemini":
+        if 'flash-lite' in api_model_str:
+            return 2000
+        elif 'flash' in api_model_str:
+            return 3000
+        elif 'pro' in api_model_str:
+            return 10000
+        else:
+            return 10000
+    elif api_provider == "anthropic":
+        if 'haiku' in api_model_str:
+            return 2000
+        elif 'sonnet' in api_model_str:
+            return 3000
+        elif 'opus' in api_model_str:
+            return 10000
+        else:
+            return 10000
+    elif api_provider == "openai":
+        if 'nano' in api_model_str:
+            return 2000
+        elif 'mini' in api_model_str:
+            return 3000
+        else:
+            return 10000
 
 def contrastive_label_double_cluster(
         decoded_strs_1: List[str], 
@@ -128,6 +96,7 @@ def contrastive_label_double_cluster(
         device: str = "cuda:0", 
         sampled_texts_per_cluster: int = 10, 
         generated_labels_per_cluster: int = 3, 
+        max_labeling_tokens: int = None,
         cluster_ids_to_prompt_ids_to_decoding_ids_dict_1: Dict = None,
         cluster_ids_to_prompt_ids_to_decoding_ids_dict_2: Dict = None,
         num_decodings_per_prompt: int = None,
@@ -135,6 +104,7 @@ def contrastive_label_double_cluster(
         label_diversification_str_instructions: Optional[str] = None,
         verified_diversity_promoter_labels: List[str] = None,
         api_interactions_save_loc: Optional[str] = None,
+        logging_level: str = "INFO",
         logger: Optional[BoundLoggerLazyProxy] = None,
         split_clusters_by_prompt: bool = False,
         base_decoded_texts_prompt_ids: List[int] = None,
@@ -155,6 +125,8 @@ def contrastive_label_double_cluster(
         cluster_id_2 (int): ID of the matched comparison cluster in decoded_strs_2.
         local_model (AutoModel, optional): Deprecated.
         labeling_tokenizer (AutoTokenizer, optional): Deprecated.
+        max_labeling_tokens (int, optional): Maximum number of tokens allowed for labeling a single contrastive label. Defaults to None.
+            If None, will be determined based on the api_provider and api_model_str.
         api_provider (str, optional): API provider for text generation. Defaults to None.
         api_model_str (str, optional): Model string for API requests. Defaults to None.
         auth_key (str, optional): Authentication key for API requests. Defaults to None.
@@ -185,6 +157,8 @@ def contrastive_label_double_cluster(
             similar to the verified diversity promoter labels. Defaults to None.
         api_interactions_save_loc (Optional[str]): Which file to store the API requests and responses to. 
             Defaults to None.
+        logging_level (str): The logging level to use for logging API requests and responses. Defaults to "INFO", 
+            but can be set to "DEBUG" for more detailed logging of API requests and responses.
         logger (Optional[BoundLoggerLazyProxy]): The logger to use for logging API requests and responses.
         split_clusters_by_prompt (bool, optional): Whether to split the clusters by prompt during discriminative 
             evaluation of the labels. If True, we will ensure no overlap in prompts between the label generation 
@@ -203,6 +177,8 @@ def contrastive_label_double_cluster(
         contrastive_cluster_label_instruction = "You will be given two sets of texts generated by different LLM models. Concisely describe the key themes that differentiate the texts generated by these two models, based on the texts provided."
     if local_model is not None:
         print("Warning: Local model is deprecated for contrastive label generation.")
+    if max_labeling_tokens is None:
+        max_labeling_tokens = get_max_labeling_tokens(api_provider, api_model_str)
 
     cluster_indices_1 = [i for i, x in enumerate(clustering_assignments_1) if x == cluster_id_1]
     cluster_indices_2 = [i for i, x in enumerate(clustering_assignments_2) if x == cluster_id_2]
@@ -345,21 +321,25 @@ def contrastive_label_double_cluster(
         else:
             current_prompt = str_instruction_to_assistant_model
         
+
+        
         label = make_api_request(
             current_prompt, 
             api_provider, 
             api_model_str, 
             auth_key, 
             client=client,
-            max_tokens=250 if api_provider != "gemini" else 1000,
+            max_tokens=max_labeling_tokens,
+            max_thinking_tokens=10000,
             api_interactions_save_loc=api_interactions_save_loc,
+            logging_level=logging_level,
             logger=logger,
             request_info={
                 "pipeline_stage": "contrastive cluster label generation", 
                 "cluster_id_1": str(cluster_id_1),
                 "cluster_id_2": str(cluster_id_2),
                 "label_number": str(i+1)
-            }
+            },
         )
         decoded_labels.append(label)
 
@@ -379,6 +359,7 @@ def label_single_cluster(
         cluster_id: int, 
         local_model: AutoModel = None, 
         labeling_tokenizer: AutoTokenizer = None, 
+        max_labeling_tokens: int = None,
         api_provider: str = None,
         api_model_str: str = None,
         auth_key: str = None,
@@ -391,6 +372,7 @@ def label_single_cluster(
         single_cluster_label_instruction: Optional[str] = None,
         cluster_strs_list: Optional[List[str]] = None,
         api_interactions_save_loc: Optional[str] = None,
+        logging_level: str = "INFO",
         logger: Optional[BoundLoggerLazyProxy] = None
         ) -> Tuple[List[str], List[int]]:
     """
@@ -405,6 +387,8 @@ def label_single_cluster(
         cluster_id (int): ID of the cluster to label in decoded_strs.
         local_model (AutoModel, optional): Local model for text generation. Defaults to None.
         labeling_tokenizer (AutoTokenizer, optional): Tokenizer for the local model. Defaults to None.
+        max_labeling_tokens (int, optional): Maximum number of tokens allowed for labeling a single cluster label. Defaults to None.
+            If None, will be determined based on the api_provider and api_model_str.
         api_provider (str, optional): API provider for text generation. Defaults to None.
         api_model_str (str, optional): Model string for API requests. Defaults to None.
         auth_key (str, optional): Authentication key for API requests. Defaults to None.
@@ -426,6 +410,8 @@ def label_single_cluster(
             Defaults to None.
         api_interactions_save_loc (Optional[str]): Which file to store the API requests and responses to. 
             Defaults to None.
+        logging_level (str): The logging level to use for logging API requests and responses. Defaults to "INFO", 
+            but can be set to "DEBUG" for more detailed logging of API requests and responses.
         logger (Optional[BoundLoggerLazyProxy]): The logger to use for logging API requests and responses.
 
     Returns:
@@ -439,6 +425,8 @@ def label_single_cluster(
     """
     if single_cluster_label_instruction is None:
         single_cluster_label_instruction = "Concisely summarize the common themes of the texts shown to you. We are interested in the common themes of the set of texts these are drawn from, not the specific details of the texts we're showing you. So, only highlight the common themes, not the specific details of the texts we're showing you."
+    if max_labeling_tokens is None:
+        max_labeling_tokens = get_max_labeling_tokens(api_provider, api_model_str)
     if cluster_strs_list is not None:
         within_cluster_indices = list(range(len(cluster_strs_list)))
         selected_text_indices = np.random.choice(within_cluster_indices, sampled_texts_per_cluster, replace=False)
@@ -498,13 +486,15 @@ def label_single_cluster(
                 api_model_str, 
                 auth_key, 
                 client=client,
-                max_tokens=250,
+                max_tokens=max_labeling_tokens,
+                max_thinking_tokens=10000,
                 api_interactions_save_loc=api_interactions_save_loc,
+                logging_level=logging_level,
                 logger=logger,
                 request_info={
                     "pipeline_stage": "single cluster label generation", 
                     "cluster_id": str(cluster_id)
-                }
+                },
             ) for _ in range(generated_labels_per_cluster)
         ]
     for i, label in enumerate(decoded_labels):
@@ -531,6 +521,7 @@ def get_cluster_labels_random_subsets(
         num_decodings_per_prompt: int = None,
         single_cluster_label_instruction: Optional[str] = None,
         api_interactions_save_loc: Optional[str] = None,
+        logging_level: str = "INFO",
         logger: Optional[BoundLoggerLazyProxy] = None
         ) -> Tuple[Dict[int, List[str]], Dict[int, List[int]]]:
     """
@@ -565,6 +556,8 @@ def get_cluster_labels_random_subsets(
         single_cluster_label_instruction (Optional[str]): Instructions for generating the single cluster labels.
         api_interactions_save_loc (Optional[str]): Which file to store the API requests and responses to. 
             Defaults to None.
+        logging_level (str): The logging level to use for logging API requests and responses. Defaults to "INFO", 
+            but can be set to "DEBUG" for more detailed logging of API requests and responses.
         logger (Optional[BoundLoggerLazyProxy]): The logger to use for logging API requests and responses.
     Returns:
         Tuple[Dict[int, List[str]], Dict[int, List[int]]]: A tuple containing:
@@ -604,6 +597,7 @@ def get_cluster_labels_random_subsets(
             num_decodings_per_prompt=num_decodings_per_prompt,
             single_cluster_label_instruction=single_cluster_label_instruction,
             api_interactions_save_loc=api_interactions_save_loc,
+            logging_level=logging_level,
             logger=logger
         )
         all_cluster_texts_used_for_label_strs_ids[cluster] = selected_text_indices
@@ -623,6 +617,7 @@ def api_based_label_text_matching(
         client: Optional[Union[Anthropic, OpenAI, Client]] = None,
         mode: str = "single_cluster",
         api_interactions_save_loc: Optional[str] = None,
+        logging_level: str = "INFO",
         logger: Optional[BoundLoggerLazyProxy] = None,
         cluster_id_1: Optional[int] = None,
         cluster_id_2: Optional[int] = None
@@ -647,6 +642,8 @@ def api_based_label_text_matching(
             "double_cluster" or "contrastive" to evaluate a contrastive label between two clusters.
         api_interactions_save_loc (Optional[str]): Which file to store the API requests and responses to. 
             Defaults to None.
+        logging_level (str): The logging level to use for logging API requests and responses. Defaults to "INFO", 
+            but can be set to "DEBUG" for more detailed logging of API requests and responses.
         logger (Optional[BoundLoggerLazyProxy]): The logger to use for logging API requests and responses.
         cluster_id_1 (Optional[int]): The ID of the first cluster, if using a contrastive label.
         cluster_id_2 (Optional[int]): The ID of the second cluster, if using a contrastive label.
@@ -700,6 +697,7 @@ def api_based_label_text_matching(
         api_key, 
         client,
         api_interactions_save_loc=api_interactions_save_loc,
+        logging_level=logging_level,
         logger=logger,
         request_info={
             "pipeline_stage": "double_cluster text matching",
@@ -760,11 +758,12 @@ def evaluate_label_discrimination(
         use_unitary_comparisons: bool = False,
         max_unitary_comparisons_per_label: int = 100,
         api_interactions_save_loc: Optional[str] = None,
+        logging_level: str = "INFO",
         logger: Optional[BoundLoggerLazyProxy] = None,
         cluster_id_1: Optional[int] = None,
         cluster_id_2: Optional[int] = None,
-        metric: str = "acc"
-        ) -> float:
+        n_permutations: int = 0
+        ) -> Tuple[float, float, float]:
     """
     Evaluate the discrimination power of a given label between two sets of texts.
 
@@ -799,12 +798,17 @@ def evaluate_label_discrimination(
             for each label. Defaults to 100.
         api_interactions_save_loc (Optional[str]): Which file to store the API requests and responses to. 
             Defaults to None.
+        logging_level (str): The logging level to use for logging API requests and responses. Defaults to "INFO", 
+            but can be set to "DEBUG" for more detailed logging of API requests and responses.
         logger (Optional[BoundLoggerLazyProxy]): The logger to use for logging API requests and responses.
         cluster_id_1 (Optional[int]): The ID of the first cluster, if using a contrastive label.
         cluster_id_2 (Optional[int]): The ID of the second cluster, if using a contrastive label.
-        metric (str): The metric to use for evaluation. Defaults to "acc". Set to "auc" to use AUC.
+        n_permutations (int): The number of permutations to perform to evaluate the p-value of the label's
+            discrimination power via permutation test. Defaults to 0.
     Returns:
         float: The accuracy or AUC score representing the label's discrimination power.
+        float: The p-value of the label's discrimination power via permutation test.
+        float: The AUC score representing the label's discrimination power.
     """
     scores = []
     true_labels = []
@@ -871,9 +875,11 @@ def evaluate_label_discrimination(
                 auth_key=auth_key,
                 client=client,
                 api_interactions_save_loc=api_interactions_save_loc,
+                logging_level=logging_level,
                 logger=logger,
                 request_info=request_info,
-                max_tokens=150
+                max_tokens=512,
+                max_thinking_tokens=0
             )
             for score_text in scores_texts:
                 try:
@@ -922,6 +928,7 @@ def evaluate_label_discrimination(
                         client=client,
                         mode=mode,
                         api_interactions_save_loc=api_interactions_save_loc,
+                        logging_level=logging_level,
                         logger=logger,
                         cluster_id_1=cluster_id_1,
                         cluster_id_2=cluster_id_2
@@ -932,16 +939,16 @@ def evaluate_label_discrimination(
             # Permute sampled_texts_2
             sampled_texts_2 = random.sample(sampled_texts_2, len(sampled_texts_2))
     
-    if metric == "auc":
-        try:
-            auc = roc_auc_score(true_labels, scores)
-        except ValueError:
-            auc = float('nan') 
-    elif metric == "acc":
-        accuracy = sum([1 for i, score in enumerate(scores) if score > 0.5 and true_labels[i] == 1 or score < 0.5 and true_labels[i] == 0]) / len(scores)
+    try:
+        auc = roc_auc_score(true_labels, scores)
+    except ValueError:
+        auc = float('nan') 
+    accuracy = sum([1 for i, score in enumerate(scores) if score > 0.5 and true_labels[i] == 1 or score < 0.5 and true_labels[i] == 0]) / len(scores)
+    if n_permutations > 0:
+        p_value = permutation_test_auc(scores, true_labels, n_permutations, seed=42)
     else:
-        raise ValueError(f"Invalid metric: {metric}. Must be 'auc' or 'acc'.")
-    return auc if metric == "auc" else accuracy
+        p_value = None
+    return accuracy, p_value, auc
 
 # For each possible contrastive label of each cluster pair, we select sampled_comparison_texts_per_cluster random texts from
 # each cluster (which must not be in the associated cluster's all_cluster_texts_used_for_label_strs_ids, skipping the cluster 
@@ -970,12 +977,21 @@ def validate_cluster_label_comparative_discrimination_power(
         use_unitary_comparisons: bool = False,
         max_unitary_comparisons_per_label: int = 100,
         api_interactions_save_loc: Optional[str] = None,
+        logging_level: str = "INFO",
         logger: Optional[BoundLoggerLazyProxy] = None,
-        metric: str = "acc",
+        n_permutations: int = 0,
         split_clusters_by_prompt: bool = False,
+        use_baseline_discrimination: bool = False,
         base_decoded_texts_prompt_ids: List[int] = None,
-        finetuned_decoded_texts_prompt_ids: List[int] = None
-        ) -> Tuple[Dict[Tuple[int, int], Dict[str, float]], Dict[Tuple[int, int], Tuple[List[int], List[int]]]]:
+        finetuned_decoded_texts_prompt_ids: List[int] = None,
+        random_seed: int = 0,
+        ) -> Tuple[
+            Dict[Tuple[int, int], Dict[str, float]], # (cluster_1_id, cluster_2_id), label, accuracy/AUC
+            Dict[Tuple[int, int], Tuple[List[int], List[int]]], # (cluster_1_id, cluster_2_id), list of text ids used for generating labels, list of text ids used for validating labels
+            Dict[Tuple[int, int], Dict[str, float]], # (cluster_1_id, cluster_2_id), label, p-value
+            Dict[Tuple[int, int], Dict[str, float]], # (cluster_1_id, cluster_2_id), label, AUC scores
+            Optional[Dict[Tuple[int, int], Dict[str, float]]], # (cluster_1_id, cluster_2_id), label, baseline accuracy scores
+            Optional[Dict[Tuple[int, int], Dict[str, float]]]]: # (cluster_1_id, cluster_2_id), label, baseline AUC scores
     """
     Validate the discrimination power of contrastive labels for pairs of clusters.
 
@@ -1016,8 +1032,10 @@ def validate_cluster_label_comparative_discrimination_power(
             per label. Defaults to 100.
         api_interactions_save_loc (Optional[str]): Which file to store the API requests and responses to. 
             Defaults to None.
+        logging_level (str): The logging level to use for logging API requests and responses. Defaults to "INFO", 
+            but can be set to "DEBUG" for more detailed logging of API requests and responses.
         logger (Optional[BoundLoggerLazyProxy]): The logger to use for logging API requests and responses.
-        metric (str): The metric to use for evaluation. Defaults to "acc". Set to "auc" to use AUC.
+        n_permutations (int, optional): Number of permutations to perform for the permutation test. Defaults to 0.
         split_clusters_by_prompt (bool, optional): Whether to split the clusters by prompt during discriminative
             evaluation of the labels. If True, we will ensure no overlap in prompts between the label generation
             and evaluation splits of each cluster. Defaults to False.
@@ -1025,24 +1043,42 @@ def validate_cluster_label_comparative_discrimination_power(
             Defaults to None.
         finetuned_decoded_texts_prompt_ids (List[int], optional): List of prompt IDs for the finetuned decoded texts.
             Defaults to None.
+        random_seed (int, optional): Random seed to use for reproducibility. Defaults to 0. Used for the baseline 
+            discriminator.
     Returns:
         Tuple[
             Dict[Tuple[int, int], Dict[str, float]], 
             Dict[Tuple[int, int], Tuple[List[int], List[int]]]
+            Dict[Tuple[int, int], Dict[str, float]]
+            Dict[Tuple[int, int], Dict[str, float]]
+            Dict[Tuple[int, int], Dict[str, float]]
+            Dict[Tuple[int, int], Dict[str, LogisticBoWDiscriminator]]
             ]:
-            - A dictionary mapping cluster pairs to a dictionary of contrastive label strings and their associated AUC scores.
+            - A dictionary mapping cluster pairs to a dictionary of contrastive label strings and their associated accuracy or AUC scores.
             - A dictionary mapping cluster pairs to the indices of texts used for validation.
-
+            - A dictionary mapping cluster pairs to a dictionary of contrastive label strings and their associated AUC scores.
+            - A dictionary mapping cluster pairs to a dictionary of contrastive label strings and their associated baseline accuracy scores.
+            - A dictionary mapping cluster pairs to a dictionary of contrastive label strings and their associated baseline AUC scores.
+            - A dictionary mapping cluster pairs to a dictionary of contrastive label strings and their associated baseline discriminators.
     Note:
         This function skips cluster pairs that don't have enough available texts for sampling.
         It uses the evaluate_label_discrimination function to compute accuracy or AUC scores for each label.
     """
     cluster_pair_scores = {}
+    cluster_pair_auc_scores = {}
     all_cluster_texts_used_for_validating_label_strs_ids = {}
+    auc_permutation_p_values = {}
+    baseline_cluster_pair_scores = {}
+    baseline_cluster_pair_auc_scores = {}
+    baseline_cluster_pair_discriminators = {}
     for (cluster_id_1, cluster_id_2), cluster_label_candidates in tqdm(cluster_label_strs.items(), desc="Processing cluster pairs"):
         cluster_pair_scores[(cluster_id_1, cluster_id_2)] = {}
+        cluster_pair_auc_scores[(cluster_id_1, cluster_id_2)] = {}
+        auc_permutation_p_values[(cluster_id_1, cluster_id_2)] = {}
         all_cluster_texts_used_for_validating_label_strs_ids[(cluster_id_1, cluster_id_2)] = []
-
+        baseline_cluster_pair_scores[(cluster_id_1, cluster_id_2)] = {}
+        baseline_cluster_pair_auc_scores[(cluster_id_1, cluster_id_2)] = {}
+        baseline_cluster_pair_discriminators[(cluster_id_1, cluster_id_2)] = {}
         # Get the lists of texts used for each label in this cluster pair
         label_texts_1 = all_cluster_texts_used_for_label_strs_ids_1.get((cluster_id_1, cluster_id_2), [])
         label_texts_2 = all_cluster_texts_used_for_label_strs_ids_2.get((cluster_id_1, cluster_id_2), [])
@@ -1061,7 +1097,7 @@ def validate_cluster_label_comparative_discrimination_power(
             cluster_1_avail_len = len(cluster_1_indices)
             cluster_2_avail_len = len(cluster_2_indices)
             if cluster_1_avail_len < sampled_comparison_texts_per_cluster or cluster_2_avail_len < sampled_comparison_texts_per_cluster:
-                print(f"Warning: Not enough texts for cluster pair {cluster_id_1} ({cluster_1_avail_len}), {cluster_id_2} ({cluster_2_avail_len}). Setting {metric} to -1.0 to indicate invalid result.")
+                print(f"Warning: Not enough texts for cluster pair {cluster_id_1} ({cluster_1_avail_len}), {cluster_id_2} ({cluster_2_avail_len}). Setting accuracy to -1.0 to indicate invalid result.")
                 sampled_texts_1, sampled_texts_2 = [], []
             else:
                 sampled_texts_1 = random.sample(cluster_1_indices, sampled_comparison_texts_per_cluster)
@@ -1070,9 +1106,13 @@ def validate_cluster_label_comparative_discrimination_power(
             all_cluster_texts_used_for_validating_label_strs_ids[(cluster_id_1, cluster_id_2)].append((sampled_texts_1, sampled_texts_2))
 
             if len(sampled_texts_1) == 0 or len(sampled_texts_2) == 0:
-                metric_score = -1.0
+                accuracy_score = -1.0
+                p_value = None
+                baseline_accuracy_score = -1.0
+                baseline_p_value = None
+                baseline_auc_score = -1.0
             else:
-                metric_score = evaluate_label_discrimination(
+                accuracy_score, p_value, auc_score = evaluate_label_discrimination(
                     label,
                     sampled_texts_1,
                     sampled_texts_2,
@@ -1090,14 +1130,31 @@ def validate_cluster_label_comparative_discrimination_power(
                     use_unitary_comparisons=use_unitary_comparisons,
                     max_unitary_comparisons_per_label=max_unitary_comparisons_per_label,
                     api_interactions_save_loc=api_interactions_save_loc,
+                    logging_level=logging_level,
                     logger=logger,
                     cluster_id_1=cluster_id_1,
                     cluster_id_2=cluster_id_2,
-                    metric=metric
+                    n_permutations=n_permutations
                 )
-            cluster_pair_scores[(cluster_id_1, cluster_id_2)][label] = metric_score
+                if use_baseline_discrimination:
+                    baseline_accuracy_score, baseline_auc_score, baseline_discriminator = baseline_discrimination(
+                        [decoded_strs_1[text_id] for text_id in sampled_texts_1], 
+                        [decoded_strs_2[text_id] for text_id in sampled_texts_2],
+                        top_k_features_to_show=10,
+                        label_names=("M1", "M2"),
+                        random_state=random_seed
+                    )
+                    baseline_cluster_pair_scores[(cluster_id_1, cluster_id_2)][label] = baseline_accuracy_score
+                    baseline_cluster_pair_auc_scores[(cluster_id_1, cluster_id_2)][label] = baseline_auc_score
+                    baseline_cluster_pair_discriminators[(cluster_id_1, cluster_id_2)][label] = baseline_discriminator
+                else:
+                    baseline_accuracy_score = None
+                    baseline_auc_score = None
+            cluster_pair_scores[(cluster_id_1, cluster_id_2)][label] = accuracy_score
+            cluster_pair_auc_scores[(cluster_id_1, cluster_id_2)][label] = auc_score
+            auc_permutation_p_values[(cluster_id_1, cluster_id_2)][label] = p_value
 
-    return cluster_pair_scores, all_cluster_texts_used_for_validating_label_strs_ids
+    return cluster_pair_scores, all_cluster_texts_used_for_validating_label_strs_ids, auc_permutation_p_values, cluster_pair_auc_scores, baseline_cluster_pair_scores, baseline_cluster_pair_auc_scores, baseline_cluster_pair_discriminators
 
 
 # For each possible label of each cluster, we select sampled_comparison_texts_per_cluster random texts (which must not
@@ -1121,8 +1178,9 @@ def validate_cluster_label_discrimination_power(
         sampled_comparison_texts_per_cluster = 10, 
         non_cluster_comparison_texts = 10,
         api_interactions_save_loc: Optional[str] = None,
+        logging_level: str = "INFO",
         logger: Optional[BoundLoggerLazyProxy] = None,
-        metric: str = "acc"
+        n_permutations: int = 0
         ) -> Tuple[Dict[int, Dict[str, float]], Dict[int, List[int]]]:
     """
     Validate the discrimination power of cluster labels by testing if an assistant LLM can use the 
@@ -1153,8 +1211,10 @@ def validate_cluster_label_discrimination_power(
             comparison. Defaults to 10.
         api_interactions_save_loc (Optional[str]): Which file to store the API requests and responses to. 
             Defaults to None.
+        logging_level (str): The logging level to use for logging API requests and responses. Defaults to "INFO", 
+            but can be set to "DEBUG" for more detailed logging of API requests and responses.
         logger (Optional[BoundLoggerLazyProxy]): The logger to use for logging API requests and responses.
-        metric (str): The metric to use for evaluation. Defaults to "acc". Set to "auc" to use AUC.
+        n_permutations (int, optional): Number of permutations to perform for the permutation test. Defaults to 0.
     Returns:
         Tuple[Dict[int, Dict[str, float]], Dict[int, List[int]]]: A tuple containing:
             - Dictionary mapping cluster IDs to a dictionary of label strings and their associated accuracy or AUC scores.
@@ -1165,9 +1225,13 @@ def validate_cluster_label_discrimination_power(
         It uses the evaluate_label_discrimination function to compute accuracy or AUC scores for each label.
     """
     cluster_label_scores = {}
+    cluster_label_auc_scores = {}
+    auc_permutation_p_values = {}
     all_cluster_texts_used_for_validating_label_strs_ids = {}
     for cluster_id, cluster_label_candidates in tqdm(cluster_label_strs.items(), desc="Processing clusters"):
         cluster_label_scores[cluster_id] = {}
+        cluster_label_auc_scores[cluster_id] = {}
+        auc_permutation_p_values[cluster_id] = {}
 
         cluster_indices = [i for i, x in enumerate(clustering_assignments) if x == cluster_id]
         texts_used_for_current_label_ids = all_cluster_texts_used_for_label_strs_ids[cluster_id]
@@ -1184,7 +1248,7 @@ def validate_cluster_label_discrimination_power(
         all_cluster_texts_used_for_validating_label_strs_ids[cluster_id] = sampled_cluster_texts
 
         for label in cluster_label_candidates:
-            metric_score = evaluate_label_discrimination(
+            accuracy_score, p_value, auc_score = evaluate_label_discrimination(
                 label,
                 sampled_cluster_texts,
                 sampled_non_cluster_texts,
@@ -1198,13 +1262,21 @@ def validate_cluster_label_discrimination_power(
                 client=client,
                 device=device,
                 api_interactions_save_loc=api_interactions_save_loc,
+                logging_level=logging_level,
                 logger=logger,
                 cluster_id_1=cluster_id,
-                cluster_id_2=None
+                cluster_id_2=None,
+                n_permutations=n_permutations
             )
-            cluster_label_scores[cluster_id][label] = metric_score
-                
-    return cluster_label_scores, all_cluster_texts_used_for_validating_label_strs_ids
+            cluster_label_scores[cluster_id][label] = accuracy_score
+            cluster_label_auc_scores[cluster_id][label] = auc_score
+            auc_permutation_p_values[cluster_id][label] = p_value
+
+    return cluster_label_scores, cluster_label_auc_scores, all_cluster_texts_used_for_validating_label_strs_ids, auc_permutation_p_values
+
+# From https://huggingface.co/intfloat/multilingual-e5-large-instruct
+def get_detailed_instruct(task_description: str, query: str) -> str:
+    return f'Instruct: {task_description}\nQuery: {query}'
 
 # To save costs / time with embeddings, we will save a copy of whatever embeddings we generate and attempt to load past embeddings
 # from file if they exist. We will only generate new embeddings if we can't find past embeddings on file. This function thus first
@@ -1221,7 +1293,7 @@ def read_past_embeddings_or_generate_new(
         batch_size: int = 16, 
         save_embeddings: bool = True, 
         tqdm_disable: bool = False, 
-        clustering_instructions: str = "Identify the topic or theme of the given texts", 
+        clustering_instructions: str = "Identify the topic or theme of the given text", 
         max_length: int = 512, 
         bnb_config: BitsAndBytesConfig = None
         ) -> List[List[float]]:
@@ -1304,6 +1376,7 @@ def read_past_embeddings_or_generate_new(
                 if local_embedding_model_str == "nvidia/NV-Embed-v1" or local_embedding_model_str == "nvidia/NV-Embed-v2":
                     embeddings = local_embedding_model.encode(batch, instruction = clustering_instructions, max_length = max_length)
                 else:
+                    batch = [get_detailed_instruct(clustering_instructions, query) for query in batch]
                     batch_ids = tokenizer(batch, return_tensors="pt", padding=True, truncation=True, max_length=max_length).to(device)
                     output = local_embedding_model(**batch_ids, output_hidden_states=True)
                     token_embeddings = output.hidden_states[-1]
@@ -1331,10 +1404,13 @@ def update_diversification_instructions(
     api_provider: str = "openai",
     api_model_str: str = "gpt-4.1",
     api_stronger_model_str: Optional[str] = None,
+    max_labeling_tokens: int = None,
     auth_key: str = None,
     client: Optional[Union[Anthropic, OpenAI, Client]] = None,
     api_interactions_save_loc: Optional[str] = None,
+    logging_level: str = "INFO",
     logger: Optional[BoundLoggerLazyProxy] = None,
+    random_seed: int = 0,
 ) -> str:
     """
     Update label diversification instructions by analyzing prior labels and generating theme summaries.
@@ -1356,14 +1432,18 @@ def update_diversification_instructions(
         api_provider: API provider for theme summarization
         api_model_str: API model string
         api_stronger_model_str: Optional stronger API model string
+        max_labeling_tokens: Maximum number of tokens allowed for labeling a single cluster label
         auth_key: API authentication key
         client: API client object
         api_interactions_save_loc: File to save API interactions
+        logging_level: Logging level
         logger: Logger for API requests
-        
+        random_seed: Random seed to use for reproducibility. Defaults to 0. Used for sklearn's random state initialization.
     Returns:
         Updated label diversification instructions string
     """
+    if max_labeling_tokens is None:
+        max_labeling_tokens = get_max_labeling_tokens(api_provider, api_model_str if api_stronger_model_str is None else api_stronger_model_str)
     try:
         # 1. Embed the prior labels
         label_embeddings = read_past_embeddings_or_generate_new(
@@ -1381,7 +1461,7 @@ def update_diversification_instructions(
         n_clusters = min(num_cluster_centers_to_use_for_label_diversification, len(prior_labels_for_diversification))
         
         if n_clusters > 1 and len(prior_labels_for_diversification) >= n_clusters:
-            kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+            kmeans = KMeans(n_clusters=n_clusters, random_state=random_seed, n_init=10)
             cluster_labels = kmeans.fit_predict(label_embeddings)
             cluster_centers = kmeans.cluster_centers_
             
@@ -1400,7 +1480,7 @@ def update_diversification_instructions(
             
             # Compute t-SNE (use perplexity that's appropriate for the data size)
             perplexity = min(30, max(4, len(label_embeddings) - 1))
-            tsne = TSNE(n_components=2, random_state=42, perplexity=perplexity)
+            tsne = TSNE(n_components=2, random_state=random_seed, perplexity=perplexity)
             tsne_embeddings = tsne.fit_transform(label_embeddings)
             
             # Create the plot
@@ -1447,13 +1527,15 @@ def update_diversification_instructions(
             api_model_str if api_stronger_model_str is None else api_stronger_model_str,
             auth_key,
             client=client,
-            max_tokens=300,
+            max_tokens=max_labeling_tokens,
+            max_thinking_tokens=10000,
             api_interactions_save_loc=api_interactions_save_loc,
+            logging_level=logging_level,
             logger=logger,
             request_info={
                 "pipeline_stage": "label diversification theme summary",
                 "num_prior_labels": len(prior_labels_for_diversification)
-            }
+            },
         )
         
         # 5. Update label_diversification_str_instructions
@@ -1462,7 +1544,7 @@ def update_diversification_instructions(
             "To maintain diversity, please focus on different features to distinguish the current sets of texts."
         )
         
-        print(f"Updated label diversification instructions after {len(prior_labels_for_diversification)} labels: {label_diversification_str_instructions}")
+        print(f"Updated label diversification instructions after {len(prior_labels_for_diversification)} SAFFRON-validated labels: \n\n{label_diversification_str_instructions}")
         
         return label_diversification_str_instructions
         
@@ -1501,17 +1583,23 @@ def get_validated_contrastive_cluster_labels(
         n_head_to_head_comparisons_per_text: Optional[int] = None,
         use_unitary_comparisons: bool = False,
         max_unitary_comparisons_per_label: int = 100,
-        additional_unitary_comparisons_per_label: int = 0,
         api_interactions_save_loc: Optional[str] = None,
+        logging_level: str = "INFO",
         logger: Optional[BoundLoggerLazyProxy] = None,
-        metric: str = "acc",
+        n_permutations: int = 0,
         split_clusters_by_prompt: bool = False,
+        use_baseline_discrimination: bool = False,
         base_decoded_texts_prompt_ids: List[int] = None,
-        finetuned_decoded_texts_prompt_ids: List[int] = None
+        finetuned_decoded_texts_prompt_ids: List[int] = None,
+        random_seed: int = 0,
         ) ->  Dict[str, Union[
-                Dict[Tuple[int, int], Dict[str, float]], # (cluster_1_id, cluster_2_id), label, accuracy/AUC
+                Dict[Tuple[int, int], Dict[str, float]], # (cluster_1_id, cluster_2_id), label, accuracy
                 Dict[Tuple[int, int], Tuple[List[int], List[int]]], # (cluster_1_id, cluster_2_id), list of text ids used for generating labels, list of text ids used for validating labels
-                Optional[Dict[Tuple[int, int], Dict[str, float]]] # (cluster_1_id, cluster_2_id), label, p-value
+                Dict[Tuple[int, int], Dict[str, float]], # (cluster_1_id, cluster_2_id), label, AUC
+                Optional[Dict[Tuple[int, int], Dict[str, float]]], # (cluster_1_id, cluster_2_id), label, p-value
+                Optional[Dict[Tuple[int, int], Dict[str, float]]], # (cluster_1_id, cluster_2_id), label, baseline accuracy
+                Optional[Dict[Tuple[int, int], Dict[str, float]]], # (cluster_1_id, cluster_2_id), label, baseline AUC
+                Optional[Dict[Tuple[int, int], Dict[str, LogisticBoWDiscriminator]]], # (cluster_1_id, cluster_2_id), label, baseline discriminator
             ]
         ]:
     """
@@ -1573,13 +1661,12 @@ def get_validated_contrastive_cluster_labels(
             without considering another text for comparison. Defaults to False.
         max_unitary_comparisons_per_label (int, optional): Maximum number of unitary comparisons to perform 
             per label. Defaults to 100.
-        additional_unitary_comparisons_per_label (int, optional): Additional number of unitary comparisons to 
-            perform per label. These are run when a hypothesis passes the initial discriminative validation.
-            Defaults to 0.
         api_interactions_save_loc (Optional[str]): Which file to store the API requests and responses to. 
             Defaults to None.
+        logging_level (str): The logging level to use for logging API requests and responses. Defaults to "INFO", 
+            but can be set to "DEBUG" for more detailed logging of API requests and responses.
         logger (Optional[BoundLoggerLazyProxy]): The logger to use for logging API requests and responses.
-        metric (str, optional): Metric to use for label validation. Defaults to "acc".
+        n_permutations (int, optional): Number of permutations to perform for p-value computation. Defaults to 0.
         split_clusters_by_prompt (bool, optional): Whether to split the clusters by prompt during discriminative 
             evaluation of the labels. If True, we will ensure no overlap in prompts between the label generation 
             and evaluation splits of each cluster. Defaults to False.
@@ -1587,14 +1674,29 @@ def get_validated_contrastive_cluster_labels(
             Defaults to None.
         finetuned_decoded_texts_prompt_ids (List[int], optional): List of prompt IDs for the finetuned decoded texts.
             Defaults to None.
+        random_seed (int, optional): Random seed to use for reproducibility. Defaults to 0. Used for the baseline 
+            discriminator.
     Returns:
         dict: A dictionary containing the following key / value pairs:
-            - 'cluster_pair_scores': (Dict[Tuple[int, int], Dict[str, float]]) accuracy / AUC scores for each label 
+            - 'cluster_pair_scores': (Dict[Tuple[int, int], Dict[str, float]]) accuracy scores for each label 
                 in each cluster pair.
             - 'all_cluster_texts_used_for_validating_label_strs_ids': 
                 (Dict[Tuple[int, int], Tuple[List[int], List[int]]]) Indices of texts used for validating labels.
-            - 'p_values': (Dict[Tuple[int, int], Dict[str, float]]) P-values for each label 
-                (if compute_p_values is True).
+            - 'cluster_pair_auc_scores': (Dict[Tuple[int, int], Dict[str, float]]) AUC scores for each label in each
+                cluster pair.            
+            - 'p_values': (Dict[Tuple[int, int], Dict[str, float]]) P-values for each label, based on the accuracy scores
+                and binomial test (if compute_p_values is True).
+            - 'auc_permutation_p_values': (Dict[Tuple[int, int], Dict[str, float]]) Permutation p-values for each label, based 
+                on the AUC scores and permutation test (if n_permutations > 0).
+            - 'baseline_cluster_pair_scores': (Optional[Dict[Tuple[int, int], Dict[str, float]]]) Accuracy scores for 
+                each label in each cluster pair, based on the random forest bag of words baseline discrimination model
+                (if use_baseline_discrimination is True).
+            - 'baseline_cluster_pair_auc_scores': (Optional[Dict[Tuple[int, int], Dict[str, float]]]) AUC scores for 
+                each label in each cluster pair, based on the random forest bag of words baseline discrimination model
+                (if use_baseline_discrimination is True).
+            - 'baseline_cluster_pair_discriminators': (Optional[Dict[Tuple[int, int], Dict[str, LogisticBoWDiscriminator]]]) 
+                Baseline discriminators for each label in each cluster pair, based on the random forest bag of words baseline 
+                discrimination model (if use_baseline_discrimination is True).
     """
     # Initialize dictionaries to store cluster labels and text indices used for generating labels
     all_cluster_texts_used_for_label_strs_ids_1 = {}
@@ -1627,6 +1729,7 @@ def get_validated_contrastive_cluster_labels(
             label_diversification_str_instructions=label_diversification_str_instructions,
             verified_diversity_promoter_labels=verified_diversity_promoter_labels,
             api_interactions_save_loc=api_interactions_save_loc,
+            logging_level=logging_level,
             logger=logger,
             split_clusters_by_prompt=split_clusters_by_prompt,
             base_decoded_texts_prompt_ids=base_decoded_texts_prompt_ids,
@@ -1639,10 +1742,12 @@ def get_validated_contrastive_cluster_labels(
         all_cluster_texts_used_for_label_strs_ids_2[(cluster_id_1, cluster_id_2)] = selected_text_indices_2
 
     # Validate the discrimination power of the generated labels
-    cluster_pair_scores, all_cluster_texts_used_for_validating_label_strs_ids = validate_cluster_label_comparative_discrimination_power(
-        decoded_strs_1, clustering_assignments_1, 
+    cluster_pair_scores, all_cluster_texts_used_for_validating_label_strs_ids, auc_permutation_p_values, cluster_pair_auc_scores, baseline_cluster_pair_scores, baseline_cluster_pair_auc_scores, baseline_cluster_pair_discriminators = validate_cluster_label_comparative_discrimination_power(
+        decoded_strs_1, 
+        clustering_assignments_1, 
         all_cluster_texts_used_for_label_strs_ids_1,
-        decoded_strs_2, clustering_assignments_2, 
+        decoded_strs_2, 
+        clustering_assignments_2, 
         all_cluster_texts_used_for_label_strs_ids_2,
         cluster_label_strs, 
         local_model, 
@@ -1657,73 +1762,21 @@ def get_validated_contrastive_cluster_labels(
         use_unitary_comparisons=use_unitary_comparisons,
         max_unitary_comparisons_per_label=max_unitary_comparisons_per_label,
         api_interactions_save_loc=api_interactions_save_loc,
+        logging_level=logging_level,
         logger=logger,
-        metric=metric,
+        n_permutations=n_permutations,
         split_clusters_by_prompt=split_clusters_by_prompt,
         base_decoded_texts_prompt_ids=base_decoded_texts_prompt_ids,
-        finetuned_decoded_texts_prompt_ids=finetuned_decoded_texts_prompt_ids
+        finetuned_decoded_texts_prompt_ids=finetuned_decoded_texts_prompt_ids,
+        use_baseline_discrimination=use_baseline_discrimination,
+        random_seed=random_seed
     )
 
-    # If additional_unitary_comparisons_per_label > 0, we run additional unitary comparisons for each label
-    if additional_unitary_comparisons_per_label > 0:
-        # First, need to update the dictionary of prior texts used for generating / validating labels
-        # Don't want to reuse the same texts for the additional comparisons as were used to either generate or validate the labels
-        # 'all_cluster_texts_used_for_validating_label_strs_ids': 
-        # (Dict[Tuple[int, int], Tuple[List[int], List[int]]]) Indices of texts used for validating labels.
-        all_cluster_texts_used_for_generating_or_validating_labels_1 = {}
-        all_cluster_texts_used_for_generating_or_validating_labels_2 = {}
-        # First, we need to get the texts used for generating labels
-        for pair_ids, text_indices_1 in all_cluster_texts_used_for_label_strs_ids_1.items():
-            all_cluster_texts_used_for_generating_or_validating_labels_1[pair_ids] = [l.tolist() for l in text_indices_1]
-        for pair_ids, text_indices_2 in all_cluster_texts_used_for_label_strs_ids_2.items():
-            all_cluster_texts_used_for_generating_or_validating_labels_2[pair_ids] = [l.tolist() for l in text_indices_2]
-        # Then, we need to add in the texts used for validating labels
-        # print("all_cluster_texts_used_for_validating_label_strs_ids:", all_cluster_texts_used_for_validating_label_strs_ids)
-        # print("all_cluster_texts_used_for_generating_or_validating_labels_1:", all_cluster_texts_used_for_generating_or_validating_labels_1)
-
-        for pair_ids, text_indices_list in all_cluster_texts_used_for_validating_label_strs_ids.items():
-            if pair_ids in all_cluster_texts_used_for_generating_or_validating_labels_1:
-                for label_index, (text_indices_1, text_indices_2) in enumerate(text_indices_list):
-                    all_cluster_texts_used_for_generating_or_validating_labels_1[pair_ids][label_index] = list(set(all_cluster_texts_used_for_generating_or_validating_labels_1[pair_ids][label_index] + text_indices_1))
-            else:
-                all_cluster_texts_used_for_generating_or_validating_labels_1[pair_ids] = text_indices_list
-        for pair_ids, text_indices_list in all_cluster_texts_used_for_validating_label_strs_ids.items():
-            if pair_ids in all_cluster_texts_used_for_generating_or_validating_labels_2:
-                for label_index, (text_indices_1, text_indices_2) in enumerate(text_indices_list):
-                    all_cluster_texts_used_for_generating_or_validating_labels_2[pair_ids][label_index] = list(set(all_cluster_texts_used_for_generating_or_validating_labels_2[pair_ids][label_index] + text_indices_2))
-            else:
-                all_cluster_texts_used_for_generating_or_validating_labels_2[pair_ids] = text_indices_list
-        #print("all_cluster_texts_used_for_generating_or_validating_labels_1:", all_cluster_texts_used_for_generating_or_validating_labels_1)
-        additional_cluster_pair_scores, additional_all_cluster_texts_used_for_validating_label_strs_ids = validate_cluster_label_comparative_discrimination_power(
-            decoded_strs_1, clustering_assignments_1, 
-            all_cluster_texts_used_for_generating_or_validating_labels_1,
-            decoded_strs_2, clustering_assignments_2, 
-            all_cluster_texts_used_for_generating_or_validating_labels_2,
-            cluster_label_strs, 
-            local_model, 
-            labeling_tokenizer, 
-            api_provider, 
-            api_model_str, 
-            auth_key, 
-            client=client,
-            device=device, 
-            sampled_comparison_texts_per_cluster=sampled_comparison_texts_per_cluster,
-            n_head_to_head_comparisons_per_text=n_head_to_head_comparisons_per_text,
-            use_unitary_comparisons=use_unitary_comparisons,
-            max_unitary_comparisons_per_label=additional_unitary_comparisons_per_label,
-            api_interactions_save_loc=api_interactions_save_loc,
-            logger=logger,
-            metric=metric,
-            split_clusters_by_prompt=split_clusters_by_prompt,
-            base_decoded_texts_prompt_ids=base_decoded_texts_prompt_ids,
-            finetuned_decoded_texts_prompt_ids=finetuned_decoded_texts_prompt_ids
-        )
-
     if pick_top_n_labels is not None:
-        # For each cluster, pick the top n labels based on accuracy / AUC score
+        # For each cluster, pick the top n labels based on AUC score
         top_n_labels = {}
-        for cluster_pair, label_scores in cluster_pair_scores.items():
-            # Sort labels by their accuracy / AUC scores in descending order
+        for cluster_pair, label_scores in cluster_pair_auc_scores.items():
+            # Sort labels by their AUC scores in descending order
             sorted_labels = sorted(label_scores.items(), key=lambda x: x[1], reverse=True)
             
             # Pick the top n labels
@@ -1731,21 +1784,25 @@ def get_validated_contrastive_cluster_labels(
             
             # Store the top n labels and their scores
             top_n_labels[cluster_pair] = {label: score for label, score in top_n}
-        # Update cluster_labels with only the top n labels
+        # Update cluster_labels and auc_permutation_p_values with only the top n labels
         cluster_pair_scores = {cluster_pair: top_n_labels[cluster_pair] for cluster_pair in cluster_pair_scores.keys()}
-
+        cluster_pair_auc_scores = {cluster_pair: top_n_labels[cluster_pair] for cluster_pair in cluster_pair_auc_scores.keys()}
+        auc_permutation_p_values = {cluster_pair: auc_permutation_p_values[cluster_pair] for cluster_pair in auc_permutation_p_values.keys()}
+        baseline_cluster_pair_scores = {cluster_pair: baseline_cluster_pair_scores[cluster_pair] for cluster_pair in baseline_cluster_pair_scores.keys()}
+        baseline_cluster_pair_auc_scores = {cluster_pair: baseline_cluster_pair_auc_scores[cluster_pair] for cluster_pair in baseline_cluster_pair_auc_scores.keys()}
+        baseline_cluster_pair_discriminators = {cluster_pair: baseline_cluster_pair_discriminators[cluster_pair] for cluster_pair in baseline_cluster_pair_discriminators.keys()}
     # Optionally compute p-values if required
     if compute_p_values:
-        # Use exact binomial test for p-values
+        # Use exact binomial test for p-values (separate from the permutation-based p-values already computed)
         # Under null hypothesis, each score is the average of max_unitary_comparisons_per_label 
         # IID coin flips (50/50 between 0 and 1)
         p_values = {}
         for cluster_pair, label_scores in cluster_pair_scores.items():
             p_values[cluster_pair] = {}
-            for label, metric_score in label_scores.items():
-                if metric_score > 0:
+            for label, accuracy_score in label_scores.items():
+                if accuracy_score > 0:
                     # Convert accuracy back to number of correct classifications
-                    num_correct = round(metric_score * max_unitary_comparisons_per_label)
+                    num_correct = round(accuracy_score * max_unitary_comparisons_per_label)
                     
                     # Use one-sided exact binomial test
                     # H0: p = 0.5 (no discriminative power)
@@ -1755,44 +1812,35 @@ def get_validated_contrastive_cluster_labels(
                     p_values[cluster_pair][label] = p_value
                 else:
                     p_values[cluster_pair][label] = 1.0
-        if additional_unitary_comparisons_per_label > 0:
-            additional_p_values = {}
-            for cluster_pair, label_scores in additional_cluster_pair_scores.items():
-                additional_p_values[cluster_pair] = {}
-                for label, metric_score in label_scores.items():
-                    if metric_score > 0:
-                        num_correct = round(metric_score * additional_unitary_comparisons_per_label)
-                        result = binomtest(num_correct, additional_unitary_comparisons_per_label, p=0.5, alternative='greater')
-                        additional_p_values[cluster_pair][label] = result.pvalue
-                    else:
-                        additional_p_values[cluster_pair][label] = 1.0
-        else:
-            additional_p_values = None
     
-    metric_str = "accuracy" if metric == "acc" else "AUC"
-    # Print the aucs and p-values for each label in each cluster
-    for cluster_pair, labels_p_values in p_values.items():
-        print(f"Clusters {cluster_pair} {metric_str} scores and p-values:")
-        for label, p_value in labels_p_values.items():
-            metric_score = cluster_pair_scores[cluster_pair][label]
-            outstr_label = label.replace("\n", "\\n")
-            print(f"{metric_str}: {metric_score:.4f}, P-value: {p_value:.4f}, Label: {outstr_label}")
-            if additional_unitary_comparisons_per_label > 0:
-                additional_metric_score = additional_cluster_pair_scores[cluster_pair][label]
-                additional_p_value = additional_p_values[cluster_pair][label]
-                print(f"Additional {metric_str}: {additional_metric_score:.4f}, P-value: {additional_p_value:.4f}, Label: {outstr_label}")
+        # Print the aucs and p-values for each label in each cluster
+        for cluster_pair, labels_p_values in p_values.items():
+            print(f"Clusters {cluster_pair} accuracy scores and p-values:")
+            for label, p_value in labels_p_values.items():
+                accuracy_score = cluster_pair_scores[cluster_pair][label]
+                permutation_p_value = auc_permutation_p_values[cluster_pair][label]
+                baseline_accuracy_score = baseline_cluster_pair_scores[cluster_pair][label]
+                baseline_auc_score = baseline_cluster_pair_auc_scores[cluster_pair][label]
+                outstr_label = label.replace("\n", "\\n")
+                binomial_p_value_str = "N/A" if p_value is None else f"{p_value:.5f}"
+                permutation_p_value_str = "N/A" if permutation_p_value is None else f"{permutation_p_value:.5f}"
+                print(f"accuracy: {accuracy_score:.5f}, Binomial P-value: {binomial_p_value_str}, Permutation P-value: {permutation_p_value_str}, Label: {outstr_label}")
+                print(f"Label AUC score: {cluster_pair_auc_scores[cluster_pair][label]:.5f}")
+                print(f"Baseline accuracy score: {baseline_accuracy_score:.5f}, Baseline AUC score: {baseline_auc_score:.5f}")
 
     return_dict = {
         "cluster_pair_scores": cluster_pair_scores,
         "all_cluster_texts_used_for_validating_label_strs_ids": all_cluster_texts_used_for_validating_label_strs_ids,
+        "cluster_pair_auc_scores": cluster_pair_auc_scores,
     }
-    if additional_unitary_comparisons_per_label > 0:
-        return_dict["additional_cluster_pair_scores"] = additional_cluster_pair_scores
-        return_dict["additional_all_cluster_texts_used_for_validating_label_strs_ids"] = additional_all_cluster_texts_used_for_validating_label_strs_ids
+    if use_baseline_discrimination:
+        return_dict["baseline_cluster_pair_scores"] = baseline_cluster_pair_scores
+        return_dict["baseline_cluster_pair_auc_scores"] = baseline_cluster_pair_auc_scores
+        return_dict["baseline_cluster_pair_discriminators"] = baseline_cluster_pair_discriminators
     if compute_p_values:
         return_dict["p_values"] = p_values
-        if additional_unitary_comparisons_per_label > 0:
-            return_dict["additional_p_values"] = additional_p_values
+    if n_permutations > 0:
+        return_dict["auc_permutation_p_values"] = auc_permutation_p_values
     return return_dict
 
 
@@ -1812,12 +1860,14 @@ def build_contrastive_K_neighbor_similarity_graph(
     api_provider: str = None,
     api_model_str: str = None,
     api_stronger_model_str: Optional[str] = None,
+    max_labeling_tokens: int = None,
     auth_key: str = None,
     client: Optional[Union[Anthropic, OpenAI, Client]] = None,
     local_embedding_model_str: str = "intfloat/multilingual-e5-large-instruct",
     device: str = "cuda:0",
     sampled_comparison_texts_per_cluster: int = 50,
     cross_validate_contrastive_labels: bool = False,
+    cross_validate_on_all_clusters: bool = True,
     sampled_texts_per_cluster: int = 10,
     generated_labels_per_cluster: int = 3,
     cluster_ids_to_prompt_ids_to_decoding_ids_dict_1: Dict = None,
@@ -1830,15 +1880,16 @@ def build_contrastive_K_neighbor_similarity_graph(
     n_head_to_head_comparisons_per_text: Optional[int] = None,
     use_unitary_comparisons: bool = False,
     max_unitary_comparisons_per_label: int = 20,
-    additional_unitary_comparisons_per_label: int = 0,
     api_interactions_save_loc: Optional[str] = None,
+    logging_level: str = "INFO",
     logger: Optional[BoundLoggerLazyProxy] = None,
     tsne_save_path: str = "diversity_labels_tsne/",
     run_prefix: str = "",
-    metric: str = "acc",
+    n_permutations: int = 0,
     split_clusters_by_prompt: bool = False,
     base_decoded_texts_prompt_ids: List[int] = None,
-    finetuned_decoded_texts_prompt_ids: List[int] = None
+    finetuned_decoded_texts_prompt_ids: List[int] = None,
+    random_seed: int = 0,
 ) -> nx.Graph:
     """
     Build a K-nearest neighbor similarity graph between two sets of clusters based on contrastive labels.
@@ -1859,6 +1910,9 @@ def build_contrastive_K_neighbor_similarity_graph(
         api_provider (str): API provider for text generation.
         api_model_str (str): Model string for API requests.
         api_stronger_model_str (str): Model string for API requests for the stronger model. Can be used to generate labels.
+            If None, will use the same model as api_model_str.
+        max_labeling_tokens (int): Maximum number of tokens allowed for labeling a single cluster label.
+            If None, will be determined based on the api_provider and api_model_str.
         auth_key (str): Authentication key for API requests.
         client (Optional[Union[Anthropic, OpenAI, Client]], optional): API client for text
             generation. Defaults to None.
@@ -1868,6 +1922,7 @@ def build_contrastive_K_neighbor_similarity_graph(
         sampled_comparison_texts_per_cluster (int): Number of texts to sample per cluster for comparison.
         cross_validate_contrastive_labels (bool): Whether to cross-validate the contrastive labels by testing the 
             discriminative score of the labels on different clusters from which they were generated.
+        cross_validate_on_all_clusters (bool): Whether to cross-validate the contrastive labels on texts sampled from all other clusters.
         sampled_texts_per_cluster (int): Number of texts to sample per cluster for label generation.
         generated_labels_per_cluster (int): Number of labels to generate per cluster pair.
         cluster_ids_to_prompt_ids_to_decoding_ids_dict_1 (Dict, optional): Nested dict. First dict is indexed by cluster id.
@@ -1888,14 +1943,14 @@ def build_contrastive_K_neighbor_similarity_graph(
         n_head_to_head_comparisons_per_text (Optional[int]): Number of head-to-head comparisons per text.
         use_unitary_comparisons (bool): Whether to use unitary comparisons.
         max_unitary_comparisons_per_label (int): Maximum number of unitary comparisons to perform per label.
-        additional_unitary_comparisons_per_label (int): Additional number of unitary comparisons to perform per label.
-            These are run when a hypothesis passes the initial discriminative validation.
         api_interactions_save_loc (Optional[str]): Which file to store the API requests and responses to. 
             Defaults to None.
+        logging_level (str): The logging level to use for logging API requests and responses. Defaults to "INFO", 
+            but can be set to "DEBUG" for more detailed logging of API requests and responses.
         logger (Optional[BoundLoggerLazyProxy]): The logger to use for logging API requests and responses.
         tsne_save_path (str): Path to save the t-SNE plot of the label embeddings.
         run_prefix (str): Prefix to use for the t-SNE plot file name. Defaults to \"\".
-        metric (str): Metric to use for label validation. Defaults to "acc".
+        n_permutations (int, optional): Number of permutations to perform for the permutation test. Defaults to 0.
         split_clusters_by_prompt (bool): Whether to split the clusters by prompt during discriminative evaluation of the labels.
             If True, we will ensure no overlap in prompts between the label generation and evaluation splits of each cluster.
             Defaults to False.
@@ -1903,10 +1958,15 @@ def build_contrastive_K_neighbor_similarity_graph(
             Defaults to None.
         finetuned_decoded_texts_prompt_ids (List[int], optional): List of prompt IDs for the finetuned decoded texts.
             Defaults to None.
+        random_seed (int, optional): Random seed to use for reproducibility. Defaults to 0. Used for random state initialization 
+            of all RNGs used in the code, and for the baseline discriminator.
     Returns:
         nx.Graph: A graph where nodes are clusters from both sets and edge attributes include
             similarity scores, labels, and per-label accuracy / AUC scores.
     """
+
+    if random_seed is not None:
+        seed_everything(random_seed)
     # Create a graph
     G = nx.Graph()
     # Calculate cluster centroids for both sets
@@ -1922,14 +1982,28 @@ def build_contrastive_K_neighbor_similarity_graph(
     prior_labels_for_diversification = []
     verified_diversity_promoter_labels = []
     label_diversification_str_instructions = ""
-    metric_cross_validation_scores = []
-    metric_validation_scores = []
+
+    hypotheses = []
+    
+    accuracy_cross_validation_scores = []
+    accuracy_validation_scores = []
+    accuracy_binomial_p_values = []
+
+    auc_validation_scores = []
+    auc_cross_validation_scores = []
+    auc_permutation_p_values = []
+
+    baseline_accuracy_validation_scores = []
+    baseline_auc_validation_scores = []
+
+    baseline_accuracy_cross_validation_scores = []
+    baseline_auc_cross_validation_scores = []
 
     # Initialize SAFFRON for multiple comparison correction
     saffron = SAFFRON(alpha=0.05, lambda_param=0.5, gamma_param=0.5)
     
     # Function to compute similarity and add edge
-    def compute_similarity_and_add_edge(cluster1, cluster2, set1, set2, prior_labels_for_diversification, diversify_contrastive_labels, label_diversification_str_instructions, verified_diversity_promoter_labels, saffron, metric_cross_validation_scores, metric_validation_scores):
+    def compute_similarity_and_add_edge(cluster1, cluster2, set1, set2, prior_labels_for_diversification, diversify_contrastive_labels, label_diversification_str_instructions, verified_diversity_promoter_labels, saffron, accuracy_cross_validation_scores, accuracy_validation_scores, auc_validation_scores, auc_cross_validation_scores, auc_permutation_p_values, random_seed: int = 0):
         print(f"Computing similarity and adding edge for clusters {cluster1} and {cluster2} from set {set1} and {set2}")
         cluster_matches = [(cluster1, cluster2)]
 
@@ -1943,11 +2017,14 @@ def build_contrastive_K_neighbor_similarity_graph(
                 run_prefix=run_prefix,
                 api_provider=api_provider,
                 api_model_str=api_model_str,
-                api_stronger_model_str=api_stronger_model_str,
+                api_stronger_model_str=api_stronger_model_str if api_stronger_model_str is not None else api_model_str,
+                max_labeling_tokens=max_labeling_tokens,
                 auth_key=auth_key,
                 client=client,
                 api_interactions_save_loc=api_interactions_save_loc,
-                logger=logger
+                logging_level=logging_level,
+                logger=logger,
+                random_seed=random_seed
             )
 
         result = get_validated_contrastive_cluster_labels(
@@ -1960,7 +2037,7 @@ def build_contrastive_K_neighbor_similarity_graph(
             labeling_tokenizer,
             api_provider, 
             api_model_str, 
-            api_stronger_model_str,
+            api_stronger_model_str if api_stronger_model_str is not None else api_model_str,
             auth_key, 
             client=client,
             device=device,
@@ -1975,61 +2052,76 @@ def build_contrastive_K_neighbor_similarity_graph(
             n_head_to_head_comparisons_per_text=n_head_to_head_comparisons_per_text,
             use_unitary_comparisons=use_unitary_comparisons,
             max_unitary_comparisons_per_label=max_unitary_comparisons_per_label,
-            additional_unitary_comparisons_per_label=additional_unitary_comparisons_per_label,
             label_diversification_str_instructions=label_diversification_str_instructions,
             verified_diversity_promoter_labels=verified_diversity_promoter_labels,
             api_interactions_save_loc=api_interactions_save_loc,
+            logging_level=logging_level,
             logger=logger,
-            metric=metric,
+            n_permutations=n_permutations,
             split_clusters_by_prompt=split_clusters_by_prompt,
+            use_baseline_discrimination=True,
             base_decoded_texts_prompt_ids=base_decoded_texts_prompt_ids if set1 == 1 else finetuned_decoded_texts_prompt_ids,
-            finetuned_decoded_texts_prompt_ids=finetuned_decoded_texts_prompt_ids if set1 == 1 else base_decoded_texts_prompt_ids
+            finetuned_decoded_texts_prompt_ids=finetuned_decoded_texts_prompt_ids if set1 == 1 else base_decoded_texts_prompt_ids,
+            random_seed=random_seed
         )
         p_values = result['p_values']
-        if additional_unitary_comparisons_per_label > 0:
-            additional_p_values = result['additional_p_values']
-            additional_label_metric_scores = result['additional_cluster_pair_scores'][(cluster1, cluster2)]
-        else:
-            additional_p_values = None
-            additional_label_metric_scores = None
+        auc_p_values = result['auc_permutation_p_values']
         
-        labels_and_metric_scores = result['cluster_pair_scores'][(cluster1, cluster2)]
-        similarity_score = np.mean([1 - metric_score for metric_score in labels_and_metric_scores.values()])
-        
+        labels_and_accuracy_scores = result['cluster_pair_scores'][(cluster1, cluster2)]
+        labels_and_auc_scores = result['cluster_pair_auc_scores'][(cluster1, cluster2)]
+        similarity_score = np.mean([1 - accuracy_score for accuracy_score in labels_and_accuracy_scores.values()])
+
+        baseline_labels_and_accuracy_scores = result['baseline_cluster_pair_scores'][(cluster1, cluster2)]
+        baseline_labels_and_auc_scores = result['baseline_cluster_pair_auc_scores'][(cluster1, cluster2)]
+        baseline_labels_and_discriminators = result['baseline_cluster_pair_discriminators'][(cluster1, cluster2)]
         # Add basic edge information
         edge_data = {
             'weight': similarity_score,
-            'labels': list(labels_and_metric_scores.keys()),
-            'label_metric_scores': labels_and_metric_scores,
+            'labels': list(labels_and_accuracy_scores.keys()),
+            'label_accuracy_scores': labels_and_accuracy_scores,
             'label_p_values': p_values[(cluster1, cluster2)],
-            'additional_label_p_values': additional_p_values[(cluster1, cluster2)] if additional_p_values else None,
-            'additional_label_metric_scores': additional_label_metric_scores,
             'significant_labels': []  # Will be populated by SAFFRON
         }
         
         # Test each label with SAFFRON
-        labels = list(labels_and_metric_scores.keys())
-        metric_scores = list(labels_and_metric_scores.values())
-        
-        for i, (label, metric_score) in enumerate(zip(labels, metric_scores)):
+        round_labels = list(labels_and_accuracy_scores.keys())
+        round_accuracy_scores = list(labels_and_accuracy_scores.values())
+        round_auc_scores = list(labels_and_auc_scores.values())
+        round_accuracy_binomial_p_values = list(p_values[(cluster1, cluster2)].values())
+        round_auc_permutation_p_values = list(auc_p_values[(cluster1, cluster2)].values())
+        round_baseline_accuracy_scores = list(baseline_labels_and_accuracy_scores.values())
+        round_baseline_auc_scores = list(baseline_labels_and_auc_scores.values())
+        round_baseline_discriminators = list(baseline_labels_and_discriminators.values())
+
+        any_rejected = False
+        for i, (label, accuracy_score, auc_score, baseline_accuracy_score, baseline_auc_score) in enumerate(zip(round_labels, round_accuracy_scores, round_auc_scores, round_baseline_accuracy_scores, round_baseline_auc_scores)):
             label_p_value = p_values[(cluster1, cluster2)][label]
+            permutation_p_value = auc_p_values[(cluster1, cluster2)][label]
             
             # Test with SAFFRON
             hypothesis_info = {
                 'label': label,
-                'metric_score': metric_score,
+                'accuracy_score': accuracy_score,
+                'auc_score': auc_score,
+                'baseline_accuracy_score': baseline_accuracy_score,
+                'baseline_auc_score': baseline_auc_score,
                 'clusters': (cluster1, cluster2),
                 'set1': set1,
                 'set2': set2
             }
             
-            is_rejected, alpha_threshold = saffron.test_hypothesis(label_p_value, hypothesis_info)
+            is_rejected, alpha_threshold = saffron.test_hypothesis(permutation_p_value, hypothesis_info)
             
             if is_rejected:
+                any_rejected = True
                 edge_data['significant_labels'].append({
                     'label': label,
-                    'metric_score': metric_score,
+                    'metric_score': accuracy_score,
+                    'auc_score': auc_score,
+                    'baseline_accuracy_score': baseline_accuracy_score,
+                    'baseline_auc_score': baseline_auc_score,
                     'p_value': label_p_value,
+                    'permutation_p_value': permutation_p_value,
                     'alpha_threshold': alpha_threshold
                 })
                 
@@ -2042,60 +2134,121 @@ def build_contrastive_K_neighbor_similarity_graph(
         
         G.add_edge(f"{set1}_{cluster1}", f"{set2}_{cluster2}", **edge_data)
         
-        # Select the label with the highest metric score to represent the cluster pair for diversification purposes
-        max_metric_score_idx = np.argmax(metric_scores)
-        new_label = labels[max_metric_score_idx]
-        prior_labels_for_diversification.append(new_label)
-        metric_cross_validation_scores.append(metric_scores[max_metric_score_idx])
-
+        # Select the label with the highest AUC score to represent the cluster pair for diversification purposes
+        max_auc_score_idx = np.argmax(round_auc_scores)
+        new_label = round_labels[max_auc_score_idx]
+        new_baseline_discriminator = round_baseline_discriminators[max_auc_score_idx]
+        if any_rejected:
+            prior_labels_for_diversification.append(new_label)
+        accuracy_validation_scores.append(round_accuracy_scores[max_auc_score_idx])
+        auc_validation_scores.append(round_auc_scores[max_auc_score_idx])
+        accuracy_binomial_p_values.append(round_accuracy_binomial_p_values[max_auc_score_idx])
+        auc_permutation_p_values.append(round_auc_permutation_p_values[max_auc_score_idx])
+        baseline_accuracy_validation_scores.append(round_baseline_accuracy_scores[max_auc_score_idx])
+        baseline_auc_validation_scores.append(round_baseline_auc_scores[max_auc_score_idx])
+        hypotheses.append(new_label)
         if cross_validate_contrastive_labels:
-            # Cross-validate the contrastive labels by testing the discriminative score of the labels on different clusters from which they were generated. Choose a random cluster, then test new_label on that cluster. Print the result.
-            possible_pairs = [(c1, c2) for c1 in unique_clusters_1 for c2 in unique_clusters_2 if (c1 != cluster1 or c2 != cluster2)]
-            if not possible_pairs:
-                print("Warning: No other cluster pairs available for cross-validation.")
-            else:
-                val_cluster1, val_cluster2 = random.choice(possible_pairs)
-                print(f"Cross-validating label '{new_label.replace(chr(10), ' ')}' on cluster pair ({val_cluster1}, {val_cluster2})")
-                val_cluster_1_indices = [i for i, x in enumerate(clustering_assignments_1) if x == val_cluster1]
-                val_cluster_2_indices = [i for i, x in enumerate(clustering_assignments_2) if x == val_cluster2]
-                if len(val_cluster_1_indices) < sampled_comparison_texts_per_cluster or len(val_cluster_2_indices) < sampled_comparison_texts_per_cluster:
-                    print(f"Warning: Not enough texts for cross-validation on cluster pair ({val_cluster1}, {val_cluster2}). Required {sampled_comparison_texts_per_cluster} texts per cluster. Got {len(val_cluster_1_indices)} and {len(val_cluster_2_indices)}. Skipping.")
-                    metric_cross_validation_scores.append(-1.0)
+            if cross_validate_on_all_clusters:
+                # Cross-validate the contrastive label by testing the discriminative score of the label on texts sampled from all other clusters.
+                print(f"Cross-validating label '{new_label.replace(chr(10), ' ')}' on all clusters")
+                # First, determine how many texts we're going to sample from each cluster.
+                # In total, we sample max(max_unitary_comparisons_per_label, sampled_comparison_texts_per_cluster) text pairs, so we need to split this up across the clusters.
+                total_text_pairs_to_sample = max(max_unitary_comparisons_per_label, sampled_comparison_texts_per_cluster)
+                texts_to_sample_per_cluster = total_text_pairs_to_sample // len(unique_clusters_1) + 1
+                if match_by_ids:
+                    valid_cluster_pairs = [(unique_clusters_1[i], unique_clusters_2[i]) for i in range(len(unique_clusters_1))]
                 else:
-                    sampled_texts_1 = random.sample(val_cluster_1_indices, sampled_comparison_texts_per_cluster)
-                    sampled_texts_2 = random.sample(val_cluster_2_indices, sampled_comparison_texts_per_cluster)
-                    metric_score = evaluate_label_discrimination(
-                        new_label,
-                        sampled_texts_1,
-                        sampled_texts_2,
-                        decoded_strs_1,
-                        decoded_strs_2,
-                        local_model,
-                        labeling_tokenizer,
-                        api_provider,
-                        api_model_str,
-                        auth_key,
-                        client=client,
-                        device=device,
-                        mode="contrastive",
-                        n_head_to_head_comparisons_per_text=n_head_to_head_comparisons_per_text,
-                        use_unitary_comparisons=use_unitary_comparisons,
-                        max_unitary_comparisons_per_label=max_unitary_comparisons_per_label,
-                        api_interactions_save_loc=api_interactions_save_loc,
-                        logger=logger,
-                        cluster_id_1=val_cluster1,
-                        cluster_id_2=val_cluster2,
-                        metric=metric,
-                    )
-                    print(f"Cross-validation {metric} for label on pair ({val_cluster1}, {val_cluster2}): {metric_score:.4f}")
-                    metric_cross_validation_scores.append(metric_score)
-
+                    valid_cluster_pairs = [(c1, c2) for c1 in unique_clusters_1 for c2 in unique_clusters_2 if (c1 != cluster1 or c2 != cluster2)]
+                if not valid_cluster_pairs:
+                    print("Warning: No other cluster pairs available for cross-validation.")
+                    accuracy_cross_validation_scores.append(-1.0)
+                    auc_cross_validation_scores.append(-2.0)
+                else:
+                    # Now, we iterate over the cluster pairs and sample texts_to_sample_per_cluster text pairs from each cluster, before shuffling the list and taking the first total_text_pairs_to_sample text pairs.
+                    sampled_texts_1 = []
+                    sampled_texts_2 = []
+                    for val_cluster1, val_cluster2 in valid_cluster_pairs:
+                        val_cluster_1_indices = [i for i, x in enumerate(clustering_assignments_1) if x == val_cluster1]
+                        val_cluster_2_indices = [i for i, x in enumerate(clustering_assignments_2) if x == val_cluster2]
+                        cluster_texts_1 = random.sample(val_cluster_1_indices, texts_to_sample_per_cluster)
+                        cluster_texts_2 = random.sample(val_cluster_2_indices, texts_to_sample_per_cluster)
+                        sampled_texts_1.extend(cluster_texts_1)
+                        sampled_texts_2.extend(cluster_texts_2)
+                    random_suffle_indices = list(range(len(sampled_texts_1)))
+                    random.shuffle(random_suffle_indices)
+                    sampled_texts_1 = [sampled_texts_1[i] for i in random_suffle_indices]
+                    sampled_texts_2 = [sampled_texts_2[i] for i in random_suffle_indices]
+                    sampled_texts_1 = sampled_texts_1[:total_text_pairs_to_sample]
+                    sampled_texts_2 = sampled_texts_2[:total_text_pairs_to_sample]
+            else:
+                # Legacy approach kept for comparison and reference
+                print("Alert: Cross-validation on single randomly sampled cluster is deprecated. Using legacy approach.")
+                # Cross-validate the contrastive labels by testing the discriminative score of the labels on different clusters from which they were generated. Choose a random cluster, then test new_label on that cluster. Print the result.
+                possible_pairs = [(c1, c2) for c1 in unique_clusters_1 for c2 in unique_clusters_2 if (c1 != cluster1 or c2 != cluster2)]
+                if not possible_pairs:
+                    print("Warning: No other cluster pairs available for cross-validation.")
+                    accuracy_cross_validation_scores.append(-1.0)
+                    auc_cross_validation_scores.append(-2.0)
+                    baseline_accuracy_cross_validation_scores.append(-1.0)
+                    baseline_auc_cross_validation_scores.append(-2.0)
+                else:
+                    val_cluster1, val_cluster2 = random.choice(possible_pairs)
+                    print(f"Cross-validating label on cluster pair ({val_cluster1}, {val_cluster2})")
+                    val_cluster_1_indices = [i for i, x in enumerate(clustering_assignments_1) if x == val_cluster1]
+                    val_cluster_2_indices = [i for i, x in enumerate(clustering_assignments_2) if x == val_cluster2]
+                    if len(val_cluster_1_indices) < sampled_comparison_texts_per_cluster or len(val_cluster_2_indices) < sampled_comparison_texts_per_cluster:
+                        print(f"Warning: Not enough texts for cross-validation on cluster pair ({val_cluster1}, {val_cluster2}). Required {sampled_comparison_texts_per_cluster} texts per cluster. Got {len(val_cluster_1_indices)} and {len(val_cluster_2_indices)}. Skipping.")
+                        accuracy_cross_validation_scores.append(-1.0)
+                        auc_cross_validation_scores.append(-2.0)
+                        baseline_accuracy_cross_validation_scores.append(-1.0)
+                        baseline_auc_cross_validation_scores.append(-2.0)
+                    else:
+                        sampled_texts_1 = random.sample(val_cluster_1_indices, sampled_comparison_texts_per_cluster)
+                        sampled_texts_2 = random.sample(val_cluster_2_indices, sampled_comparison_texts_per_cluster)
+            accuracy_score, p_value, auc_score = evaluate_label_discrimination(
+                new_label,
+                sampled_texts_1,
+                sampled_texts_2,
+                decoded_strs_1,
+                decoded_strs_2,
+                local_model,
+                labeling_tokenizer,
+                api_provider,
+                api_model_str,
+                auth_key,
+                client=client,
+                device=device,
+                mode="contrastive",
+                n_head_to_head_comparisons_per_text=n_head_to_head_comparisons_per_text,
+                use_unitary_comparisons=use_unitary_comparisons,
+                max_unitary_comparisons_per_label=max_unitary_comparisons_per_label,
+                api_interactions_save_loc=api_interactions_save_loc,
+                logging_level=logging_level,
+                logger=logger,
+                cluster_id_1=val_cluster1,
+                cluster_id_2=val_cluster2,
+                n_permutations=n_permutations
+            )
+            baseline_accuracy_cross_validation_score, baseline_auc_cross_validation_score = new_baseline_discriminator(
+                [decoded_strs_1[text_id] for text_id in sampled_texts_1], 
+                [decoded_strs_2[text_id] for text_id in sampled_texts_2],
+            )
+            print(f"Cross-validation accuracy for label on pair ({val_cluster1}, {val_cluster2}): {accuracy_score:.5f}")
+            print(f"Cross-validation AUC for label: {auc_score:.5f}")
+            print(f"Cross-validation baseline accuracy for label: {baseline_accuracy_cross_validation_score:.5f}")
+            print(f"Cross-validation baseline AUC for label: {baseline_auc_cross_validation_score:.5f}")
+            p_value_str = f"{p_value:.5f}" if n_permutations > 0 else "None"
+            print(f"Permutation p-value for label: {p_value_str}")
+            accuracy_cross_validation_scores.append(accuracy_score)
+            auc_cross_validation_scores.append(auc_score)
+            baseline_accuracy_cross_validation_scores.append(baseline_accuracy_cross_validation_score)
+            baseline_auc_cross_validation_scores.append(baseline_auc_cross_validation_score)
         return prior_labels_for_diversification, verified_diversity_promoter_labels, label_diversification_str_instructions
 
     if match_by_ids:
         # Match cluster i in set 1 to cluster i in set 2
         for i in range(len(unique_clusters_1)):
-            prior_labels_for_diversification, verified_diversity_promoter_labels, label_diversification_str_instructions = compute_similarity_and_add_edge(unique_clusters_1[i], unique_clusters_2[i], 1, 2, prior_labels_for_diversification, diversify_contrastive_labels, label_diversification_str_instructions, verified_diversity_promoter_labels, saffron, metric_cross_validation_scores, metric_validation_scores)
+            prior_labels_for_diversification, verified_diversity_promoter_labels, label_diversification_str_instructions = compute_similarity_and_add_edge(unique_clusters_1[i], unique_clusters_2[i], 1, 2, prior_labels_for_diversification, diversify_contrastive_labels, label_diversification_str_instructions, verified_diversity_promoter_labels, saffron, accuracy_cross_validation_scores, accuracy_validation_scores, auc_validation_scores, auc_cross_validation_scores, auc_permutation_p_values, random_seed=random_seed)
     else:
         # Find the K nearest neighbors for each cluster in set 1 from set 2
         centroids_1 = []
@@ -2126,30 +2279,32 @@ def build_contrastive_K_neighbor_similarity_graph(
             for j in range(K):
                 cluster2 = unique_clusters_2[indices_1[i][j]]
                 if not G.has_edge(f"1_{cluster1}", f"2_{cluster2}"):
-                    prior_labels_for_diversification, verified_diversity_promoter_labels, label_diversification_str_instructions = compute_similarity_and_add_edge(cluster1, cluster2, 1, 2, prior_labels_for_diversification, diversify_contrastive_labels, label_diversification_str_instructions, verified_diversity_promoter_labels, saffron, metric_cross_validation_scores, metric_validation_scores)
+                    prior_labels_for_diversification, verified_diversity_promoter_labels, label_diversification_str_instructions = compute_similarity_and_add_edge(cluster1, cluster2, 1, 2, prior_labels_for_diversification, diversify_contrastive_labels, label_diversification_str_instructions, verified_diversity_promoter_labels, saffron, accuracy_cross_validation_scores, accuracy_validation_scores, auc_validation_scores, auc_cross_validation_scores, auc_permutation_p_values, random_seed=random_seed)
 
         # Compute similarities and add edges for set 2 to set 1 (if not already computed)
         for i, cluster2 in enumerate(unique_clusters_2):
             for j in range(K):
                 cluster1 = unique_clusters_1[indices_2[i][j]]
                 if not G.has_edge(f"2_{cluster2}", f"1_{cluster1}"):
-                    prior_labels_for_diversification, verified_diversity_promoter_labels, label_diversification_str_instructions = compute_similarity_and_add_edge(cluster1, cluster2, 1, 2, prior_labels_for_diversification, diversify_contrastive_labels, label_diversification_str_instructions, verified_diversity_promoter_labels, saffron, metric_cross_validation_scores, metric_validation_scores)
+                    prior_labels_for_diversification, verified_diversity_promoter_labels, label_diversification_str_instructions = compute_similarity_and_add_edge(cluster1, cluster2, 1, 2, prior_labels_for_diversification, diversify_contrastive_labels, label_diversification_str_instructions, verified_diversity_promoter_labels, saffron, accuracy_cross_validation_scores, accuracy_validation_scores, auc_validation_scores, auc_cross_validation_scores, auc_permutation_p_values, random_seed=random_seed)
         if cross_validate_contrastive_labels:
-            print(f"Cross-validation scores: {metric_cross_validation_scores}")
-            print(f"Validation scores: {metric_validation_scores}")
-            print(f"Mean cross-validation score: {np.mean(metric_cross_validation_scores)}")
-            print(f"Mean validation score: {np.mean(metric_validation_scores)}")
-            print(f"Standard deviation of cross-validation scores: {np.std(metric_cross_validation_scores)}")
-            print(f"Standard deviation of validation scores: {np.std(metric_validation_scores)}")
-            print(f"Max cross-validation score: {np.max(metric_cross_validation_scores)}")
-            print(f"Max validation score: {np.max(metric_validation_scores)}")
-            print(f"Min cross-validation score: {np.min(metric_cross_validation_scores)}")
-            # create a histogram of the metric_cross_validation_scores and metric_validation_scores
-            plt.hist(metric_cross_validation_scores, bins=20, alpha=0.5, label='Cross-validation')
-            plt.hist(metric_validation_scores, bins=20, alpha=0.5, label='Validation')
-            plt.legend()
-            plt.savefig(f"{tsne_save_path}/metric_cross_validation_scores_and_metric_validation_scores_histogram_{metric}.png")
-            plt.close()
+            print(f"Validation accuracy scores: {accuracy_validation_scores}")
+            print(f"Cross-validation accuracy scores: {accuracy_cross_validation_scores}")
+            print(f"Validation AUC scores: {auc_validation_scores}")
+            print(f"Cross-validation AUC scores: {auc_cross_validation_scores}")
+            print("\n------------------------------------------------\n")
+            print(f"Mean validation accuracy score: {np.mean(accuracy_validation_scores)}")
+            print(f"Mean cross-validation accuracy score: {np.mean(accuracy_cross_validation_scores)}")
+            print(f"Mean validation AUC score: {np.mean(auc_validation_scores)}")
+            print(f"Mean cross-validation AUC score: {np.mean(auc_cross_validation_scores)}")
+            print("\n------------------------------------------------\n")
+            print(f"Standard deviation of validation accuracy scores: {np.std(accuracy_validation_scores)}")
+            print(f"Standard deviation of cross-validation accuracy scores: {np.std(accuracy_cross_validation_scores)}")
+            print(f"Standard deviation of validation AUC scores: {np.std(auc_validation_scores)}")
+            print(f"Standard deviation of cross-validation AUC scores: {np.std(auc_cross_validation_scores)}")
+            print(f"Max cross-validation accuracy score: {np.max(accuracy_cross_validation_scores)}")
+            print(f"Max validation accuracy score: {np.max(accuracy_validation_scores)}")
+            print(f"Min cross-validation accuracy score: {np.min(accuracy_cross_validation_scores)}")
 
     # Add SAFFRON summary to graph attributes
     saffron_summary = saffron.get_summary()
@@ -2160,24 +2315,25 @@ def build_contrastive_K_neighbor_similarity_graph(
     print("\n=== SAFFRON Multiple Comparison Correction Summary ===")
     print(f"Total hypothesis tests: {saffron_summary['total_tests']}")
     print(f"Total rejections (significant labels): {saffron_summary['total_rejections']}")
-    print(f"Rejection rate: {saffron_summary['rejection_rate']:.3f}")
-    print(f"Current wealth: {saffron_summary['current_wealth']:.4f}")
+    print(f"Rejection rate: {saffron_summary['rejection_rate']:.5f}")
+    print(f"Current wealth: {saffron_summary['current_wealth']:.5f}")
     print(f"Active candidates: {saffron_summary['active_candidates']}")
-    
-    # Print significant labels found
-    # if saffron.rejections:
-    #     print("\nSignificant contrastive labels found:")
-    #     for i, rejection in enumerate(saffron.rejections):
-    #         info = rejection['info']
-    #         print(f"\n{i+1}. Clusters {info['set1']}_{info['clusters'][0]} vs {info['set2']}_{info['clusters'][1]}")
-    #         print(f"   Label: {info['label']}")
-    #         print(f"   Metric score: {info['metric_score']:.3f}")
-    #         print(f"   P-value: {rejection['p_value']:.4e} < α_t = {rejection['threshold']:.4e}")
-    # else:
-    #     print("\nNo labels reached statistical significance after correction.")
-    # print("=" * 60 + "\n")
 
-    return G
+    results_dict = {
+        "accuracy_validation_scores": accuracy_validation_scores,
+        "accuracy_cross_validation_scores": accuracy_cross_validation_scores,
+        "auc_validation_scores": auc_validation_scores,
+        "auc_cross_validation_scores": auc_cross_validation_scores,
+        "accuracy_binomial_p_values": accuracy_binomial_p_values,
+        "auc_permutation_p_values": auc_permutation_p_values,
+        "baseline_accuracy_validation_scores": baseline_accuracy_validation_scores,
+        "baseline_auc_validation_scores": baseline_auc_validation_scores,
+        "baseline_accuracy_cross_validation_scores": baseline_accuracy_cross_validation_scores,
+        "baseline_auc_cross_validation_scores": baseline_auc_cross_validation_scores,
+        "hypotheses": hypotheses,
+    }
+
+    return G, results_dict
 
 
 def attach_cluster_metrics_to_graph(
@@ -2240,7 +2396,6 @@ def analyze_metric_differences_vs_similarity(G: nx.Graph):
             "v_kl": v_kl,
             "u_entropy": u_entropy,
             "v_entropy": v_entropy,
-            # ... etc. for each raw metric if you want
         }
         rows.append(row)
     
@@ -2331,7 +2486,7 @@ def analyze_node_metric_vs_neighbor_similarity(G: nx.Graph):
 def analyze_hypothesis_scores_vs_cluster_metrics(
     G: nx.Graph,
     hypothesis_origin_clusters: List[Tuple[int, int, str]],
-    all_validated_metric_scores: List[List[float]],
+    all_validated_accuracy_scores: List[List[float]],
     model_label_for_node_1="1_",  # or just "1_"
     model_label_for_node_2="2_"
 ):
@@ -2339,15 +2494,15 @@ def analyze_hypothesis_scores_vs_cluster_metrics(
     Build a mapping from each hypothesis to the node metrics of its cluster(s).
     Then correlate the cluster metrics with the average validated score.
     """
-    # Suppose all_validated_metric_scores has shape (num_rephrases + 1, num_hypotheses)
-    all_validated_metric_scores = np.array(all_validated_metric_scores)
-    num_hypotheses = all_validated_metric_scores.shape[1]
-    print("all_validated_metric_scores.shape:", all_validated_metric_scores.shape)
+    # Suppose all_validated_accuracy_scores has shape (num_rephrases + 1, num_hypotheses)
+    all_validated_accuracy_scores = np.array(all_validated_accuracy_scores)
+    num_hypotheses = all_validated_accuracy_scores.shape[1]
+    print("all_validated_accuracy_scores.shape:", all_validated_accuracy_scores.shape)
     
     rows = []
     for i in range(len(hypothesis_origin_clusters)):
         # mean validation score across rephrasings
-        mean_val_score = np.mean(all_validated_metric_scores[:, i])
+        mean_val_score = np.mean(all_validated_accuracy_scores[:, i])
         
         # Which cluster pair generated hypothesis i?
         # e.g. hypothesis_origin_clusters[i] = (cluster_id_base, cluster_id_ft)
@@ -2533,6 +2688,7 @@ def assistant_generative_compare(
         permute_labels: bool = False,
         bnb_config: BitsAndBytesConfig = None,
         api_interactions_save_loc: Optional[str] = None,
+        logging_level: str = "INFO",
         logger: Optional[BoundLoggerLazyProxy] = None
         ) -> Tuple[List[float], List[List[str]], List[List[str]]]:
     """
@@ -2584,6 +2740,8 @@ def assistant_generative_compare(
         bnb_config (BitsAndBytesConfig): Configuration for quantization.
         api_interactions_save_loc (Optional[str]): Which file to store the API requests and responses to. 
             Defaults to None.
+        logging_level (str): The logging level to use for logging API requests and responses. Defaults to "INFO", 
+            but can be set to "DEBUG" for more detailed logging of API requests and responses.
         logger (Optional[BoundLoggerLazyProxy]): The logger to use for logging API requests and responses.
     Returns:
         Tuple[List[float], List[List[str]], List[List[str]]]: A tuple containing:
@@ -2639,6 +2797,7 @@ def assistant_generative_compare(
                     num_datapoints=num_generated_texts_per_description,
                     max_tokens=2048,
                     api_interactions_save_loc=api_interactions_save_loc,
+                    logging_level=logging_level,
                     logger=logger,
                     request_info={"pipeline_stage": "generating model 1 attributed texts"}
                 )
@@ -2669,6 +2828,7 @@ def assistant_generative_compare(
                     num_datapoints=num_generated_texts_per_description,
                     max_tokens=2048,
                     api_interactions_save_loc=api_interactions_save_loc,
+                    logging_level=logging_level,
                     logger=logger,
                     request_info={"pipeline_stage": "generating model 2 attributed texts"}
                 )
@@ -2939,6 +3099,7 @@ def validated_assistant_generative_compare(
         return_generated_texts: bool = False,
         bnb_config: BitsAndBytesConfig = None,
         api_interactions_save_loc: Optional[str] = None,
+        logging_level: str = "INFO",
         logger: Optional[BoundLoggerLazyProxy] = None
     ) -> Union[
         Tuple[List[List[float]], List[List[float]], List[List[str]]],
@@ -2986,6 +3147,8 @@ def validated_assistant_generative_compare(
         bnb_config (BitsAndBytesConfig, optional): Configuration for quantization. Defaults to None.
         api_interactions_save_loc (Optional[str]): Which file to store the API requests and responses to. 
             Defaults to None.
+        logging_level (str): The logging level to use for logging API requests and responses. Defaults to "INFO", 
+            but can be set to "DEBUG" for more detailed logging of API requests and responses.
         logger (Optional[BoundLoggerLazyProxy]): The logger to use for logging API requests and responses.
     Returns:
         If return_generated_texts is False:
@@ -3017,6 +3180,7 @@ def validated_assistant_generative_compare(
                     num_rephrases=num_rephrases_for_validation,
                     max_tokens=4096,
                     api_interactions_save_loc=api_interactions_save_loc,
+                    logging_level=logging_level,
                     logger=logger
                 )
             )
@@ -3048,6 +3212,7 @@ def validated_assistant_generative_compare(
             num_generated_texts_per_description=num_generated_texts_per_description, 
             bnb_config=bnb_config,
             api_interactions_save_loc=api_interactions_save_loc,
+            logging_level=logging_level,
             logger=logger
         )
         all_real_scores.append(real_scores)
@@ -3077,6 +3242,7 @@ def validated_assistant_generative_compare(
                     permute_labels=True, 
                     bnb_config=bnb_config,
                     api_interactions_save_loc=api_interactions_save_loc,
+                    logging_level=logging_level,
                     logger=logger
                 )
                 all_permuted_scores.extend(fake_scores)
@@ -3207,6 +3373,7 @@ def validated_embeddings_discriminative_single_unknown_ICL(
     max_tokens: int = 1000,
     max_decoding_length: int = 96,
     api_interactions_save_loc: Optional[str] = None,
+    logging_level: str = "INFO",
     logger: Optional["BoundLoggerLazyProxy"] = None,
     num_workers: int = 1,
     model_batch_size: int = 16,
@@ -3386,6 +3553,7 @@ def validated_embeddings_discriminative_single_unknown_ICL(
             auth_key=auth_key,
             client=client,
             api_interactions_save_loc=api_interactions_save_loc,
+            logging_level=logging_level,
             logger=logger,
             num_workers=num_workers,
             request_info={
