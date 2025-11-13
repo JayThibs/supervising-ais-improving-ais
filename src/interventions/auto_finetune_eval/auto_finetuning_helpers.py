@@ -124,8 +124,8 @@ def make_api_request(
                         messages=[{"role": "user", "content": prompt}],
                         temperature=temperature
                     )
-                    if reasoning_effort == "high":
-                        print("High reasoning effort response: ", response.choices[0].message.reasoning)
+                    #if reasoning_effort == "high":
+                    #    print("High reasoning effort response: ", response.choices[0].message.reasoning)
                 else:
                     response = client.chat.completions.create(
                         model=model_str,
