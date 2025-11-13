@@ -41,8 +41,9 @@ class AutoFineTuningEvaluator:
         key (str): API key for the chosen provider.
         ground_truths_df (pd.DataFrame): DataFrame containing ground truths and associated data.
         base_model (Union[AutoModelForCausalLM, str]): The base language model.
-        tokenizer (AutoTokenizer): Tokenizer for the base model.
+        tokenizer_base (AutoTokenizer): Tokenizer for the base model.
         intervention_model (Union[AutoModelForCausalLM, str]): The intervention model.
+        tokenizer_intervention (AutoTokenizer): Tokenizer for the intervention model.
     """
 
     def __init__(self, args: argparse.Namespace):
@@ -63,7 +64,8 @@ class AutoFineTuningEvaluator:
         self.openrouter_api_key = load_api_key(args.openrouter_api_key_path) if args.openrouter_api_key_path else None
         self.instantiate_client()
         self.base_model = None
-        self.tokenizer = None
+        self.tokenizer_base = None
+        self.tokenizer_intervention = None
         self.intervention_model = None
         self.ground_truths = None
         self.ground_truths_df = None
@@ -80,7 +82,11 @@ class AutoFineTuningEvaluator:
             llm_int8_threshold=6.0,
             llm_int8_has_fp16_weight=False,
         )
-        # Note: 16 bit quantization is not supported via bitsandbytes        
+        # Note: 16 bit quantization is not supported via bitsandbytes
+
+        requires_remote_code_models = ["microsoft/Phi-3-small-128k-instruct"]
+        self.trust_remote_code_base = self.args.base_model in requires_remote_code_models
+        self.trust_remote_code_intervention = self.args.intervention_model in requires_remote_code_models
 
 
     def load_ground_truths_and_data(self):
@@ -112,13 +118,14 @@ class AutoFineTuningEvaluator:
             quantization_config=self.get_quantization_config(self.args.base_model_quant_level),
             device_map={"": 0} if self.device == "cuda:0" else "auto",
             revision=self.args.base_model_revision,
-            torch_dtype=torch.bfloat16 if self.args.base_model_quant_level == "bfloat16" else None
+            torch_dtype=torch.bfloat16 if self.args.base_model_quant_level == "bfloat16" else None,
+            trust_remote_code=self.trust_remote_code_base
         )
             
-        self.tokenizer = AutoTokenizer.from_pretrained(self.args.base_model, padding_side="left")
+        self.tokenizer_base = AutoTokenizer.from_pretrained(self.args.base_model, padding_side="left")
     
     def load_intervention_model(self):
-        """Called if we are loading a pre-existing intervention model to analyze. We assume there is no finetuning."""
+        """Load the intervention model and tokenizer."""
         self.log.info("loading_intervention_model", 
                      model=self.args.intervention_model,
                      device=self.device)
@@ -127,8 +134,10 @@ class AutoFineTuningEvaluator:
             quantization_config=self.get_quantization_config(self.args.intervention_model_quant_level),
             device_map={"": 0} if self.device == "cuda:0" else "auto",
             revision=self.args.intervention_model_revision,
-            torch_dtype=torch.bfloat16 if self.args.intervention_model_quant_level == "bfloat16" else None
+            torch_dtype=torch.bfloat16 if self.args.intervention_model_quant_level == "bfloat16" else None,
+            trust_remote_code=self.trust_remote_code_intervention
         )
+        self.tokenizer_intervention = AutoTokenizer.from_pretrained(self.args.intervention_model, padding_side="left")
 
     def quantize_models(self):
         '''Quantize the base and intervention models to the specified level, for use after training without a LoRA adapter'''
@@ -145,7 +154,8 @@ class AutoFineTuningEvaluator:
                 self.args.intervention_model,
                 quantization_config=intervention_quant_config,
                 torch_dtype=torch.bfloat16 if self.args.intervention_model_quant_level == "bfloat16" else None,
-                device_map={"": 0} if self.device == "cuda:0" else "auto"
+                device_map={"": 0} if self.device == "cuda:0" else "auto",
+                trust_remote_code=self.trust_remote_code_intervention
             )
         else:
             # Create a temporary directory
@@ -166,7 +176,8 @@ class AutoFineTuningEvaluator:
                     temp_dir,
                     quantization_config=intervention_quant_config,
                     torch_dtype=torch.bfloat16 if self.args.intervention_model_quant_level == "bfloat16" else None,
-                    device_map={"": 0} if self.device == "cuda:0" else "auto"
+                    device_map={"": 0} if self.device == "cuda:0" else "auto",
+                    trust_remote_code=self.trust_remote_code_intervention
                 )
         
         # Load and quantize the base model
@@ -175,7 +186,8 @@ class AutoFineTuningEvaluator:
             self.args.base_model, 
             quantization_config=base_quant_config,
             torch_dtype=torch.bfloat16 if self.args.base_model_quant_level == "bfloat16" else None,
-            device_map={"": 0} if self.device == "cuda:0" else "auto"
+            device_map={"": 0} if self.device == "cuda:0" else "auto",
+            trust_remote_code=self.trust_remote_code_base
         )
 
         if self.args.base_model_quant_level == "4bit":
@@ -191,6 +203,8 @@ class AutoFineTuningEvaluator:
             self.client = openai.OpenAI(api_key=self.key)
         elif self.args.api_provider == "gemini":
             self.client = genai.Client(api_key=self.key)
+        elif self.args.api_provider == "openrouter":
+            self.client = openai.OpenAI(api_key=self.key, base_url="https://openrouter.ai/api/v1")
         else:
             raise ValueError(f"Unsupported API provider: {self.args.api_provider}")
 
@@ -201,7 +215,7 @@ class AutoFineTuningEvaluator:
         
         self.intervention_model = finetune_model(
             self.base_model,
-            self.tokenizer,
+            self.tokenizer_base,
             train_data_list,
             self.args.finetuning_params,
             self.args.train_lora
@@ -274,7 +288,7 @@ class AutoFineTuningEvaluator:
                             self.args.ground_truth_file_path,
                             self.args.num_base_samples_for_training,
                             self.base_model,
-                            self.tokenizer,
+                            self.tokenizer_base,
                             self.args.finetuning_params.get("max_length", 64),
                             self.args.decoding_batch_size,
                             self.args.api_interactions_save_loc,
@@ -330,12 +344,14 @@ class AutoFineTuningEvaluator:
             self.base_model = self.args.base_model.split(":")[1]
             self.intervention_model = self.args.intervention_model.split(":")[1]
 
-        results, table_output, discovered_hypotheses = apply_interpretability_method_1_to_K(
+        results_dict = apply_interpretability_method_1_to_K(
             self.base_model, 
             self.intervention_model,
-            self.tokenizer,
+            self.tokenizer_base,
+            self.tokenizer_intervention,
             base_model_prefix=self.args.base_model_prefix,
             intervention_model_prefix=self.args.intervention_model_prefix,
+            format_prefix_chatML=self.args.format_prefix_chatML,
             cot_start_token_base=self.args.cot_start_token_base,
             cot_end_token_base=self.args.cot_end_token_base,
             cot_max_length_base=self.args.cot_max_length_base,
@@ -350,6 +366,7 @@ class AutoFineTuningEvaluator:
             api_provider=self.args.api_provider,
             api_model_str=self.args.model_str,
             api_stronger_model_str=self.args.stronger_model_str,
+            max_labeling_tokens=self.args.max_labeling_tokens,
             auth_key=self.key,
             openrouter_api_key=self.openrouter_api_key,
             client=self.client,
@@ -370,6 +387,7 @@ class AutoFineTuningEvaluator:
             max_cluster_size=self.args.max_cluster_size,
             sampled_comparison_texts_per_cluster=self.args.sampled_comparison_texts_per_cluster,
             cross_validate_contrastive_labels=self.args.cross_validate_contrastive_labels,
+            cross_validate_on_all_clusters=self.args.cross_validate_on_all_clusters,
             sampled_texts_per_cluster=self.args.sampled_texts_per_cluster,
             max_length=self.args.decoding_max_length,
             decoding_batch_size=self.args.decoding_batch_size,
@@ -389,38 +407,25 @@ class AutoFineTuningEvaluator:
             verified_diversity_promoter=self.args.verified_diversity_promoter,
             use_unitary_comparisons=self.args.use_unitary_comparisons,
             max_unitary_comparisons_per_label=self.args.max_unitary_comparisons_per_label,
-            additional_unitary_comparisons_per_label=self.args.additional_unitary_comparisons_per_label,
             match_cutoff=self.args.match_cutoff,
             discriminative_query_rounds=self.args.discriminative_query_rounds,
             discriminative_validation_runs=self.args.discriminative_validation_runs,
-            metric=self.args.metric,
+            n_permutations=self.args.n_permutations,
             split_clusters_by_prompt=self.args.split_clusters_by_prompt,
             tsne_save_path=self.args.tsne_save_path,
             tsne_title=self.args.tsne_title,
             tsne_perplexity=self.args.tsne_perplexity,
             api_interactions_save_loc=self.args.api_interactions_save_loc,
+            logging_level=self.args.logging_level,
             logger=self.log,
             run_prefix=self.args.run_prefix,
             save_addon_str=self.args.save_addon_str,
             graph_load_path=self.args.graph_load_path,
-            scoring_results_load_path=self.args.scoring_results_load_path
+            scoring_results_load_path=self.args.scoring_results_load_path,
+            global_random_seed=self.args.global_random_seed
         )
         # save the pickle and table outputs
-        pickle.dump(results, open(f"pkl_results/{self.args.run_prefix}{self.args.save_addon_str}_results.pkl", "wb"))
-        with open(f"table_outputs/{self.args.run_prefix}{self.args.save_addon_str}_table_output.txt", "w") as f:
-            f.write(table_output)
-        
-        print("discovered_hypotheses", discovered_hypotheses)
-        if len(discovered_hypotheses) > 0 and self.ground_truths_df is not None and self.ground_truths_df['ground_truth'] is not None and len(self.ground_truths_df['ground_truth']) > 0:
-            evaluation_score = compare_and_score_hypotheses(
-                self.ground_truths_df['ground_truth'].unique().tolist(),
-                discovered_hypotheses,
-                api_provider=self.args.api_provider,
-                model_str=self.args.model_str,
-                api_key=self.key,
-                client=self.client
-            )
-            print(f"Evaluation Score: {evaluation_score}")
+        #pickle.dump(results_dict, open(f"pkl_results/{self.args.run_prefix}{self.args.save_addon_str}_results.pkl", "wb"))
 
 def main(args: argparse.Namespace) -> None:
     """
@@ -440,12 +445,14 @@ if __name__ == "__main__":
     parser.add_argument("--save_addon_str", type=str, default=None, help="Addon string for the run, to be added to the save paths")
     parser.add_argument("--graph_load_path", type=str, default=None, help="Path to load the graph from")
     parser.add_argument("--scoring_results_load_path", type=str, default=None, help="Path to load the scoring results from")
+    parser.add_argument("--global_random_seed", type=int, default=0, help="Global random seed to use for reproducibility")
     # Base model, device
     parser.add_argument("--base_model", type=str, required=True, help="Either a HuggingFace model ID for the base model, a path to a local model directory, or \"OR:<model_str>\" for an OpenRouter model specified by <model_str>. If the latter, include an openrouter API key path via --openrouter_api_key_path")
     parser.add_argument("--base_model_revision", type=str, default=None, help="Revision of the base model to use")
     parser.add_argument("--intervention_model", type=str, default=None, help="Either a HuggingFace model ID for the intervention model, a path to a local model directory, or \"OR:<model_str>\" for an OpenRouter model specified by <model_str>. If the latter, include an openrouter API key path via --openrouter_api_key_path")
     parser.add_argument("--base_model_prefix", type=str, default="", help="Prefix to add to all prompts for the base model")
     parser.add_argument("--intervention_model_prefix", type=str, default="", help="Prefix to add to all prompts for the intervention model")
+    parser.add_argument("--format_prefix_chatML", action="store_true", help="Flag to format the prefix using ChatML-style tags")
     parser.add_argument("--cot_start_token_base", type=str, default=None, help="Token to start the chain of thought for the base model")
     parser.add_argument("--cot_end_token_base", type=str, default=None, help="Token to end the chain of thought for the base model")
     parser.add_argument("--cot_max_length_base", type=int, default=512, help="Max new tokens for CoT phase before continuation for the base model")
@@ -506,6 +513,7 @@ if __name__ == "__main__":
     parser.add_argument("--max_cluster_size", type=int, default=2000, help="Maximum cluster size to use for clustering. Only matters when using HDBSCAN")
     parser.add_argument("--sampled_comparison_texts_per_cluster", type=int, default=50, help="Number of texts to sample for each cluster when validating the contrastive discriminative score of labels between neighboring clusters")
     parser.add_argument("--cross_validate_contrastive_labels", action="store_true", help="Flag to cross-validate the contrastive labels by testing the discriminative score of the labels on different clusters from which they were generated.")
+    parser.add_argument("--cross_validate_on_all_clusters", action="store_true", help="Flag to cross-validate the contrastive labels by testing the discriminative score of the labels on texts sampled from all other clusters.")
     parser.add_argument("--sampled_texts_per_cluster", type=int, default=10, help="Number of texts to sample for each cluster when generating labels")
     parser.add_argument("--clustering_instructions", type=str, default="Identify the topic or theme of the given texts", help="Instructions provided to the local embedding model for clustering")
     parser.add_argument("--n_clustering_inits", type=int, default=10, help="Number of clustering initializations to use for clustering")
@@ -523,11 +531,10 @@ if __name__ == "__main__":
 
     parser.add_argument("--use_unitary_comparisons", action="store_true", help="Flag to use unitary comparisons")
     parser.add_argument("--max_unitary_comparisons_per_label", type=int, default=100, help="Maximum number of unitary comparisons to perform per label")
-    parser.add_argument("--additional_unitary_comparisons_per_label", type=int, default=0, help="Additional number of unitary comparisons to perform per label")
     parser.add_argument("--match_cutoff", type=float, default=0.69, help="Accuracy / AUC cutoff for determining matching/unmatching clusters")
     parser.add_argument("--discriminative_query_rounds", type=int, default=3, help="Number of rounds of discriminative queries to perform")
     parser.add_argument("--discriminative_validation_runs", type=int, default=5, help="Number of validation runs to perform for each model for each hypothesis")
-    parser.add_argument("--metric", type=str, default="acc", choices=["acc", "auc"], help="Metric to use for validation of labels")
+    parser.add_argument("--n_permutations", type=int, default=0, help="Number of permutations to perform for the permutation test")
     parser.add_argument("--split_clusters_by_prompt", action="store_true", help="Flag to split the clusters by prompt during discriminative evaluation of the labels")
     # t-SNE
     parser.add_argument("--tsne_save_path", type=str, default=None, help="Path to save the t-SNE plot to")
@@ -535,12 +542,14 @@ if __name__ == "__main__":
     parser.add_argument("--tsne_perplexity", type=int, default=30, help="Perplexity parameter for t-SNE")
 
     # API provider
-    parser.add_argument("--api_provider", type=str, choices=["anthropic", "openai", "gemini"], required=True, help="API provider for ground truth generation and comparison")
+    parser.add_argument("--api_provider", type=str, choices=["anthropic", "openai", "gemini", "openrouter"], required=True, help="API provider for ground truth generation and comparison")
     parser.add_argument("--model_str", type=str, required=True, help="Model version for the chosen API provider")
     parser.add_argument("--stronger_model_str", type=str, default=None, help="Model version for an optional second model more capable than the one indicated with model_str; can be used for key steps that are not repeated often")
     parser.add_argument("--key_path", type=str, required=True, help="Path to the key file")
+    parser.add_argument("--max_labeling_tokens", type=int, default=None, help="Max new tokens for labeling")
     parser.add_argument("--openrouter_api_key_path", type=str, default=None, help="Path to the openrouter API key file")
     parser.add_argument("--api_interactions_save_loc", type=str, default=None, help="File location to record any API model interactions. Defaults to None and no recording of interactions.")
+    parser.add_argument("--logging_level", type=str, default="INFO", help="Logging level")
 
     args = parser.parse_args()
     main(args)
