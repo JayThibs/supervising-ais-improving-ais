@@ -23,15 +23,86 @@ from auto_finetuning_helpers import plot_comparison_tsne, batch_decode_texts, lo
 from os import path
 
 from validated_comparison_tools import read_past_embeddings_or_generate_new, match_clusterings, get_validated_contrastive_cluster_labels, validated_assistant_generative_compare, build_contrastive_K_neighbor_similarity_graph, get_cluster_labels_random_subsets, evaluate_label_discrimination, validated_embeddings_discriminative_single_unknown_ICL, attach_cluster_metrics_to_graph, analyze_metric_differences_vs_similarity, analyze_node_metric_vs_neighbor_similarity, analyze_hypothesis_scores_vs_cluster_metrics
+from stats import benjamini_hochberg_correction
 from structlog._config import BoundLoggerLazyProxy
+
+def get_chatML_format_lengths(tokenizer: PreTrainedTokenizer) -> Tuple[int, int]:
+    """
+    Get the lengths of the chatML format for the user and system roles.
+    """
+    test_str = "Hello, how are you?"
+    test_str_len = len(tokenizer_base.encode(test_str, add_special_tokens=False))
+    user_role_format_test_str = tokenizer_base.apply_chat_template([{'role': 'user', 'content': test_str}], tokenize=False, padding=False)
+    user_role_format_test_str_len = len(tokenizer_base.encode(user_role_format_test_str, add_special_tokens=False))
+    user_system_role_format_test_str = tokenizer_base.apply_chat_template([{'role': 'system', 'content': test_str}, {'role': 'user', 'content': test_str}], tokenize=False, padding=False)
+    user_system_role_format_test_str_len = len(tokenizer_base.encode(user_system_role_format_test_str, add_special_tokens=False))
+    return user_role_format_test_str_len - test_str_len, user_system_role_format_test_str_len - test_str_len
+
+def format_prompts_for_decoding(
+        prompts: List[str], 
+        tokenizer: PreTrainedTokenizer, 
+        format_prefix_chatML: bool, 
+        model_prefix: Optional[str], 
+        cot_start_token: Optional[str]
+    ) -> Tuple[List[str], int]:
+    """
+    Format the prompts for decoding and determine how much length is added by the formatting.
+
+    Args:
+        prompts (List[str]): The prompts to format.
+        tokenizer (PreTrainedTokenizer): The tokenizer to use for formatting.
+        format_prefix_chatML (bool): Whether to format the prefix using ChatML-style tags.
+        model_prefix (Optional[str]): The prefix to add to the prompts.
+        cot_start_token (Optional[str]): The token to add to the prompts.
+    """
+    # First, compute the length of all the prompts without the formatting
+    prompts_no_formatting_lengths = [len(tokenizer.encode(prompt, add_special_tokens=False)) for prompt in prompts]
+    
+    if format_prefix_chatML:
+        if model_prefix is not None and model_prefix != "":
+            if cot_start_token is not None:
+                prompts = [[{'role': 'system', 'content': model_prefix}, {'role': 'user', 'content': prompt + cot_start_token}] for prompt in prompts]
+            else:
+                prompts = [[{'role': 'system', 'content': model_prefix}, {'role': 'user', 'content': prompt}] for prompt in prompts]
+        else:
+            if cot_start_token is not None:
+                prompts = [[{'role': 'user', 'content': prompt + cot_start_token}] for prompt in prompts]
+            else:
+                prompts = [[{'role': 'user', 'content': prompt}] for prompt in prompts]
+        prompts = tokenizer.apply_chat_template(
+            prompts,
+            tokenize=False,  # Return strings, not tensors
+            padding=False   # Will pad during decoding
+        )
+    else:
+        if model_prefix is not None and model_prefix != "":
+            if cot_start_token is not None:
+                prompts = [model_prefix + prompt + cot_start_token for prompt in prompts]
+            else:
+                prompts = [model_prefix + prompt for prompt in prompts]
+        else:
+            if cot_start_token is not None:
+                prompts = [prompt + cot_start_token for prompt in prompts]
+            else:
+                pass # prompts remain unchanged
+    # Now compute the length of all the prompts with the formatting
+    prompts_formatting_lengths = [len(tokenizer.encode(prompt, add_special_tokens=False)) for prompt in prompts]
+    # Compute the difference between the length of the prompts with and without the formatting
+    prompts_formatting_lengths_diff = [prompts_formatting_lengths[i] - prompts_no_formatting_lengths[i] for i in range(len(prompts))]
+    # Find the maximum difference
+    max_formatting_length_diff = max(prompts_formatting_lengths_diff)
+    print("Max formatting length diff:", max_formatting_length_diff)
+    return prompts, max_formatting_length_diff
 
 
 def setup_interpretability_method(
         base_model: Union[PreTrainedModel, str], 
         finetuned_model: Union[PreTrainedModel, str], 
-        tokenizer: PreTrainedTokenizer,
+        tokenizer_base: PreTrainedTokenizer,
+        tokenizer_intervention: PreTrainedTokenizer,
         base_model_prefix: Optional[str] = None,
         intervention_model_prefix: Optional[str] = None,
+        format_prefix_chatML: bool = False,
         cot_start_token_base: Optional[str] = None,
         cot_end_token_base: Optional[str] = None,
         cot_max_length_base: int = 512,
@@ -46,6 +117,7 @@ def setup_interpretability_method(
         openrouter_api_key: Optional[str] = None,
         client: Optional[Any] = None,
         api_interactions_save_loc: Optional[str] = None,
+        logging_level: str = "INFO",
         logger: Optional[BoundLoggerLazyProxy] = None,
         local_embedding_model_str: str = "intfloat/multilingual-e5-large-instruct", 
         local_embedding_api_key: Optional[str] = None,
@@ -74,7 +146,8 @@ def setup_interpretability_method(
         tsne_save_path: Optional[str] = None,
         tsne_title: Optional[str] = None,
         tsne_perplexity: int = 30,
-        run_prefix: Optional[str] = None
+        run_prefix: Optional[str] = None,
+        global_random_seed: int = 42,
     ) -> Dict[str, Any]:
     """
     Set up the interpretability method to compare two models.
@@ -88,9 +161,11 @@ def setup_interpretability_method(
             in which case it references an openrouter model that will respond via the openrouter API.
         finetuned_model (Union[PreTrainedModel, str]): The model after finetuning. Can also be a string,
             in which case it references an openrouter model that will respond via the openrouter API.
-        tokenizer (PreTrainedTokenizer): The tokenizer to use for text generation.
+        tokenizer_base (PreTrainedTokenizer): The tokenizer to use for text generation.
+        tokenizer_intervention (PreTrainedTokenizer): The tokenizer to use for text generation.
         base_model_prefix (Optional[str]): Prefix to add to all prompts for the base model.
         intervention_model_prefix (Optional[str]): Prefix to add to all prompts for the intervention model.
+        format_prefix_chatML (bool): Whether to format the prefix using ChatML-style tags. False by default.
         cot_start_token_base (Optional[str]): Token to start the chain of thought for the base model.
         cot_end_token_base (Optional[str]): Token to end the chain of thought for the base model.
         cot_max_length_base (int): Max new tokens for CoT phase before continuation for the base model. Defaults to 512.
@@ -107,6 +182,8 @@ def setup_interpretability_method(
         openrouter_api_key (Optional[str]): The API key to use for openrouter API calls.
         client (Optional[Any]): The client object for API calls.
         api_interactions_save_loc (Optional[str]): The path to save the API interactions to. None by default.
+        logging_level (str): The logging level to use for logging API requests and responses. Defaults to "INFO", 
+            but can be set to "DEBUG" for more detailed logging of API requests and responses.
         logger (Optional[BoundLoggerLazyProxy]): The logger to use for logging. None by default.
         local_embedding_model_str (str): The name of the local embedding model to use.
         local_embedding_api_key (Optional[str]): The API key for the local embedding model.
@@ -126,7 +203,7 @@ def setup_interpretability_method(
         n_clusters (int): The number of clusters to use. 30 by default.
         min_cluster_size (int): The minimum size of a cluster. 7 by default.
         max_cluster_size (int): The maximum size of a cluster. 2000 by default.
-        max_length (int): The maximum length of the decoded texts. 32 by default.
+        max_length (int): The maximum length of the decoded text responses, not including the prefixes and COTs.
         decoding_batch_size (int): The batch size to use for decoding. 32 by default.
         decoded_texts_save_path (Optional[str]): The path to save the decoded texts to. None by default.
         decoded_texts_load_path (Optional[str]): The path to load the decoded texts from. None by default.
@@ -144,7 +221,7 @@ def setup_interpretability_method(
         tsne_title (Optional[str]): The title of the t-SNE plot. None by default.
         tsne_perplexity (int): The perplexity of the t-SNE plot. 30 by default.
         run_prefix (Optional[str]): The prefix to use for the run. None by default.
-
+        global_random_seed (int): Global random seed to use for reproducibility.
     Returns:
         Dict[str, Any]: A dictionary containing the setup results, including clusterings,
         embeddings, and decoded texts for both models.
@@ -199,7 +276,7 @@ def setup_interpretability_method(
             statements = load_statements_from_truthfulqa(num_questions_to_load = max_number_of_prompts)
             print("Number of statements loaded:", len(statements))
             print("Example statement:", statements[0])
-            prompts = [f"Question: {statement}.\nResponse:" for statement in statements]
+            prompts = [f"Question: {statement}\nResponse:" for statement in statements]
         elif 'bold' in path_to_MWE_repo:
             # Loading from the bold repository
             print("Loading statements from Amazon bold dataset")
@@ -215,7 +292,17 @@ def setup_interpretability_method(
                 categories_of_interest = None
             else:
                 categories_of_interest = categories_of_interest.split(",")
-            prompts = generate_new_prompts(categories_of_interest = categories_of_interest, num_prompts_to_generate = max_number_of_prompts, api_provider = "openrouter", api_model_str = "openai/gpt-5-mini", auth_key = openrouter_api_key, client = client, api_interactions_save_loc = api_interactions_save_loc, logger = logger, request_info = {"pipeline_stage": "generating new prompts"})
+            prompts = generate_new_prompts(
+                categories_of_interest = categories_of_interest, 
+                num_prompts_to_generate = max_number_of_prompts, 
+                api_provider = "openrouter", 
+                api_model_str = "openai/gpt-5-mini", 
+                auth_key = openrouter_api_key, 
+                client = client, 
+                api_interactions_save_loc = api_interactions_save_loc, 
+                logging_level=logging_level,
+                logger = logger, 
+                request_info = {"pipeline_stage": "generating new prompts"})
             print("Number of prompts generated:", len(prompts))
             print("Example prompt:", prompts[0])
         else:
@@ -402,7 +489,7 @@ def setup_interpretability_method(
         if isinstance(base_model, str):
             # Decode texts with OpenRouter
             duplicated_base_prompts = [prompt for prompt in prompts for _ in range(texts_decoded_per_prompt)]
-            if base_model_prefix is not None:
+            if base_model_prefix is not None and base_model_prefix != "":
                 duplicated_base_prompts = [base_model_prefix + prompt for prompt in duplicated_base_prompts]
             if cot_start_token_base is not None:
                 duplicated_base_prompts = [prompt + cot_start_token_base for prompt in duplicated_base_prompts]
@@ -413,6 +500,7 @@ def setup_interpretability_method(
                 auth_key=openrouter_api_key,
                 client=client,
                 api_interactions_save_loc=None,
+                logging_level=logging_level,
                 logger=None,
                 request_info=None,
                 max_tokens=max_length,
@@ -420,22 +508,21 @@ def setup_interpretability_method(
                 cot_max_length=cot_max_length_base
             )
         else:
-            # Decode texts with local model
-            if base_model_prefix is not None:
-                base_prompts = [base_model_prefix + prompt for prompt in prompts]
-                base_prefix_length = len(tokenizer.encode(base_model_prefix, add_special_tokens=False))
-            else:
-                base_prompts = prompts
-                base_prefix_length = 0
-            if cot_start_token_base is not None:
-                base_prompts = [prompt + cot_start_token_base for prompt in base_prompts]
+            base_prompts, _ = format_prompts_for_decoding(
+                prompts=prompts,
+                tokenizer=tokenizer_base,
+                format_prefix_chatML=format_prefix_chatML,
+                model_prefix=base_model_prefix,
+                cot_start_token=cot_start_token_base
+            )
+            
             base_decoded_texts = batch_decode_texts(
                 base_model, 
-                tokenizer, 
+                tokenizer_base, 
                 base_prompts, 
                 n_decoded_texts=n_decoded_texts,
                 texts_decoded_per_prefix=texts_decoded_per_prompt,
-                max_length=max_length + base_prefix_length,
+                max_answer_length=max_length,
                 batch_size=decoding_batch_size,
                 cot_end_token=cot_end_token_base,
                 cot_max_length=cot_max_length_base
@@ -444,7 +531,7 @@ def setup_interpretability_method(
         if isinstance(finetuned_model, str):
             # Decode texts with OpenRouter
             duplicated_finetuned_prompts = [prompt for prompt in prompts for _ in range(texts_decoded_per_prompt)]
-            if intervention_model_prefix is not None:
+            if intervention_model_prefix is not None and intervention_model_prefix != "":
                 duplicated_finetuned_prompts = [intervention_model_prefix + prompt for prompt in duplicated_finetuned_prompts]
             if cot_start_token_intervention is not None:
                 duplicated_finetuned_prompts = [prompt + cot_start_token_intervention for prompt in duplicated_finetuned_prompts]
@@ -455,6 +542,7 @@ def setup_interpretability_method(
                 auth_key=openrouter_api_key,
                 client=client,
                 api_interactions_save_loc=None,
+                logging_level=logging_level,
                 logger=None,
                 request_info=None,
                 max_tokens=max_length,
@@ -462,22 +550,20 @@ def setup_interpretability_method(
                 cot_max_length=cot_max_length_intervention
             )
         else:
-            # Decode texts with local model
-            if intervention_model_prefix is not None:
-                finetuned_prompts = [intervention_model_prefix + prompt for prompt in prompts]
-                intervention_prefix_length = len(tokenizer.encode(intervention_model_prefix, add_special_tokens=False))
-            else:
-                finetuned_prompts = prompts
-                intervention_prefix_length = 0
-            if cot_start_token_intervention is not None:
-                finetuned_prompts = [prompt + cot_start_token_intervention for prompt in finetuned_prompts]
+            finetuned_prompts, _ = format_prompts_for_decoding(
+                prompts=prompts,
+                tokenizer=tokenizer_intervention,
+                format_prefix_chatML=format_prefix_chatML,
+                model_prefix=intervention_model_prefix,
+                cot_start_token=cot_start_token_intervention
+            )
             finetuned_decoded_texts = batch_decode_texts(
                 finetuned_model, 
-                tokenizer, 
+                tokenizer_intervention, 
                 finetuned_prompts, 
                 n_decoded_texts=n_decoded_texts,
                 texts_decoded_per_prefix=texts_decoded_per_prompt,
-                max_length=max_length + intervention_prefix_length,
+                max_answer_length=max_length,
                 batch_size=decoding_batch_size,
                 cot_end_token=cot_end_token_intervention,
                 cot_max_length=cot_max_length_intervention
@@ -508,46 +594,79 @@ def setup_interpretability_method(
             print(f"Decoded texts saved to: {decoded_texts_save_path}")
     
     if base_model_prefix is not None and base_model_prefix != "":
-        base_decoded_texts = [text.replace(base_model_prefix, "") for text in base_decoded_texts]
+        base_prefix_char_length = len(base_model_prefix)
+        base_decoded_texts = [text[base_prefix_char_length:] for text in base_decoded_texts]
+        # if '\\n\\n' in base_model_prefix or '\n\n' in base_model_prefix:
+        #     # find the first occurrence of '\n\n' in the decoded texts
+        #     end_of_prefix = [text.find('\n\n') + 2 for text in base_decoded_texts]
+        #     # check if we found the end of the prefix
+        #     if -1 in end_of_prefix:
+        #         # Assume the tokenizer_base has replaced \n with \n\n, so we need to find the first occurrence of \\n\\n
+        #         end_of_prefix = [text.find('\\n\\n') + 4 for text in base_decoded_texts]
+        #     base_decoded_texts = [text[end_of_prefix[i]:] for i, text in enumerate(base_decoded_texts)]
+        # else:
+        #     base_decoded_texts = [text.replace(base_model_prefix, "") for text in base_decoded_texts]
         print("Removed base model prefix from base decoded texts")
         print("Removed prefix:", base_model_prefix)
     if intervention_model_prefix is not None and intervention_model_prefix != "":
-        finetuned_decoded_texts = [text.replace(intervention_model_prefix, "") for text in finetuned_decoded_texts]
+        intervention_prefix_char_length = len(intervention_model_prefix)
+        finetuned_decoded_texts = [text[intervention_prefix_char_length:] for text in finetuned_decoded_texts]
+        # if '\\n\\n' in intervention_model_prefix or '\n\n' in intervention_model_prefix:
+        #     # find the first occurrence of '\n\n' in the decoded texts
+        #     end_of_prefix = [text.find('\n\n') + 2 for text in finetuned_decoded_texts]
+        #     # check if we found the end of the prefix
+        #     if -1 in end_of_prefix:
+        #         # Assume the tokenizer_intervention has replaced \n with \n\n, so we need to find the first occurrence of \\n\\n
+        #         end_of_prefix = [text.find('\\n\\n') + 4 for text in finetuned_decoded_texts]
+        #     finetuned_decoded_texts = [text[end_of_prefix[i]:] for i, text in enumerate(finetuned_decoded_texts)]
+        # else:
+        #     finetuned_decoded_texts = [text.replace(intervention_model_prefix, "") for text in finetuned_decoded_texts]
         print("Removed intervention model prefix from finetuned decoded texts")
         print("Removed prefix:", intervention_model_prefix)
 
     # Print out 20 randomly sampled decoded texts
     print("Base decoded texts:")
     for i, t in enumerate(random.sample(base_decoded_texts, k=min(20, len(base_decoded_texts)))):
-        print(f"- {i}: {t}")
+        print(f"-Base {i}: {t}")
     print("Finetuned decoded texts:")
     for i, t in enumerate(random.sample(finetuned_decoded_texts, k=min(20, len(finetuned_decoded_texts)))):
-        print(f"- {i}: {t}")
+        print(f"-Finetuned {i}: {t}")
 
     # strip out all tokens in the chains of thought from the decoded texts, if they are present
     if cot_start_token_base is not None and cot_end_token_base is not None:
         base_decoded_texts_cot_stripped = []
         for text in base_decoded_texts:
             idx_start = text.find(cot_start_token_base)
-            idx_end = text.find(cot_end_token_base)
+            idx_end = text.find(cot_end_token_base, idx_start + len(cot_start_token_base))
             if idx_start != -1 and idx_end != -1:
-                base_decoded_texts_cot_stripped.append(text[:idx_start] + text[idx_end:])
+                stripped_text = text[:idx_start] + text[idx_end + len(cot_end_token_base):]
+                base_decoded_texts_cot_stripped.append(stripped_text.replace("\"\"\n\n", ""))
             else:
                 base_decoded_texts_cot_stripped.append(text)
         base_decoded_texts = base_decoded_texts_cot_stripped
         print("Stripped out chains of thought from base decoded texts")
+        # Print out 10 randomly sampled base decoded texts after stripping out chains of thought
+        print("Base decoded texts after stripping out chains of thought:")
+        for i, t in enumerate(random.sample(base_decoded_texts, k=min(10, len(base_decoded_texts)))):
+            print(f"-Base {i} without COT: {t}")
     
     if cot_start_token_intervention is not None and cot_end_token_intervention is not None:
         finetuned_decoded_texts_cot_stripped = []
         for text in finetuned_decoded_texts:
             idx_start = text.find(cot_start_token_intervention)
-            idx_end = text.find(cot_end_token_intervention)
+            idx_end = text.find(cot_end_token_intervention, idx_start + len(cot_start_token_intervention))
             if idx_start != -1 and idx_end != -1:
-                finetuned_decoded_texts_cot_stripped.append(text[:idx_start] + text[idx_end:])
+                stripped_text = text[:idx_start] + text[idx_end + len(cot_end_token_intervention):]
+                finetuned_decoded_texts_cot_stripped.append(stripped_text.replace("\"\"\n\n", ""))
             else:
                 finetuned_decoded_texts_cot_stripped.append(text)
         finetuned_decoded_texts = finetuned_decoded_texts_cot_stripped
         print("Stripped out chains of thought from finetuned decoded texts")
+        # Print out 10 randomly sampled finetuned decoded texts after stripping out chains of thought
+        print("Finetuned decoded texts after stripping out chains of thought:")
+        for i, t in enumerate(random.sample(finetuned_decoded_texts, k=min(10, len(finetuned_decoded_texts)))):
+            print(f"-Finetuned {i} without COT: {t}")
+    
 
     # Generate embeddings for both sets of decoded texts
     bnb_config = BitsAndBytesConfig(load_in_4bit=True)
@@ -772,7 +891,7 @@ def setup_interpretability_method(
         target_cluster_size = len(prompt_embeddings) // n_clusters
         min_cluster_size = max(2, target_cluster_size - 3)
         max_cluster_size = min(len(prompt_embeddings) // 2, target_cluster_size + 3)
-        prompt_clustering = KMeansConstrained(n_clusters=n_clusters, random_state=0, n_init=n_clustering_inits, size_min=min_cluster_size, size_max=max_cluster_size).fit(prompt_embeddings)
+        prompt_clustering = KMeansConstrained(n_clusters=n_clusters, random_state=global_random_seed, n_init=n_clustering_inits, size_min=min_cluster_size, size_max=max_cluster_size).fit(prompt_embeddings)
         
         # Now we derive the cluster assignments for the decoded texts from the prompt clustering
         # Then create mock clustering objects to match the expected format
@@ -787,7 +906,7 @@ def setup_interpretability_method(
                 finetuned_decoding_to_prompt_cluster.append(current_prompt_cluster)
 
         # print the first 100 elements of base_decoding_to_prompt_cluster and their corresponding decoded texts
-        for i in range(200):
+        for i in range(20):
             print(f"base_decoding_to_prompt_cluster[{i}]: {base_decoding_to_prompt_cluster[i]}")
             print(f"base_decoded_texts[{i}]: {base_decoded_texts[i]}")
 
@@ -824,30 +943,30 @@ def setup_interpretability_method(
                 if len(base_embeddings) > 10000:  # threshold for switching to MiniBatch
                     base_clustering = MiniBatchKMeans(
                         n_clusters=n_clusters, 
-                        random_state=0, 
+                        random_state=global_random_seed, 
                         n_init=n_clustering_inits,
                         batch_size=1000,
                         max_iter=100
                     ).fit(base_embeddings)
                 else:
-                    base_clustering = KMeans(n_clusters=n_clusters, random_state=0, n_init=n_clustering_inits).fit(base_embeddings)
+                    base_clustering = KMeans(n_clusters=n_clusters, random_state=global_random_seed, n_init=n_clustering_inits).fit(base_embeddings)
                 if init_clustering_from_base_model:
                     initial_centroids = base_clustering.cluster_centers_
-                    finetuned_clustering = KMeans(n_clusters=n_clusters, random_state=0, n_init=1, init=initial_centroids).fit(finetuned_embeddings)
+                    finetuned_clustering = KMeans(n_clusters=n_clusters, random_state=global_random_seed, n_init=1, init=initial_centroids).fit(finetuned_embeddings)
                 else:
                     if len(finetuned_embeddings) > 10000:
                         finetuned_clustering = MiniBatchKMeans(
                             n_clusters=n_clusters, 
-                            random_state=0, 
+                            random_state=global_random_seed, 
                             n_init=n_clustering_inits,
                             batch_size=1000,
                             max_iter=100
                         ).fit(finetuned_embeddings)
                     else:
-                        finetuned_clustering = KMeans(n_clusters=n_clusters, random_state=0, n_init=n_clustering_inits).fit(finetuned_embeddings)
+                        finetuned_clustering = KMeans(n_clusters=n_clusters, random_state=global_random_seed, n_init=n_clustering_inits).fit(finetuned_embeddings)
             elif cluster_method == "hdbscan":
-                base_clustering = HDBSCAN(min_cluster_size=min_cluster_size, max_cluster_size=max_cluster_size).fit(base_embeddings)
-                finetuned_clustering = HDBSCAN(min_cluster_size=min_cluster_size, max_cluster_size=max_cluster_size).fit(finetuned_embeddings)
+                base_clustering = HDBSCAN(min_cluster_size=min_cluster_size, max_cluster_size=max_cluster_size, random_state=global_random_seed).fit(base_embeddings)
+                finetuned_clustering = HDBSCAN(min_cluster_size=min_cluster_size, max_cluster_size=max_cluster_size, random_state=global_random_seed).fit(finetuned_embeddings)
         
             print("Found", len(set(base_clustering.labels_)), "clusters for base model")
             print("Found", len(set(finetuned_clustering.labels_)), "clusters for finetuned model")
@@ -1052,8 +1171,8 @@ def get_individual_labels(
     single_cluster_label_instruction: Optional[str] = None,
     max_unitary_comparisons_per_label: int = 50,
     api_interactions_save_loc: Optional[str] = None,
+    logging_level: str = "INFO",
     logger: Optional[BoundLoggerLazyProxy] = None,
-    metric: str = "acc"
 ) -> Dict[int, Tuple[str, float]]:
     """
     Generate and evaluate individual labels for each cluster.
@@ -1084,11 +1203,12 @@ def get_individual_labels(
         single_cluster_label_instruction (Optional[str]): Instructions for generating the single cluster labels.
         max_unitary_comparisons_per_label (int): Maximum number of unitary comparisons to perform per label.
         api_interactions_save_loc (Optional[str]): Where to store interactions with the API model, if anywhere.
+        logging_level (str): The logging level to use for logging API requests and responses. Defaults to "INFO", 
+            but can be set to "DEBUG" for more detailed logging of API requests and responses.
         logger (Optional[BoundLoggerLazyProxy]): The logger to use for logging API requests and responses.
-        metric (str): The metric to use for label validation. Defaults to "acc".
     Returns:
         Dict[int, Tuple[str, float]]: A dictionary mapping cluster IDs to tuples of
-        (best_label, best_metric_score).
+        (best_label, best_AUC_score).
     """
     cluster_labels, _ = get_cluster_labels_random_subsets(
         decoded_strs,
@@ -1106,14 +1226,15 @@ def get_individual_labels(
         num_decodings_per_prompt=num_decodings_per_prompt,
         single_cluster_label_instruction=single_cluster_label_instruction,
         api_interactions_save_loc=api_interactions_save_loc,
+        logging_level=logging_level,
         logger=logger
     )
     
-    labels_with_metric_scores = {}
+    labels_with_auc_scores = {}
     for cluster_id, labels in cluster_labels.items():
-        metric_scores = []
+        auc_scores = []
         for label in labels:
-            metric_score = evaluate_label_discrimination(
+            accuracy, p_value, auc_score = evaluate_label_discrimination(
                 label,
                 [i for i, c in enumerate(clustering_assignments) if c == cluster_id],
                 [i for i, c in enumerate(clustering_assignments) if c != cluster_id],
@@ -1129,16 +1250,16 @@ def get_individual_labels(
                 use_unitary_comparisons=True,
                 max_unitary_comparisons_per_label=max_unitary_comparisons_per_label,
                 api_interactions_save_loc=api_interactions_save_loc,
+                logging_level=logging_level,
                 logger=logger,
                 cluster_id_1=cluster_id,
                 cluster_id_2=None,
-                metric=metric
             )
-            metric_scores.append(metric_score)
-        best_label_index = max(range(len(metric_scores)), key=metric_scores.__getitem__)
-        labels_with_metric_scores[cluster_id] = (labels[best_label_index], metric_scores[best_label_index])
+            auc_scores.append(auc_score)
+        best_label_index = max(range(len(auc_scores)), key=auc_scores.__getitem__)
+        labels_with_auc_scores[cluster_id] = (labels[best_label_index], auc_scores[best_label_index])
     
-    return labels_with_metric_scores
+    return labels_with_auc_scores
 
 def get_random_texts(
     decoded_strs: List[str],
@@ -1160,7 +1281,6 @@ def get_random_texts(
 
 def generate_table_output(
         results: Dict[str, Any], 
-        metric_str: str
 ) -> str:
     """
     Generate a human-readable table output from the analysis results.
@@ -1173,7 +1293,6 @@ def generate_table_output(
     Args:
         results (Dict[str, Any]): A dictionary containing the analysis results,
             including information about base clusters and new finetuned clusters.
-        metric_str (str): The metric to use for label validation.
     Returns:
         str: A string containing formatted ASCII tables representing the analysis results.
     """
@@ -1183,7 +1302,7 @@ def generate_table_output(
     for i, cluster in enumerate(results['base_clusters']):
         data = [
             ['Base Cluster', f"Cluster {i}"],
-            ['Label', f"{cluster['label']} ({metric_str}: {cluster['label_metric_score']:.3f})"],
+            ['Label', f"{cluster['label']} (accuracy: {cluster['label_metric_score']:.3f})"],
             ['Size', str(cluster['size'])],
             ['Sample Texts', '\n'.join(cluster['sample_texts'])]
         ]
@@ -1192,8 +1311,8 @@ def generate_table_output(
             data.append(['Matching Finetuned Clusters', ''])
             for j, match in enumerate(cluster['matching_finetuned_clusters']):
                 data.extend([
-                    [f'Match {j} Label', f"{match['label']} ({metric_str}: {match['label_metric_score']:.3f})"],
-                    [f'Match {j} Contrastive Label', f"{match['contrastive_label']} ({metric_str}: {match['contrastive_metric_score']:.3f})"],
+                    [f'Match {j} Label', f"{match['label']} (accuracy: {match['label_metric_score']:.3f})"],
+                    [f'Match {j} Contrastive Label', f"{match['contrastive_label']} (accuracy: {match['contrastive_metric_score']:.3f})"],
                     [f'Match {j} Size', str(match['size'])],
                     [f'Match {j} Sample Texts', '\n'.join(match['sample_texts'])]
                 ])
@@ -1204,8 +1323,8 @@ def generate_table_output(
             data.append(['Unmatching Finetuned Clusters', ''])
             for j, unmatch in enumerate(cluster['unmatching_finetuned_clusters']):
                 data.extend([
-                    [f'Unmatch {j} Label', f"{unmatch['label']} ({metric_str}: {unmatch['label_metric_score']:.3f})"],
-                    [f'Unmatch {j} Contrastive Label', f"{unmatch['contrastive_label']} ({metric_str}: {unmatch['contrastive_metric_score']:.3f})"],
+                    [f'Unmatch {j} Label', f"{unmatch['label']} (accuracy: {unmatch['label_metric_score']:.3f})"],
+                    [f'Unmatch {j} Contrastive Label', f"{unmatch['contrastive_label']} (accuracy: {unmatch['contrastive_metric_score']:.3f})"],
                     [f'Unmatch {j} Size', str(unmatch['size'])],
                     [f'Unmatch {j} Sample Texts', '\n'.join(unmatch['sample_texts'])]
                 ])
@@ -1216,15 +1335,15 @@ def generate_table_output(
     for i, cluster in enumerate(results['new_finetuned_clusters']):
         data = [
             ['New Finetuned Cluster', f"Cluster {i}"],
-            ['Label', f"{cluster['label']} ({metric_str}: {cluster['label_metric_score']:.3f})"],
+            ['Label', f"{cluster['label']} (accuracy: {cluster['label_metric_score']:.3f})"],
             ['Size', str(cluster['size'])],
             ['Sample Texts', '\n'.join(cluster['sample_texts'])]
         ]
 
         for j, neighbor in enumerate(cluster['nearest_base_neighbors']):
             data.extend([
-                [f'Nearest Base Neighbor {j} Label', f"{neighbor['label']} ({metric_str}: {neighbor['label_metric_score']:.3f})"],
-                [f'Nearest Base Neighbor {j} Contrastive Label', f"{neighbor['contrastive_label']} ({metric_str}: {neighbor['contrastive_metric_score']:.3f})"],
+                [f'Nearest Base Neighbor {j} Label', f"{neighbor['label']} (accuracy: {neighbor['label_metric_score']:.3f})"],
+                [f'Nearest Base Neighbor {j} Contrastive Label', f"{neighbor['contrastive_label']} (accuracy: {neighbor['contrastive_metric_score']:.3f})"],
                 [f'Nearest Base Neighbor {j} Sample Texts', '\n'.join(neighbor['sample_texts'])]
             ])
 
@@ -1266,9 +1385,11 @@ def interpret_cohens_h(h: float) -> str:
 def apply_interpretability_method_1_to_K(
     base_model: PreTrainedModel, 
     finetuned_model: PreTrainedModel, 
-    tokenizer: PreTrainedTokenizer,
+    tokenizer_base: PreTrainedTokenizer,
+    tokenizer_intervention: PreTrainedTokenizer,
     base_model_prefix: Optional[str] = None,
     intervention_model_prefix: Optional[str] = None,
+    format_prefix_chatML: bool = False,
     cot_start_token_base: Optional[str] = None,
     cot_end_token_base: Optional[str] = None,
     cot_max_length_base: int = 512,
@@ -1281,6 +1402,7 @@ def apply_interpretability_method_1_to_K(
     api_provider: str = "anthropic",
     api_model_str: str = "claude-3-haiku-20240307",
     api_stronger_model_str: Optional[str] = None,
+    max_labeling_tokens: Optional[int] = None,
     auth_key: Optional[str] = None,
     openrouter_api_key: Optional[str] = None,
     client: Optional[Union[Anthropic, OpenAI, Client]] = None,
@@ -1300,6 +1422,7 @@ def apply_interpretability_method_1_to_K(
     sampled_texts_per_cluster: int = 10,
     sampled_comparison_texts_per_cluster: int = 50,
     cross_validate_contrastive_labels: bool = False,
+    cross_validate_on_all_clusters: bool = True,
     K: int = 3,
     match_by_ids: bool = False,
     max_length: int = 32,
@@ -1323,21 +1446,22 @@ def apply_interpretability_method_1_to_K(
     generate_individual_labels: bool = False,
     use_unitary_comparisons: bool = False,
     max_unitary_comparisons_per_label: int = 50,
-    additional_unitary_comparisons_per_label: int = 0,
     match_cutoff: float = 0.6,
     discriminative_query_rounds: int = 3,
     discriminative_validation_runs: int = 5,
-    metric: str = "acc",
+    n_permutations: int = 0,
     split_clusters_by_prompt: bool = True,
     tsne_save_path: Optional[str] = None,
     tsne_title: Optional[str] = None,
     tsne_perplexity: int = 30,
     api_interactions_save_loc: Optional[str] = None,
+    logging_level: str = "INFO",
     logger: Optional[BoundLoggerLazyProxy] = None,
     run_prefix: Optional[str] = None,
     save_addon_str: Optional[str] = None,
     graph_load_path: Optional[str] = None,
-    scoring_results_load_path: Optional[str] = None
+    scoring_results_load_path: Optional[str] = None,
+    global_random_seed: int = 42,
 ) -> Tuple[str, str, List[str]]:
     """
     Apply an interpretability method to compare a base model with a finetuned model.
@@ -1355,9 +1479,11 @@ def apply_interpretability_method_1_to_K(
     Args:
         base_model (PreTrainedModel): The original, pre-finetuned model.
         finetuned_model (PreTrainedModel): The model after finetuning.
-        tokenizer (PreTrainedTokenizer): The tokenizer for text generation.
+        tokenizer_base (PreTrainedTokenizer): The tokenizer for text generation.
+        tokenizer_intervention (PreTrainedTokenizer): The tokenizer for text generation.
         base_model_prefix (Optional[str]): Prefix to add to all prompts for the base model.
         intervention_model_prefix (Optional[str]): Prefix to add to all prompts for the intervention model.
+        format_prefix_chatML (bool): Whether to format the prefix using ChatML-style tags. False by default.
         cot_start_token_base (Optional[str]): Token to start the chain of thought for the base model.
         cot_end_token_base (Optional[str]): Token to end the chain of thought for the base model.
         cot_max_length_base (int): Max new tokens for CoT phase before continuation for the base model. Defaults to 512.
@@ -1371,6 +1497,7 @@ def apply_interpretability_method_1_to_K(
         api_provider (str): API provider for clustering and analysis.
         api_model_str (str): API model to use.
         api_stronger_model_str (Optional[str]): API model to use for stronger model, only used for the most important tasks.
+        max_labeling_tokens (Optional[int]): Max new tokens for labeling.
         auth_key (Optional[str]): Authentication key for API calls.
         openrouter_api_key (Optional[str]): API key for openrouter API calls.
         client (Optional[Any]): Client object for API calls.
@@ -1392,10 +1519,12 @@ def apply_interpretability_method_1_to_K(
             of label accuracy / AUCs between clusters and for individual labels.
         cross_validate_contrastive_labels (bool): Whether to cross-validate the contrastive labels by testing the 
             discriminative score of the labels on different clusters from which they were generated.
+        cross_validate_on_all_clusters (bool): Whether to cross-validate the contrastive labels by testing the 
+            discriminative score of the labels on texts sampled from all other clusters.
         sampled_texts_per_cluster (int): Number of texts to sample per cluster when generating labels.
         K (int): Number of neighbors for K-neighbor similarity graph.
         match_by_ids (bool): Whether to match clusters by their IDs, not embedding distances.
-        max_length (int): Maximum length of decoded texts.
+        max_length (int): Maximum length of decoded text responses, not including the prefixes and COTs.
         decoding_batch_size (int): Batch size for decoding.
         decoded_texts_save_path (Optional[str]): Path to save decoded texts.
         decoded_texts_load_path (Optional[str]): Path to load decoded texts.
@@ -1428,22 +1557,23 @@ def apply_interpretability_method_1_to_K(
         max_unitary_comparisons_per_label (int): Maximum number of unitary comparisons to perform per label.
             I.e., when validating the accuracy / AUC of a given label (either contrastive or individual), we will ask 
             the assistant to use the label to classify at most max_unitary_comparisons_per_label texts.
-        additional_unitary_comparisons_per_label (int): Additional number of unitary comparisons to perform per label.
-            These are run when a hypothesis passes the initial discriminative validation.
         match_cutoff (float): Accuracy / AUC cutoff for determining matching/unmatching clusters.
         discriminative_query_rounds (int): Number of rounds of discriminative queries to perform.
         discriminative_validation_runs (int): Number of validation runs to perform for each model for each hypothesis.
-        metric (str): The metric to use for label validation.
+        n_permutations (int): Number of permutations to perform for the permutation test.
         split_clusters_by_prompt (bool): Whether to split the clusters by prompt during discriminative evaluation of the labels.
         tsne_save_path (Optional[str]): Path to save t-SNE plot.
         tsne_title (Optional[str]): Title for t-SNE plot.
         tsne_perplexity (int): Perplexity for t-SNE.
         api_interactions_save_loc (Optional[str]): Where to record interactions with the API model, if anywhere.
+        logging_level (str): The logging level to use for logging API requests and responses. Defaults to "INFO", 
+            but can be set to "DEBUG" for more detailed logging of API requests and responses.
         logger (Optional[BoundLoggerLazyProxy]): The logger to use for logging API requests and responses.
         run_prefix (Optional[str]): Prefix for the current run.
         save_addon_str (Optional[str]): Addon string for the current run.
         graph_load_path (Optional[str]): Path to load the graph from.
         scoring_results_load_path (Optional[str]): Path to load the scoring results from.
+        global_random_seed (int): Global random seed to use for reproducibility.
     Returns:
         Tuple[str, str, List[str]]: A tuple containing:
             - results: JSON string with detailed analysis results
@@ -1453,9 +1583,11 @@ def apply_interpretability_method_1_to_K(
     setup = setup_interpretability_method(
         base_model=base_model,
         finetuned_model=finetuned_model,
-        tokenizer=tokenizer,
+        tokenizer_base=tokenizer_base,
+        tokenizer_intervention=tokenizer_intervention,
         base_model_prefix=base_model_prefix,
         intervention_model_prefix=intervention_model_prefix,
+        format_prefix_chatML=format_prefix_chatML,
         cot_start_token_base=cot_start_token_base,
         cot_end_token_base=cot_end_token_base,
         cot_max_length_base=cot_max_length_base,
@@ -1469,6 +1601,7 @@ def apply_interpretability_method_1_to_K(
         openrouter_api_key=openrouter_api_key,
         client=client,
         api_interactions_save_loc=api_interactions_save_loc,
+        logging_level=logging_level,
         logger=logger,
         local_embedding_model_str=local_embedding_model_str,
         local_embedding_api_key=local_embedding_api_key,
@@ -1497,7 +1630,8 @@ def apply_interpretability_method_1_to_K(
         tsne_save_path=tsne_save_path,
         tsne_title=tsne_title,
         tsne_perplexity=tsne_perplexity,
-        run_prefix=run_prefix
+        run_prefix=run_prefix,
+        global_random_seed=global_random_seed
     )
 
     base_clustering = setup["base_clustering"]
@@ -1537,7 +1671,7 @@ def apply_interpretability_method_1_to_K(
                 base_decoded_texts,
                 base_clustering.labels_,
                 None,
-                tokenizer,
+                tokenizer_base,
                 api_provider,
                 api_model_str,
                 api_stronger_model_str,
@@ -1551,15 +1685,15 @@ def apply_interpretability_method_1_to_K(
                 single_cluster_label_instruction=single_cluster_label_instruction,
                 max_unitary_comparisons_per_label=max_unitary_comparisons_per_label,
                 api_interactions_save_loc=api_interactions_save_loc,
+                logging_level=logging_level,
                 logger=logger,
-                metric=metric
             )
             print(f"Base labels: {base_labels}")
             finetuned_labels = get_individual_labels(
                 finetuned_decoded_texts,
                 finetuned_clustering.labels_,
                 None,
-                tokenizer,
+                tokenizer_intervention,
                 api_provider,
                 api_model_str,
                 api_stronger_model_str,
@@ -1573,20 +1707,20 @@ def apply_interpretability_method_1_to_K(
                 single_cluster_label_instruction=single_cluster_label_instruction,
                 max_unitary_comparisons_per_label=max_unitary_comparisons_per_label,
                 api_interactions_save_loc=api_interactions_save_loc,
+                logging_level=logging_level,
                 logger=logger,
-                metric=metric
             )
             print(f"Finetuned labels: {finetuned_labels}")
         else:
-            base_labels = [f"Cluster {i} base" for i in range(n_base_clusters)]
-            finetuned_labels = [f"Cluster {i} finetuned" for i in range(n_finetuned_clusters)]
+            base_labels = {i: (f"Cluster {i} base", -1.0) for i in range(n_base_clusters)}
+            finetuned_labels = {i: (f"Cluster {i} finetuned", -1.0) for i in range(n_finetuned_clusters)}
         
         # Build list of decoded texts prompt IDs
         base_decoded_texts_prompt_ids = [i // num_responses_per_statement for i in range(len(base_decoded_texts))]
         finetuned_decoded_texts_prompt_ids = [i // num_responses_per_statement for i in range(len(finetuned_decoded_texts))]
 
         # Build the K-neighbor similarity graph
-        graph = build_contrastive_K_neighbor_similarity_graph(
+        graph, results_dict = build_contrastive_K_neighbor_similarity_graph(
             base_decoded_texts,
             base_clustering.labels_,
             base_embeddings,
@@ -1598,16 +1732,18 @@ def apply_interpretability_method_1_to_K(
             K,
             match_by_ids,
             base_model,
-            tokenizer,
+            tokenizer_base,
             api_provider,
             api_model_str,
             api_stronger_model_str,
-            auth_key,
+            max_labeling_tokens=max_labeling_tokens,
+            auth_key=auth_key,
             client=client,
             local_embedding_model_str=local_embedding_model_str,
             device=device,
             sampled_comparison_texts_per_cluster=sampled_comparison_texts_per_cluster,
             cross_validate_contrastive_labels=cross_validate_contrastive_labels,
+            cross_validate_on_all_clusters=cross_validate_on_all_clusters,
             sampled_texts_per_cluster=sampled_texts_per_cluster,
             generated_labels_per_cluster=generated_labels_per_cluster,
             cluster_ids_to_prompt_ids_to_decoding_ids_dict_1=cluster_ids_to_prompt_ids_to_decoding_ids_dict_1,
@@ -1618,428 +1754,43 @@ def apply_interpretability_method_1_to_K(
             verified_diversity_promoter=verified_diversity_promoter,
             use_unitary_comparisons=use_unitary_comparisons,
             max_unitary_comparisons_per_label=max_unitary_comparisons_per_label,
-            additional_unitary_comparisons_per_label=additional_unitary_comparisons_per_label,
             api_interactions_save_loc=api_interactions_save_loc,
+            logging_level=logging_level,
             logger=logger,
             run_prefix=run_prefix,
-            metric=metric,
+            n_permutations=n_permutations,
             split_clusters_by_prompt=split_clusters_by_prompt,
             base_decoded_texts_prompt_ids=base_decoded_texts_prompt_ids,
-            finetuned_decoded_texts_prompt_ids=finetuned_decoded_texts_prompt_ids
-
+            finetuned_decoded_texts_prompt_ids=finetuned_decoded_texts_prompt_ids,
+            random_seed=global_random_seed,
         )
+        # Identify significant hypotheses via Benjamini-Hochberg correction
+        n_significant_binomial_p_values, significance_threshold_binomial_p_values, significant_binomial_mask = benjamini_hochberg_correction(results_dict["accuracy_binomial_p_values"])
+        n_significant_auc_permutation_p_values, significance_threshold_auc_permutation_p_values, significant_auc_permutation_mask = benjamini_hochberg_correction(results_dict["auc_permutation_p_values"])
 
-        # Only do this if we have loaded cluster indices and metrics
-        if setup["base_loaded_mauve_cluster_scores"] is not None:
-            attach_cluster_metrics_to_graph(
-                graph,
-                base_clustering.labels_,
-                finetuned_clustering.labels_,
-                setup["base_loaded_mauve_cluster_scores"],
-                setup["finetuned_loaded_mauve_cluster_scores"],
-                setup["base_loaded_kl_divergence_cluster"],
-                setup["finetuned_loaded_kl_divergence_cluster"],
-                setup["base_loaded_mean_entropy_cluster"],
-                setup["finetuned_loaded_mean_entropy_cluster"]
-            )
-            pickle.dump(graph, open(f"pkl_graphs/{run_prefix}{save_addon_str}_1_to_K_graph.pkl", "wb"))
-    if setup["base_loaded_mauve_cluster_scores"] is not None:
-        analyze_metric_differences_vs_similarity(graph)
-        analyze_node_metric_vs_neighbor_similarity(graph)
+        # Now save all hypotheses and scores to a TSV file via pandas, in "results_tsvs/{run_prefix}.tsv"
+        df = pd.DataFrame({
+            "hypothesis": results_dict["hypotheses"],
+            "accuracy": results_dict["accuracy_validation_scores"],
+            "auc": results_dict["auc_validation_scores"],
+            "accuracy_binomial_p_value": results_dict["accuracy_binomial_p_values"],
+            "auc_permutation_p_value": results_dict["auc_permutation_p_values"],
+            "significant_accuracy_binomial": significant_binomial_mask,
+            "significant_auc_permutation": significant_auc_permutation_mask,
+            "cross_validation_accuracy": results_dict["accuracy_cross_validation_scores"],
+            "cross_validation_auc": results_dict["auc_cross_validation_scores"],
+            "baseline_accuracy": results_dict["baseline_accuracy_validation_scores"],
+            "baseline_auc": results_dict["baseline_auc_validation_scores"],
+            "baseline_cross_validation_accuracy": results_dict["baseline_accuracy_cross_validation_scores"],
+            "baseline_cross_validation_auc": results_dict["baseline_auc_cross_validation_scores"],
+        })
+        tsvs_save_path = path.join("results_tsvs", f"{run_prefix}.tsv")
+        df.to_csv(tsvs_save_path, sep="\t", index=False)
 
-    results = {'base_clusters': [], 'new_finetuned_clusters': []}
+        # Now print number of significant hypotheses and the significance thresholds
+        print(f"Number of significant hypotheses (binomial p-values): {n_significant_binomial_p_values}")
+        print(f"Significance threshold (binomial p-values): {significance_threshold_binomial_p_values}")
+        print(f"Number of significant hypotheses (AUC permutation p-values): {n_significant_auc_permutation_p_values}")
+        print(f"Significance threshold (AUC permutation p-values): {significance_threshold_auc_permutation_p_values}")
 
-    # Process base model clusters
-    for base_cluster in tqdm(range(n_base_clusters), desc="Processing base clusters"):
-        base_cluster_indices = [i for i, label in enumerate(base_clustering.labels_) if label == base_cluster]
-        cluster_info = {
-            'label': base_labels[base_cluster][0],
-            'cluster_id': base_cluster,
-            'label_metric_score': base_labels[base_cluster][1],
-            'sample_texts': get_random_texts(base_decoded_texts, base_cluster_indices),
-            'size': len(base_cluster_indices),
-            'matching_finetuned_clusters': [],
-            'unmatching_finetuned_clusters': []
-        }
-
-        for finetuned_neighbor in graph.neighbors(f"1_{base_cluster}"):
-            finetuned_cluster = int(finetuned_neighbor.split('_')[1])
-            edge_data = graph[f"1_{base_cluster}"][finetuned_neighbor]
-            if 'label_metric_scores' not in edge_data or not edge_data['label_metric_scores']:
-                print(f"Warning: No label_metric_scores data for edge (1_{base_cluster}, {finetuned_neighbor})")
-                print("edge_data:")
-                print(edge_data)
-                continue
-            best_metric_score = max(edge_data['label_metric_scores'].values())
-            additional_best_metric_score = max(edge_data['additional_label_metric_scores'].values()) if edge_data['additional_label_metric_scores'] else -1.0
-            best_label = max(edge_data['label_metric_scores'], key=edge_data['label_metric_scores'].get)
-            best_p_value = edge_data['label_p_values'][best_label]
-
-            finetuned_cluster_indices = [i for i, label in enumerate(finetuned_clustering.labels_) if label == finetuned_cluster]
-            neighbor_info = {
-                'label': finetuned_labels[finetuned_cluster][0],
-                'cluster_id': finetuned_cluster,
-                'label_metric_score': finetuned_labels[finetuned_cluster][1],
-                'contrastive_label': best_label,
-                'contrastive_metric_score': best_metric_score,
-                'additional_contrastive_metric_score': additional_best_metric_score,
-                'contrastive_p_value': best_p_value,
-                'all_contrastive_labels': list(edge_data['label_metric_scores'].keys()),
-                'all_contrastive_metric_scores': list(edge_data['label_metric_scores'].values()),
-                'sample_texts': get_random_texts(finetuned_decoded_texts, finetuned_cluster_indices),
-                'size': len(finetuned_cluster_indices)
-            }
-
-            if best_metric_score < match_cutoff:
-                # Case 1: a matching cluster is found, so the same behavior is present in both models
-                # though with potentially different probabilities, as indicated by relative cluster sizes
-                cluster_info['matching_finetuned_clusters'].append(neighbor_info)
-            else:
-                # Case 2: A cluster in model 1 is not found in model 2, so some model 1 behavior fails to
-                # appear in model 2.
-                cluster_info['unmatching_finetuned_clusters'].append(neighbor_info)
-        
-        # Account for the size of the matching clusters in case 1
-        if cluster_info['matching_finetuned_clusters']:
-            total_matching_size = sum(c['size'] for c in cluster_info['matching_finetuned_clusters'])
-            cluster_info['size_comparison'] = {
-                'absolute_difference': total_matching_size - cluster_info['size'],
-                'percentage_difference': (total_matching_size - cluster_info['size']) / cluster_info['size'] * 100
-            }
-
-        results['base_clusters'].append(cluster_info)
-
-    # Process unmatched finetuned clusters
-    matched_finetuned_clusters = set()
-    for base_info in results['base_clusters']:
-        for match in base_info['matching_finetuned_clusters']:
-            matched_finetuned_clusters.add(match['label'])
-
-    for finetuned_cluster in range(n_finetuned_clusters):
-        if finetuned_labels[finetuned_cluster][0] not in matched_finetuned_clusters:
-            finetuned_cluster_indices = [i for i, label in enumerate(finetuned_clustering.labels_) if label == finetuned_cluster]
-            new_cluster_info = {
-                'cluster_id': finetuned_cluster,
-                'label': finetuned_labels[finetuned_cluster][0],
-                'label_metric_score': finetuned_labels[finetuned_cluster][1],
-                'sample_texts': get_random_texts(finetuned_decoded_texts, finetuned_cluster_indices),
-                'size': len(finetuned_cluster_indices),
-                'nearest_base_neighbors': []
-            }
-
-            for base_neighbor in graph.neighbors(f"2_{finetuned_cluster}"):
-                base_cluster = int(base_neighbor.split('_')[1])
-                edge_data = graph[f"2_{finetuned_cluster}"][base_neighbor]
-                best_metric_score = max(edge_data['label_metric_scores'].values())
-                additional_best_metric_score = max(edge_data['additional_label_metric_scores'].values()) if edge_data['additional_label_metric_scores'] else -1.0
-                best_label = max(edge_data['label_metric_scores'], key=edge_data['label_metric_scores'].get)
-                best_p_value = edge_data['label_p_values'][best_label]
-
-                base_cluster_indices = [i for i, label in enumerate(base_clustering.labels_) if label == base_cluster]
-                new_cluster_info['nearest_base_neighbors'].append({
-                    'label': base_labels[base_cluster][0],
-                    'cluster_id': base_cluster,
-                    'label_metric_score': base_labels[base_cluster][1],
-                    'contrastive_label': best_label,
-                    'contrastive_metric_score': best_metric_score,
-                    'additional_contrastive_metric_score': additional_best_metric_score,
-                    'contrastive_p_value': best_p_value,
-                    'all_contrastive_labels': list(edge_data['label_metric_scores'].keys()),
-                    'all_contrastive_metric_scores': list(edge_data['label_metric_scores'].values()),
-                    'sample_texts': get_random_texts(base_decoded_texts, base_cluster_indices)
-                })
-            # Case 3: A new cluster is found in model 2 that is not in model 1, so some model 2 behavior
-            # is not present in model 1.
-            results['new_finetuned_clusters'].append(new_cluster_info)
-
-    # Construct the candidate hypothesis strings for each cluster, based on which of the three cases it 
-    # falls under.
-    candidate_hypotheses = []
-    candidate_hypothesis_contrastive_discriminative_scores = []
-    additional_candidate_hypothesis_contrastive_discriminative_scores = []
-    candidate_hypothesis_contrastive_discriminative_p_values = []
-    hypothesis_origin_clusters = []
-    num_cluster_matches = 0
-    num_clusters_matched_to_equivalents = 0
-
-    # Case 1: Matching clusters with different sizes
-
-    # Calculate total number of statistical tests for Bonferroni correction
-    # This includes both proportion tests and validation tests
-    n_proportion_tests = sum(len(cluster['matching_finetuned_clusters']) for cluster in results['base_clusters'])
-    bonferroni_alpha = 0.05 / n_proportion_tests if n_proportion_tests > 0 else 0.05
-
-    print(f"Bonferroni alpha (corrected for {n_proportion_tests} total tests): {bonferroni_alpha}")
-    for base_cluster in results['base_clusters']:
-        if base_cluster['matching_finetuned_clusters'] and K > 1:
-            for match in base_cluster['matching_finetuned_clusters']:
-                num_cluster_matches += 1
-                if match['cluster_id'] == base_cluster['cluster_id']:
-                    num_clusters_matched_to_equivalents += 1
-                # Set up counts and nobs as numpy arrays
-                count = np.array([base_cluster['size'], match['size']])
-                nobs = np.array([n_decoded_texts, n_decoded_texts])
-                # Perform single two-sided test
-                z_stat, p_value = proportions_ztest(
-                    count=count,
-                    nobs=nobs,
-                    alternative='two-sided'
-                )
-                
-                if p_value < bonferroni_alpha:
-                    # Calculate proportions and effect size
-                    p1 = base_cluster['size'] / n_decoded_texts
-                    p2 = match['size'] / n_decoded_texts
-                    effect_size = cohens_h(p1, p2)
-                    magnitude = interpret_cohens_h(effect_size)
-                    
-                    # Determine direction based on actual proportions
-                    direction = "more" if p1 > p2 else "less"
-                    
-                    hypothesis = f"Model 1 is {magnitude} {direction} likely to generate content described as: '{base_cluster['label']}' compared to Model 2."
-                    candidate_hypotheses.append(hypothesis)
-                    candidate_hypothesis_contrastive_discriminative_scores.append(-1.0)
-                    additional_candidate_hypothesis_contrastive_discriminative_scores.append(-1.0)
-                    candidate_hypothesis_contrastive_discriminative_p_values.append(1.0)
-                    hypothesis_origin_clusters.append([base_cluster, match, 'matching'])
-    # Case 2: Unmatching clusters (behavior in base model not found in finetuned model)
-    for base_cluster in results['base_clusters']:
-        if base_cluster['unmatching_finetuned_clusters']:
-            if K > 1:
-                hypothesis = f"Model 2 is less likely to generate content described as: '{base_cluster['label']}' compared to Model 1."
-                candidate_hypotheses.append(hypothesis)
-                candidate_hypothesis_contrastive_discriminative_scores.append(-1.0)
-                additional_candidate_hypothesis_contrastive_discriminative_scores.append(-1.0)
-                candidate_hypothesis_contrastive_discriminative_p_values.append(1.0)
-                hypothesis_origin_clusters.append([base_cluster, -1, 'unmatching'])
-            # Add hypotheses based on contrastive labels
-            for unmatch in base_cluster['unmatching_finetuned_clusters']:
-                for label in unmatch['all_contrastive_labels']:
-                    contrastive_hypothesis = re.sub(r'[Cc]luster (\d)', lambda m: f"Model {m.group(1)}", label)
-                    candidate_hypotheses.append(contrastive_hypothesis)
-                    candidate_hypothesis_contrastive_discriminative_scores.append(unmatch['contrastive_metric_score'])
-                    additional_candidate_hypothesis_contrastive_discriminative_scores.append(unmatch['additional_contrastive_metric_score'])
-                    candidate_hypothesis_contrastive_discriminative_p_values.append(unmatch['contrastive_p_value'])
-                    hypothesis_origin_clusters.append([base_cluster, unmatch, 'unmatching'])
-    # Case 3: New clusters in finetuned model
-    for new_cluster in results['new_finetuned_clusters']:
-        if K > 1:
-            hypothesis = f"Model 2 has developed a new behavior of generating content described as: '{new_cluster['label']}', which was not prominent in Model 1."
-            candidate_hypotheses.append(hypothesis)
-            candidate_hypothesis_contrastive_discriminative_scores.append(-1.0)
-            additional_candidate_hypothesis_contrastive_discriminative_scores.append(-1.0)
-            candidate_hypothesis_contrastive_discriminative_p_values.append(1.0)
-            hypothesis_origin_clusters.append([-1, new_cluster, 'new'])
-        # Add hypotheses based on contrastive labels of nearest base neighbors
-        for neighbor in new_cluster['nearest_base_neighbors']:
-            for label in neighbor['all_contrastive_labels']:
-                contrastive_hypothesis = re.sub(r'[Cc]luster (\d)', lambda m: f"Model {m.group(1)}", label)
-                candidate_hypotheses.append(contrastive_hypothesis)
-                candidate_hypothesis_contrastive_discriminative_scores.append(neighbor['contrastive_metric_score'])
-                additional_candidate_hypothesis_contrastive_discriminative_scores.append(neighbor['additional_contrastive_metric_score'])
-                candidate_hypothesis_contrastive_discriminative_p_values.append(neighbor['contrastive_p_value'])
-                hypothesis_origin_clusters.append([neighbor, new_cluster, 'new'])
-
-    print(f"Generated {len(candidate_hypotheses)} candidate hypotheses.")
-    print(f"Number of cluster matches: {num_cluster_matches}")
-    print(f"Number of clusters matched to equivalents: {num_clusters_matched_to_equivalents}")
-    for i, hypothesis, origin_cluster in zip(range(1, len(candidate_hypotheses) + 1), candidate_hypotheses, hypothesis_origin_clusters):
-        print(f"{i}. {hypothesis}")
-        print(f"   Origin cluster: {origin_cluster}")
-        print("-" * 50)
-
-    if scoring_results_load_path is None:
-        # Validate the candidate hypotheses using the validated_assistant_generative_compare function
-        if api_provider != 'openrouter':
-            validated_results = validated_assistant_generative_compare(
-                candidate_hypotheses,
-                None,
-                None,
-                api_provider=api_provider,
-                api_model_str=api_model_str,
-                auth_key=auth_key,
-                api_stronger_model_str=api_stronger_model_str,
-                client=client,
-                starting_model_str=None,
-                comparison_model_str=None,
-                common_tokenizer_str=base_model.name_or_path,
-                starting_model=base_model,
-                comparison_model=finetuned_model,
-                device=device,
-                use_normal_distribution_for_p_values=True,
-                num_generated_texts_per_description=num_generated_texts_per_description,
-                num_rephrases_for_validation=num_rephrases_for_validation,
-                bnb_config=setup["bnb_config"],
-                use_correlation_coefficient=True,
-                api_interactions_save_loc=api_interactions_save_loc,
-                logger=logger
-            )
-        else:
-            print("Unable to perform generative comparison with OpenRouter models. Assigning all scores to 0.0.")
-            validated_results = (
-                [[0.0] * len(candidate_hypotheses)], # all_validated_scores
-                [[1.0] * len(candidate_hypotheses)], # all_validated_p_values
-                [[hypothesis] for hypothesis in candidate_hypotheses] # all_validated_hypotheses
-            )
-
-        all_validated_scores, all_validated_p_values, all_validated_hypotheses = validated_results
-        pickle.dump(validated_results, open(f"pkl_results/{run_prefix}{save_addon_str}_validated_results.pkl", "wb"))
-    else:
-        if scoring_results_load_path.endswith(".txt"):
-            with open(scoring_results_load_path, "r") as f:
-                all_validated_scores = [[float(line) for line in f.readlines()]]
-        else:
-            validated_results = pickle.load(open(scoring_results_load_path, "rb"))
-            all_validated_scores, all_validated_p_values, all_validated_hypotheses = validated_results    
-
-    # only do this if we've loaded the relevant scores
-    if setup["base_loaded_mauve_cluster_scores"] is not None:
-        analyze_hypothesis_scores_vs_cluster_metrics(
-            graph,
-            hypothesis_origin_clusters,
-            all_validated_scores,
-            model_label_for_node_1="1_",
-            model_label_for_node_2="2_"
-        )
-
-    #print("validated_results object:")
-    #print(validated_results)
-    if discriminative_query_rounds > 0:
-        discriminative_validation_results = validated_embeddings_discriminative_single_unknown_ICL(
-            difference_descriptions = candidate_hypotheses,
-            api_provider = api_provider,
-            api_model_str = api_stronger_model_str if api_stronger_model_str else api_model_str,
-            auth_key = auth_key,
-            client = client,
-            common_tokenizer_str = base_model.name_or_path,
-            starting_model = base_model,
-            comparison_model = finetuned_model,
-            num_rounds = discriminative_query_rounds,
-            num_validation_runs = discriminative_validation_runs,
-            explain_reasoning = False,
-            max_tokens = 1000,
-            api_interactions_save_loc = api_interactions_save_loc,
-            logger=logger
-        )
-        validated_discriminative_accuracies = discriminative_validation_results["hypothesis_accuracies"]
-        validated_discriminative_p_values = discriminative_validation_results["hypothesis_p_values"]
-    else:
-        validated_discriminative_accuracies = [None] * len(candidate_hypotheses)
-        validated_discriminative_p_values = [None] * len(candidate_hypotheses)
-
-    # Filter and format final hypotheses
-    validated_hypotheses = []
-    
-    # Collect all neighbor discriminative p-values for multiple testing correction
-    neighbor_p_values_to_correct = []
-    neighbor_p_indices = []
-    
-    for i, p_value in enumerate(candidate_hypothesis_contrastive_discriminative_p_values):
-        # Only include valid p-values (not the placeholder -1.0 values)
-        if candidate_hypothesis_contrastive_discriminative_scores[i] != -1.0:
-            neighbor_p_values_to_correct.append(p_value)
-            neighbor_p_indices.append(i)
-    
-    # Apply multiple testing correction if we have p-values to correct
-    corrected_neighbor_p_values = {}
-    if neighbor_p_values_to_correct:
-        # Use Benjamini-Hochberg for FDR control (less conservative than Bonferroni)
-        rejected, corrected_p_values, _, _ = multipletests(
-            neighbor_p_values_to_correct, 
-            alpha=0.05, 
-            method='fdr_bh'
-        )
-        
-        # Map corrected p-values back to original indices
-        for idx, orig_idx in enumerate(neighbor_p_indices):
-            corrected_neighbor_p_values[orig_idx] = corrected_p_values[idx]
-        
-        print(f"\nMultiple testing correction applied to {len(neighbor_p_values_to_correct)} neighbor discriminative p-values")
-        print(f"Method: Benjamini-Hochberg (FDR control)")
-        print(f"Number of hypotheses rejected at FDR 0.05: {sum(rejected)}")
-    
-    print("\nValidated Hypotheses:")
-    for i, main_hypothesis in enumerate(all_validated_hypotheses[0]):
-        generative_score = all_validated_scores[0][i]
-        generative_p_value = all_validated_p_values[0][i]
-        discriminative_accuracy = validated_discriminative_accuracies[i]
-        discriminative_p_value = validated_discriminative_p_values[i]
-        neighbor_discriminative_score = candidate_hypothesis_contrastive_discriminative_scores[i]
-        additional_neighbor_discriminative_score = additional_candidate_hypothesis_contrastive_discriminative_scores[i]
-        neighbor_discriminative_p_value = candidate_hypothesis_contrastive_discriminative_p_values[i]
-        
-        if True: #generative_score > 0.2 and generative_p_value < 0.1: 
-            validated_hypothesis = f"{main_hypothesis} \n(Generative Score: {generative_score:.4f}, P-value: {generative_p_value:.4f})"
-            if discriminative_accuracy is not None:
-                validated_hypothesis = validated_hypothesis + f"\n(Discriminative Accuracy: {discriminative_accuracy:.4f}, P-value: {discriminative_p_value:.4f})"
-            if neighbor_discriminative_score is not None and neighbor_discriminative_score != -1.0:
-                # Show both raw and corrected p-values
-                corrected_p = corrected_neighbor_p_values.get(i, neighbor_discriminative_p_value)
-                validated_hypothesis = validated_hypothesis + f"\n(Neighbor Discriminative Score: {neighbor_discriminative_score:.4f}, Raw P-value: {neighbor_discriminative_p_value:.4f}, Corrected P-value: {corrected_p:.4f})"
-                if additional_neighbor_discriminative_score is not None and additional_neighbor_discriminative_score != -1.0:
-                    validated_hypothesis = validated_hypothesis + f"\n(Additional Neighbor Discriminative Score: {additional_neighbor_discriminative_score:.4f})"
-            
-            validated_hypotheses.append(validated_hypothesis)
-            
-            print(f"\n{len(validated_hypotheses)}. {validated_hypothesis}")
-
-            # Find all rephrases / associated scores and p-values
-            if len(all_validated_hypotheses) > 1:
-                rephrases_of_hypothesis = [all_validated_hypotheses[j][i] for j in range(1, len(all_validated_hypotheses))]
-                scores_of_rephrases = [all_validated_scores[j][i] for j in range(1, len(all_validated_hypotheses))]
-                p_values_of_rephrases = [all_validated_p_values[j][i] for j in range(1, len(all_validated_hypotheses))]
-            
-                # Print out the hypothesis, its rephrases, and the accuracy / AUCs and P-values for each
-                for j, rephrase in enumerate(rephrases_of_hypothesis):
-                    print(f"   Rephrase {j}: {rephrase}")
-                    print(f"   Correlation Coefficient: {scores_of_rephrases[j]:.4f}, P-value: {p_values_of_rephrases[j]:.4f}")
-            
-            print("-" * 50)
-
-    # Add validation correlations / accuracies and p-values to results
-    validation_results = {
-        'hypotheses': [],
-        'matching_clusters': [],
-        'unmatching_clusters': [],
-        'new_clusters': []
-    }
-
-    for i, (hypothesis, origin_clusters_info) in enumerate(zip(candidate_hypotheses, hypothesis_origin_clusters)):
-        validation_info = {
-            'hypothesis': hypothesis,
-            'generative_score': all_validated_scores[0][i],
-            'generative_p_value': all_validated_p_values[0][i],
-            'discriminative_accuracy': validated_discriminative_accuracies[i],
-            'discriminative_p_value': validated_discriminative_p_values[i],
-            'origin_type': origin_clusters_info[2],
-            'source_clusters': (origin_clusters_info[0], origin_clusters_info[1]),
-            'rephrases': []
-        }
-        
-        # Add rephrases if they exist
-        if len(all_validated_hypotheses) > 1:
-            validation_info['rephrases'] = [
-                {
-                    'text': all_validated_hypotheses[j][i],
-                    'score': all_validated_scores[j][i],
-                    'p_value': all_validated_p_values[j][i]
-                }
-                for j in range(1, len(all_validated_hypotheses))
-            ]
-        
-        # Add to appropriate category based on origin type
-        if origin_clusters_info[2] == 'matching':
-            validation_results['matching_clusters'].append(validation_info)
-        elif origin_clusters_info[2] == 'unmatching':
-            validation_results['unmatching_clusters'].append(validation_info)
-        elif origin_clusters_info[2] == 'new':
-            validation_results['new_clusters'].append(validation_info)
-        
-        validation_results['hypotheses'].append(validation_info)
-    
-    results['validation_results'] = validation_results
-
-    # Generate human-readable output using terminaltables
-    table_output = generate_table_output(results, "Accuracy" if metric == "acc" else "AUC")
-
-    return results, table_output, validated_hypotheses
+        return results_dict
