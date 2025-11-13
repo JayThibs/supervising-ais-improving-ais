@@ -13,6 +13,7 @@ import pickle
 import argparse
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from sklearn.manifold import TSNE
+from sklearn.metrics import roc_auc_score
 import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import tqdm
@@ -37,8 +38,10 @@ def make_api_request(
         api_key: Optional[str] = None, 
         client: Optional[Union[Anthropic, OpenAI, Client]] = None, 
         api_interactions_save_loc: Optional[str] = None,
+        logging_level: str = "INFO",
         logger: Optional[BoundLoggerLazyProxy] = None,
         max_tokens: int = 1000,
+        max_thinking_tokens: Optional[int] = None,
         n_local_retries: int = 5,
         request_info: Optional[Dict[str, str]] = {"pipeline_stage": "unknown"},
         temperature: float = 1.0,
@@ -55,8 +58,12 @@ def make_api_request(
         client (Optional[Any]): The client to use for the API.
         api_interactions_save_loc (Optional[str]): Which file to store the API requests and responses to. 
             Defaults to None.
+        logging_level (str): The logging level to use for logging API requests and responses. Defaults to "INFO", 
+            but can be set to "DEBUG" for more detailed logging of API requests and responses.
         logger (Optional[BoundLoggerLazyProxy]): The logger to use for logging API requests and responses.
         max_tokens (int): The maximum number of tokens to generate.
+        max_thinking_tokens (Optional[int]): The maximum number of tokens to generate for the COT phase. 
+            Defaults to None. Currently only used for Gemini.
         n_local_retries (int): The number of retries to make if the API request fails.
         request_info (Optional[Dict[str, str]]): Information about the request to be recorded in the API
             interactions file. Defaults to {"pipeline_stage": "unknown"}.
@@ -84,16 +91,48 @@ def make_api_request(
                 )
                 result = response.content[0].text
             elif api_provider == 'openai' or api_provider == 'openrouter':
+                if max_thinking_tokens is not None:
+                    if max_thinking_tokens == 0:
+                        reasoning_effort = "low"
+                    elif max_thinking_tokens < 10000:
+                        reasoning_effort = "medium"
+                    else:
+                        reasoning_effort = "high"
+                else:
+                    reasoning_effort = None
                 if client is None and api_provider == 'openai':
                     client = OpenAI(api_key=api_key)
                 elif client is None and api_provider == 'openrouter':
                     client = OpenAI(api_key=api_key, base_url="https://openrouter.ai/api/v1")
-                response = client.chat.completions.create(
-                    model=model_str,
-                    max_completion_tokens=max_tokens,
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=temperature
-                )
+                if api_provider == 'openai' and reasoning_effort is not None:
+                    response = client.chat.completions.create(
+                        model=model_str,
+                        max_completion_tokens=max_tokens,
+                        reasoning={"effort": reasoning_effort},
+                        messages=[{"role": "user", "content": prompt}],
+                        temperature=temperature
+                    )
+                elif api_provider == 'openrouter' and reasoning_effort is not None:
+                    response = client.chat.completions.create(
+                        model=model_str,
+                        max_completion_tokens=max_tokens,
+                        extra_body={
+                            "reasoning": {
+                                "effort": reasoning_effort
+                            }
+                        },
+                        messages=[{"role": "user", "content": prompt}],
+                        temperature=temperature
+                    )
+                    if reasoning_effort == "high":
+                        print("High reasoning effort response: ", response.choices[0].message.reasoning)
+                else:
+                    response = client.chat.completions.create(
+                        model=model_str,
+                        max_completion_tokens=max_tokens,
+                        messages=[{"role": "user", "content": prompt}],
+                        temperature=temperature
+                    )
                 result = response.choices[0].message.content
             elif api_provider == 'gemini':
                 BLOCK_NONE = [
@@ -129,20 +168,47 @@ def make_api_request(
                 # }
                 if client is None:
                     client = genai.Client(api_key=api_key)
-                response = client.models.generate_content(
-                    model=model_str,
-                    contents=prompt,
+                if max_thinking_tokens is not None:
+                    config = types.GenerateContentConfig(
+                        max_output_tokens=max_tokens,
+                        temperature=temperature,
+                        safety_settings=BLOCK_NONE,
+                        thinking_config=types.ThinkingConfig(
+                            thinking_budget=max_thinking_tokens,
+                            include_thoughts=logging_level in ["DEBUG"]
+                            )
+                    )
+                else:
                     config = types.GenerateContentConfig(
                         max_output_tokens=max_tokens,
                         temperature=temperature,
                         safety_settings=BLOCK_NONE
                     )
+                response = client.models.generate_content(
+                    model=model_str,
+                    contents=prompt,
+                    config=config
                 )
                 result = response.text
+                if logging_level in ["DEBUG"]:
+                    print("Thoughts tokens:", response.usage_metadata.thoughts_token_count)
+                    print("Output tokens:", response.usage_metadata.candidates_token_count)
+
+                    for part in response.candidates[0].content.parts:
+                        if not part.text:
+                            continue
+                        if part.thought:
+                            print("Thought summary:")
+                            print(part.text)
+                            print()
+                        else:
+                            print("Answer:")
+                            print(part.text)
+                            print()
             else:
                 raise ValueError(f"Unsupported API provider: {api_provider}")
             
-            if api_interactions_save_loc and logger:
+            if api_interactions_save_loc and logger and logging_level in ["DEBUG"]:
                 logger.info(
                     "api_request",
                     api_provider=api_provider,
@@ -155,7 +221,7 @@ def make_api_request(
             return result
         except (InternalServerError, APIError, Exception) as e:
             print(f"API request failed: {str(e)}. Retrying...")
-            if logger:
+            if logger and logging_level in ["DEBUG"]:
                 logger.info(
                     "api_request_failed",
                     api_provider=api_provider,
@@ -175,11 +241,13 @@ def parallel_make_api_requests(
         auth_key: Optional[str] = None, 
         client: Optional[Union[Anthropic, OpenAI, Client]] = None, 
         api_interactions_save_loc: Optional[str] = None, 
+        logging_level: str = "INFO",
         logger: Optional[BoundLoggerLazyProxy] = None,
         num_workers: int = 10,
         request_info: Optional[Dict[str, str]] = None,
         max_retries: int = 3,
         max_tokens: int = 1000,
+        max_thinking_tokens: Optional[int] = None,
         temperature: float = 1.0,
         cot_end_token: Optional[str] = None,
         cot_max_length: int = 512
@@ -194,11 +262,15 @@ def parallel_make_api_requests(
         auth_key (Optional[str]): The authentication key for the API.
         client (Optional[Union[Anthropic, OpenAI, Client]]): The client to use for the API request.
         api_interactions_save_loc (Optional[str]): Which file to store the API requests and responses to. 
+        logging_level (str): The logging level to use for logging API requests and responses. Defaults to "INFO", 
+            but can be set to "DEBUG" for more detailed logging of API requests and responses.
         logger (Optional[BoundLoggerLazyProxy]): The logger to use for logging API requests and responses.
         num_workers (int): The number of worker threads to use for parallel execution.
         request_info (Optional[Dict[str, str]]): Information about the request.
         max_retries (int): Maximum number of retries for failed requests.
         max_tokens (int): The maximum number of tokens to generate per request.
+        max_thinking_tokens (Optional[int]): The maximum number of tokens to generate for the COT phase. 
+            Defaults to None. Currently only used for Gemini.
         temperature (float): The temperature to use for the API request.
         cot_end_token (Optional[str]): Token to end the chain of thought. Not yet implemented.
         cot_max_length (int): Max new tokens for CoT phase before continuation. Defaults to 512.
@@ -209,6 +281,22 @@ def parallel_make_api_requests(
         ValueError: If neither auth_key nor client is provided
         RuntimeError: If all retries are exhausted for a request
     """
+    # print("Prompts: ", prompts)
+    # print("API provider: ", api_provider)
+    # print("API model string: ", api_model_str)
+    # print("Auth key: ", auth_key)
+    # print("Client: ", client)
+    # print("API interactions save loc: ", api_interactions_save_loc)
+    # print("Logging level: ", logging_level)
+    # print("Logger: ", logger)
+    # print("Num workers: ", num_workers)
+    # print("Request info: ", request_info)
+    # print("Max retries: ", max_retries)
+    # print("Max tokens: ", max_tokens)
+    # print("Max thinking tokens: ", max_thinking_tokens)
+    # print("Temperature: ", temperature)
+    # print("Cot end token: ", cot_end_token)
+    # print("Cot max length: ", cot_max_length)
     if request_info is None:
         request_info = {'pipeline_stage': 'unknown'}
 
@@ -248,9 +336,11 @@ def parallel_make_api_requests(
                     model_str=api_model_str,
                     client=local_client,
                     api_interactions_save_loc=api_interactions_save_loc,
+                    logging_level=logging_level,
                     logger=logger,
                     request_info=request_info,
                     max_tokens=max_tokens,
+                    max_thinking_tokens=max_thinking_tokens,
                     temperature=temperature,
                     cot_end_token=cot_end_token
                 )
@@ -302,6 +392,7 @@ def collect_dataset_from_api(
     api_key: Optional[str] = None,
     client: Optional[Union[Anthropic, OpenAI, Client]] = None,
     api_interactions_save_loc: Optional[str] = None,
+    logging_level: str = "INFO",
     logger: Optional[BoundLoggerLazyProxy] = None,
     max_tokens: int = 1000,
     num_datapoints: int = 100,
@@ -320,6 +411,8 @@ def collect_dataset_from_api(
         client (Optional[Any]): The client to use for the API.
         api_interactions_save_loc (Optional[str]): Which file to store the API requests and responses to. 
             Defaults to None.
+        logging_level (str): The logging level to use for logging API requests and responses. Defaults to "INFO", 
+            but can be set to "DEBUG" for more detailed logging of API requests and responses.
         logger (Optional[BoundLoggerLazyProxy]): The logger to use for logging API requests and responses.
         max_tokens (int): The maximum number of tokens to generate per request.
         num_datapoints (int): The total number of datapoints to collect.
@@ -345,6 +438,7 @@ def collect_dataset_from_api(
                 api_key, 
                 client, 
                 api_interactions_save_loc, 
+                logging_level,
                 logger,
                 max_tokens,
                 request_info=request_info
@@ -397,6 +491,7 @@ def rephrase_description(
     num_rephrases: int = 1,
     max_tokens: int = 4096,
     api_interactions_save_loc: Optional[str] = None,
+    logging_level: str = "INFO",
     logger: Optional[BoundLoggerLazyProxy] = None,
     request_info: Optional[Dict[str, str]] = {"pipeline_stage": "unspecified description rephrasing"}
 ) -> List[str]:
@@ -417,6 +512,8 @@ def rephrase_description(
         max_tokens (int, optional): The maximum number of tokens for the API response. Defaults to 100.
         api_interactions_save_loc (Optional[str]): Which file to store the API requests and responses to. 
             Defaults to None.
+        logging_level (str): The logging level to use for logging API requests and responses. Defaults to "INFO", 
+            but can be set to "DEBUG" for more detailed logging of API requests and responses.
         logger (Optional[BoundLoggerLazyProxy]): The logger to use for logging API requests and responses.
         request_info (Optional[Dict[str, str]]): Information about the request to be recorded in the API
             interactions file. Defaults to {"pipeline_stage": "unspecified description rephrasing"}.
@@ -444,6 +541,7 @@ def rephrase_description(
             api_key=auth_key,
             client=client,
             api_interactions_save_loc=api_interactions_save_loc,
+            logging_level=logging_level,
             logger=logger,
             max_tokens=max_tokens,
             num_datapoints=num_rephrases,
@@ -830,6 +928,7 @@ def generate_new_prompts(
     max_retries: int = 12,
     max_tokens: int = 2500,
     api_interactions_save_loc: Optional[str] = None,
+    logging_level: str = "INFO",
     logger: Optional[BoundLoggerLazyProxy] = None,
     request_info: Optional[Dict[str, str]] = {"pipeline_stage": "generating new prompts"},
     max_prompt_words: int = 50
@@ -856,6 +955,7 @@ def generate_new_prompts(
             api_key = auth_key,
             client = None,
             api_interactions_save_loc = api_interactions_save_loc,
+            logging_level=logging_level,
             logger = logger,
             num_datapoints = number_of_prompts_per_category,
             request_info = request_info,
@@ -874,7 +974,7 @@ def batch_decode_texts(
         n_decoded_texts: Optional[int] = None,
         texts_decoded_per_prefix: Optional[int] = None,
         batch_size: int = 32,
-        max_length: int = 32,
+        max_answer_length: int = 32,
         temperature: float = 1.0,
         cot_end_token: Optional[str] = None,
         cot_max_length: int = 512
@@ -885,11 +985,11 @@ def batch_decode_texts(
     Args:
         model (PreTrainedModel): The model to use for text generation.
         tokenizer (PreTrainedTokenizer): The tokenizer to use for text generation.
-        prefixes (List[str]): List of prefixes to use for text generation.
+        prefixes (List[str]): List of string prefixes to use for text generation. 
         n_decoded_texts (Optional[int]): Total number of texts to generate.
         texts_decoded_per_prefix (Optional[int]): Number of texts to generate per prefix.
         batch_size (int): Number of texts to generate in each batch.
-        max_length (int): The maximum length of the decoded texts.
+        max_answer_length (int): The maximum length of the responses, which are added onto the prefixes and COTs.
         temperature (float): The temperature to use for text generation.
         cot_end_token (Optional[str]): Token to end the chain of thought.
         cot_max_length (int): Max new tokens for CoT phase before continuation. Defaults to 512.
@@ -913,6 +1013,7 @@ def batch_decode_texts(
                 prefixes = [tokenizer.bos_token]
         else:
             prefixes = [""]
+
     # Set padding token to eos token
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
@@ -932,11 +1033,9 @@ def batch_decode_texts(
             batch_prefixes, 
             return_tensors="pt", 
             padding=True, 
-            truncation=True,
-            max_length=max_length
+            truncation=False,
         )
         inputs = {key: value.to(model.device) for key, value in inputs.items()}
-        
         with torch.no_grad():
             if cot_end_token is not None:
                 # Stage 1: CoT phase up to cot_max_length tokens
@@ -944,7 +1043,6 @@ def batch_decode_texts(
                     **inputs,
                     max_new_tokens=cot_max_length,
                     num_return_sequences=1,
-                    no_repeat_ngram_size=2,
                     pad_token_id=tokenizer.eos_token_id,
                     temperature=temperature,
                     do_sample=True
@@ -961,7 +1059,8 @@ def batch_decode_texts(
                         cot_text = text + cot_end_token
                     stage2_prompts.append(cot_text)
 
-                # Stage 2: continue from after CoT for additional max_length tokens
+                # Stage 2: continue from after CoT for additional max_answer_length tokens
+
                 stage2_inputs = tokenizer(
                     stage2_prompts,
                     return_tensors="pt",
@@ -972,9 +1071,8 @@ def batch_decode_texts(
 
                 final_outputs = model.generate(
                     **stage2_inputs,
-                    max_new_tokens=max_length,
+                    max_new_tokens=max_answer_length,
                     num_return_sequences=1,
-                    no_repeat_ngram_size=2,
                     pad_token_id=tokenizer.eos_token_id,
                     temperature=temperature,
                     do_sample=True
@@ -982,12 +1080,11 @@ def batch_decode_texts(
                 
                 batch_decoded = tokenizer.batch_decode(final_outputs, skip_special_tokens=True)
             else:
-                # Original single-stage generation if cot_end_token is not provided
+                # Single-stage generation if cot_end_token is not provided
                 outputs = model.generate(
                     **inputs,
-                    max_length=max_length,
+                    max_new_tokens=max_answer_length,
                     num_return_sequences=1,
-                    no_repeat_ngram_size=2,
                     pad_token_id=tokenizer.eos_token_id,
                     temperature=temperature,
                     do_sample=True
@@ -1115,7 +1212,7 @@ def plot_comparison_tsne(
         combined_embeddings = np.vstack((combined_embeddings, base_cluster_centers, finetuned_cluster_centers))
 
     # Perform t-SNE on combined embeddings
-    tsne = TSNE(n_components=2, perplexity=perplexity, random_state=42)
+    tsne = TSNE(n_components=2, perplexity=perplexity, random_state=0)
     combined_tsne = tsne.fit_transform(combined_embeddings)
 
     # Split the results back into base and fine-tuned
@@ -1603,4 +1700,40 @@ def analyze_uv_variance_patterns(U, V, S, base_name, run_prefix, save_dir):
         'v_energy_90': v_90_idx
     }
     
+def permutation_test_auc(
+    scores: List[float],
+    target_labels: List[int],
+    n_permutations: int = 50000,
+    seed: int = 0
+) -> float:
+    """
+    Permutation test using AUC to measure discrimination between classes.
     
+    Args:
+        scores: Predicted scores (0-1)
+        target_labels: True class labels (0 or 1)
+        n_permutations: Number of permutations
+        seed: Random seed for reproducibility
+    
+    Returns:
+        p-value (one-sided): fraction of permutations with AUC >= observed AUC
+    """
+    rng = np.random.default_rng(seed)
+    scores = np.array(scores)
+    target_labels = np.array(target_labels)
+    #print(f"Scores: {scores}")
+    #print(f"Target labels: {target_labels}")
+    
+    # Observed AUC
+    obs_auc = roc_auc_score(target_labels, scores)
+    
+    # Permutation test (count times permuted AUC >= observed)
+    count = 0
+    for _ in range(n_permutations):
+        perm_labels = rng.permutation(target_labels)
+        perm_auc = roc_auc_score(perm_labels, scores)
+        if perm_auc >= obs_auc:
+            count += 1
+    
+    p_value = (count + 1) / (n_permutations + 1)
+    return p_value
