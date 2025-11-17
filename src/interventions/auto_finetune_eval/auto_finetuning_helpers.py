@@ -134,6 +134,9 @@ def make_api_request(
                         temperature=temperature
                     )
                 result = response.choices[0].message.content
+                if logging_level in ["DEBUG", "SCORES"]:
+                    logger.info(f"SCORES Logging Input/Output tokens for {model_str}: {response.usage.prompt_tokens} / {response.usage.completion_tokens} : prompt start: {prompt[:20]}...")
+                    
             elif api_provider == 'gemini':
                 BLOCK_NONE = [
                     {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
@@ -190,21 +193,20 @@ def make_api_request(
                     config=config
                 )
                 result = response.text
-                if logging_level in ["DEBUG"]:
-                    print("Thoughts tokens:", response.usage_metadata.thoughts_token_count)
-                    print("Output tokens:", response.usage_metadata.candidates_token_count)
-
-                    for part in response.candidates[0].content.parts:
-                        if not part.text:
-                            continue
-                        if part.thought:
-                            print("Thought summary:")
-                            print(part.text)
-                            print()
-                        else:
-                            print("Answer:")
-                            print(part.text)
-                            print()
+                if logging_level in ["DEBUG", "SCORES"]:
+                    logger.info(f"SCORES Logging Input / Output / Thoughts tokens for {model_str}: {response.usage_metadata.prompt_token_count} / {response.usage_metadata.candidates_token_count} / {response.usage_metadata.thoughts_token_count}")
+                    if logging_level in ["DEBUG"]:
+                        for part in response.candidates[0].content.parts:
+                            if not part.text:
+                                continue
+                            if part.thought:
+                                logger.info("DEBUG Logging Thought summary:")
+                                logger.info(part.text)
+                                logger.info("")
+                            else:
+                                logger.info("DEBUG Logging Answer:")
+                                logger.info(part.text)
+                                logger.info("")
             else:
                 raise ValueError(f"Unsupported API provider: {api_provider}")
             
@@ -243,7 +245,7 @@ def parallel_make_api_requests(
         api_interactions_save_loc: Optional[str] = None, 
         logging_level: str = "INFO",
         logger: Optional[BoundLoggerLazyProxy] = None,
-        num_workers: int = 10,
+        num_workers: int = 20,
         request_info: Optional[Dict[str, str]] = None,
         max_retries: int = 3,
         max_tokens: int = 1000,
