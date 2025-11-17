@@ -223,7 +223,7 @@ class AutoFineTuningEvaluator:
 
     def run(self):
         """Execute the entire automated finetuning and evaluation process."""
-        if not self.args.base_model.startswith("OR:") and not self.args.intervention_model.startswith("OR:"): # If we are not using an OpenRouter model, we need to load the base model
+        if self.args.decoded_texts_load_path is None and not self.args.base_model.startswith("OR:") and not self.args.intervention_model.startswith("OR:"): # If we are not using an OpenRouter model, we need to load the base model
             self.load_base_model()
 
             if self.args.intervention_model:
@@ -341,8 +341,14 @@ class AutoFineTuningEvaluator:
                         analyze_weight_difference(base_param.data, intervention_param.data, base_name, self.args.run_prefix)
                 print(f"Total weight difference: {total_weight_diff}")
         else:
-            self.base_model = self.args.base_model.split(":")[1]
-            self.intervention_model = self.args.intervention_model.split(":")[1]
+            if self.args.decoded_texts_load_path is None:
+                self.base_model = self.args.base_model.split(":")[1]
+                self.intervention_model = self.args.intervention_model.split(":")[1]
+            else:
+                self.base_model = self.args.base_model
+                self.intervention_model = self.args.intervention_model
+                self.tokenizer_base = AutoTokenizer.from_pretrained(self.args.base_model, padding_side="left")
+                self.tokenizer_intervention = AutoTokenizer.from_pretrained(self.args.intervention_model, padding_side="left")
 
         results_dict = apply_interpretability_method_1_to_K(
             self.base_model, 
@@ -403,6 +409,7 @@ class AutoFineTuningEvaluator:
             generated_labels_per_cluster=self.args.generated_labels_per_cluster,
             single_cluster_label_instruction=self.args.single_cluster_label_instruction,
             contrastive_cluster_label_instruction=self.args.contrastive_cluster_label_instruction,
+            label_diversification_str_instructions=self.args.label_diversification_str_instructions,
             diversify_contrastive_labels=self.args.diversify_contrastive_labels,
             verified_diversity_promoter=self.args.verified_diversity_promoter,
             use_unitary_comparisons=self.args.use_unitary_comparisons,
@@ -412,6 +419,7 @@ class AutoFineTuningEvaluator:
             discriminative_validation_runs=self.args.discriminative_validation_runs,
             n_permutations=self.args.n_permutations,
             split_clusters_by_prompt=self.args.split_clusters_by_prompt,
+            frac_prompts_for_label_generation=self.args.frac_prompts_for_label_generation,
             tsne_save_path=self.args.tsne_save_path,
             tsne_title=self.args.tsne_title,
             tsne_perplexity=self.args.tsne_perplexity,
@@ -463,11 +471,11 @@ if __name__ == "__main__":
     parser.add_argument("--device", type=str, default=None, help="Device to use for inference with the base and intervention models")
 
     # Ground truth and data generation
-    parser.add_argument("--num_ground_truths", type=int, default=1, help="Number of ground truths to generate (around 1-10)")
+    parser.add_argument("--num_ground_truths", type=int, default=0, help="Number of ground truths to generate (around 1-10)")
     parser.add_argument("--focus_area", type=str, default=None, help="Optional focus area for ground truth generation")
     parser.add_argument("--use_truthful_qa", action="store_true", help="Flag to use the TruthfulQA dataset to generate a set of misconceptions as ground truths")
     parser.add_argument("--random_GT_sampling_seed", type=int, default=None, help="Seed to use for random sampling of the TruthfulQA dataset")
-    parser.add_argument("--num_samples", type=int, default=5, help="Number of data points to generate per ground truth (around 10-1000)")
+    parser.add_argument("--num_samples", type=int, default=0, help="Number of data points to generate per ground truth (around 10-1000)")
     parser.add_argument("--ground_truth_file_path", type=str, default=None, help="Path to save the generated CSV file")
     parser.add_argument("--num_base_samples_for_training", type=int, default=0, help="Number of samples from the base model to include in the training set")
     parser.add_argument("--regenerate_ground_truths", action="store_true", help="Flag to regenerate the ground truths and data")
@@ -502,6 +510,7 @@ if __name__ == "__main__":
     parser.add_argument("--single_cluster_label_instruction", type=str, default=None, help="Instructions for generating the single cluster labels")
     parser.add_argument("--contrastive_cluster_label_instruction", type=str, default=None, help="Instructions for generating the contrastive cluster labels")
     parser.add_argument("--diversify_contrastive_labels", action="store_true", help="Flag to diversify the contrastive labels by clustering the previously generated labels, and then using the assistant to summarize the common themes across the labels closest to the cluster centers. Then we provide those summaries to the assistant to generate new labels that are different from the previous ones.")
+    parser.add_argument("--label_diversification_str_instructions", type=str, default=None, help="Instructions for diversifying the contrastive labels")
     parser.add_argument("--verified_diversity_promoter", action="store_true", help="Flag to promote diversity in the contrastive labels by recording any hypotheses that are verified discriminatively, providing them to the assistant, and asking the assistant to look for other hypotheses that are different.")
     parser.add_argument("--run_weight_analysis", action="store_true", help="Flag to run the weight analysis looking at how the weights of the base model and intervention model differ across all named parameters")
 
@@ -521,21 +530,22 @@ if __name__ == "__main__":
     parser.add_argument("--cluster_on_prompts", action="store_true", help="Flag to perform clustering on the prompts, then use those to determine the clusters")
     parser.add_argument("--use_anthropic_evals_clusters", action="store_true", help="Flag to use the cluster assignments from the Anthropic evals repository")
     parser.add_argument("--local_embedding_model_str", type=str, default="intfloat/multilingual-e5-large-instruct", help="Model version for the local embedding model")
-    parser.add_argument("--K", type=int, default=3, help="Number of neighbors to connect each cluster to")
+    parser.add_argument("--K", type=int, default=1, help="Number of neighbors to connect each cluster to")
     parser.add_argument("--match_by_ids", action="store_true", help="Flag to match clusters by their IDs, not embedding distances.")
 
     # Validation
     parser.add_argument("--num_rephrases_for_validation", type=int, default=0, help="Number of rephrases of each generated hypothesis to generate for validation")
     parser.add_argument("--num_generated_texts_per_description", type=int, default=20, help="Number of generated texts per description for generative validation")
-    parser.add_argument("--generated_labels_per_cluster", type=int, default=3, help="Number of generated labels to generate for each cluster")
+    parser.add_argument("--generated_labels_per_cluster", type=int, default=1, help="Number of generated labels to generate for each cluster")
 
     parser.add_argument("--use_unitary_comparisons", action="store_true", help="Flag to use unitary comparisons")
     parser.add_argument("--max_unitary_comparisons_per_label", type=int, default=100, help="Maximum number of unitary comparisons to perform per label")
     parser.add_argument("--match_cutoff", type=float, default=0.69, help="Accuracy / AUC cutoff for determining matching/unmatching clusters")
-    parser.add_argument("--discriminative_query_rounds", type=int, default=3, help="Number of rounds of discriminative queries to perform")
+    parser.add_argument("--discriminative_query_rounds", type=int, default=0, help="Number of rounds of discriminative queries to perform")
     parser.add_argument("--discriminative_validation_runs", type=int, default=5, help="Number of validation runs to perform for each model for each hypothesis")
     parser.add_argument("--n_permutations", type=int, default=0, help="Number of permutations to perform for the permutation test")
     parser.add_argument("--split_clusters_by_prompt", action="store_true", help="Flag to split the clusters by prompt during discriminative evaluation of the labels")
+    parser.add_argument("--frac_prompts_for_label_generation", type=float, default=0.5, help="Fraction of prompts to use for label generation")
     # t-SNE
     parser.add_argument("--tsne_save_path", type=str, default=None, help="Path to save the t-SNE plot to")
     parser.add_argument("--tsne_title", type=str, default=None, help="Title for the t-SNE plot")
