@@ -22,7 +22,7 @@ import pickle
 from auto_finetuning_helpers import plot_comparison_tsne, batch_decode_texts, load_statements_from_MWE_repo, load_statements_from_MPI_repo, load_statements_from_truthfulqa, load_statements_from_amazon_bold, load_statements_from_jailbreak_llms_repo, parallel_make_api_requests, generate_new_prompts
 from os import path
 
-from validated_comparison_tools import read_past_embeddings_or_generate_new, match_clusterings, get_validated_contrastive_cluster_labels, validated_assistant_generative_compare, build_contrastive_K_neighbor_similarity_graph, get_cluster_labels_random_subsets, evaluate_label_discrimination, validated_embeddings_discriminative_single_unknown_ICL, attach_cluster_metrics_to_graph, analyze_metric_differences_vs_similarity, analyze_node_metric_vs_neighbor_similarity, analyze_hypothesis_scores_vs_cluster_metrics
+from validated_comparison_tools import read_past_embeddings_or_generate_new, build_contrastive_K_neighbor_similarity_graph, get_cluster_labels_random_subsets, evaluate_label_discrimination
 from stats import benjamini_hochberg_correction
 from structlog._config import BoundLoggerLazyProxy
 
@@ -417,16 +417,20 @@ def setup_interpretability_method(
                 finetuned_prompts = decoded_texts[decoded_texts["model"] == "finetuned"]["prompt"].tolist()
                 base_texts = decoded_texts[decoded_texts["model"] == "base"]["text"].tolist()
                 finetuned_texts = decoded_texts[decoded_texts["model"] == "finetuned"]["text"].tolist()
-                
-                # Combine prompts and texts with HTML-style tags
-                # base_decoded_texts = [f"<prompt>{prompt}</prompt><response>{text}</response>" 
-                #                     for prompt, text in zip(base_prompts, base_texts)]
-                # finetuned_decoded_texts = [f"<prompt>{prompt}</prompt><response>{text}</response>" 
-                #                         for prompt, text in zip(finetuned_prompts, finetuned_texts)]
-
-                # Just combine them via concatenation
-                base_decoded_texts = [prompt + text for prompt, text in zip(base_prompts, base_texts)]
-                finetuned_decoded_texts = [prompt + text for prompt, text in zip(finetuned_prompts, finetuned_texts)]
+                base_decoded_texts = []
+                for i, (prompt, text) in enumerate(zip(base_prompts, base_texts)):
+                    # check if the generated text is nan
+                    if isinstance(text, float) and pd.isna(text):
+                        print(f"Text is nan for prompt {prompt} at index {i}")
+                        text = "[System error: Generation failed for this prompt.]"
+                    base_decoded_texts.append(prompt + text)
+                finetuned_decoded_texts = []
+                for i, (prompt, text) in enumerate(zip(finetuned_prompts, finetuned_texts)):
+                    # check if the generated text is nan
+                    if isinstance(text, float) and pd.isna(text):
+                        print(f"Text is nan for prompt {prompt} at index {i}")
+                        text = "[System error: Generation failed for this prompt.]"
+                    finetuned_decoded_texts.append(prompt + text)
 
                 # Now infer texts_decoded_per_prompt from the loaded data
                 texts_decoded_per_prompt = len(base_decoded_texts) // len(set(base_prompts))
@@ -904,14 +908,20 @@ def setup_interpretability_method(
             for _ in range(texts_decoded_per_prompt):
                 base_decoding_to_prompt_cluster.append(current_prompt_cluster)
                 finetuned_decoding_to_prompt_cluster.append(current_prompt_cluster)
-
-        # print the first 100 elements of base_decoding_to_prompt_cluster and their corresponding decoded texts
-        for i in range(20):
-            print(f"base_decoding_to_prompt_cluster[{i}]: {base_decoding_to_prompt_cluster[i]}")
-            print(f"base_decoded_texts[{i}]: {base_decoded_texts[i]}")
-
         base_clustering_assignments = np.array(base_decoding_to_prompt_cluster)
         finetuned_clustering_assignments = np.array(finetuned_decoding_to_prompt_cluster)
+
+        # print the first 10 elements of base_decoding_to_prompt_cluster and their corresponding decoded texts
+        for i in range(10):
+            print(f"base_decoding_to_prompt_cluster[{i}]: {base_decoding_to_prompt_cluster[i]}")
+            print(f"base_decoded_texts[{i}]: {base_decoded_texts[i]}")
+        # print the first 10 elements of finetuned_decoding_to_prompt_cluster and their corresponding decoded texts
+        for i in range(10):
+            print(f"finetuned_decoding_to_prompt_cluster[{i}]: {finetuned_decoding_to_prompt_cluster[i]}")
+            print(f"finetuned_decoded_texts[{i}]: {finetuned_decoded_texts[i]}")
+        # print the sizes of each cluster
+        print(f"Base cluster sizes: {[np.sum(base_clustering_assignments == i) for i in range(n_clusters)]}")
+        print(f"Finetuned cluster sizes: {[np.sum(finetuned_clustering_assignments == i) for i in range(n_clusters)]}")
 
         # We also set each decoded text's embedding to be the embedding of its prompt
         base_embeddings = prompt_embeddings[base_clustering_assignments]
@@ -1441,6 +1451,7 @@ def apply_interpretability_method_1_to_K(
     include_prompts_in_decoded_texts: bool = False,
     single_cluster_label_instruction: Optional[str] = None,
     contrastive_cluster_label_instruction: Optional[str] = None,
+    label_diversification_str_instructions: Optional[str] = None,
     diversify_contrastive_labels: bool = False,
     verified_diversity_promoter: bool = False,
     generate_individual_labels: bool = False,
@@ -1451,6 +1462,7 @@ def apply_interpretability_method_1_to_K(
     discriminative_validation_runs: int = 5,
     n_permutations: int = 0,
     split_clusters_by_prompt: bool = True,
+    frac_prompts_for_label_generation: float = 0.5,
     tsne_save_path: Optional[str] = None,
     tsne_title: Optional[str] = None,
     tsne_perplexity: int = 30,
@@ -1549,6 +1561,7 @@ def apply_interpretability_method_1_to_K(
             generated labels, and then using the assistant to summarize the common themes across the labels closest to 
             the cluster centers. Then we provide those summaries to the assistant to generate new labels that are different 
             from the previous ones.
+        label_diversification_str_instructions (Optional[str]): Instructions for diversifying the contrastive labels.
         verified_diversity_promoter (bool): Whether to promote diversity in the contrastive labels by recording any 
             hypotheses that are verified discriminatively, providing them to the assistant, and asking the assistant to 
             look for other hypotheses that are different.
@@ -1562,6 +1575,7 @@ def apply_interpretability_method_1_to_K(
         discriminative_validation_runs (int): Number of validation runs to perform for each model for each hypothesis.
         n_permutations (int): Number of permutations to perform for the permutation test.
         split_clusters_by_prompt (bool): Whether to split the clusters by prompt during discriminative evaluation of the labels.
+        frac_prompts_for_label_generation (float): Fraction of prompts to use for label generation.
         tsne_save_path (Optional[str]): Path to save t-SNE plot.
         tsne_title (Optional[str]): Title for t-SNE plot.
         tsne_perplexity (int): Perplexity for t-SNE.
@@ -1580,6 +1594,8 @@ def apply_interpretability_method_1_to_K(
             - table_output: Human-readable string with formatted table output of the analysis
             - validated_hypotheses: List of validated hypotheses about how the two models differ in behavior
     """
+    print(f"base_model: {base_model}")
+    print(f"finetuned_model: {finetuned_model}")
     setup = setup_interpretability_method(
         base_model=base_model,
         finetuned_model=finetuned_model,
@@ -1750,6 +1766,7 @@ def apply_interpretability_method_1_to_K(
             cluster_ids_to_prompt_ids_to_decoding_ids_dict_2=cluster_ids_to_prompt_ids_to_decoding_ids_dict_2,
             num_decodings_per_prompt=num_decodings_per_prompt,
             contrastive_cluster_label_instruction=contrastive_cluster_label_instruction,
+            label_diversification_str_instructions=label_diversification_str_instructions,
             diversify_contrastive_labels=diversify_contrastive_labels,
             verified_diversity_promoter=verified_diversity_promoter,
             use_unitary_comparisons=use_unitary_comparisons,
@@ -1760,6 +1777,7 @@ def apply_interpretability_method_1_to_K(
             run_prefix=run_prefix,
             n_permutations=n_permutations,
             split_clusters_by_prompt=split_clusters_by_prompt,
+            frac_prompts_for_label_generation=frac_prompts_for_label_generation,
             base_decoded_texts_prompt_ids=base_decoded_texts_prompt_ids,
             finetuned_decoded_texts_prompt_ids=finetuned_decoded_texts_prompt_ids,
             random_seed=global_random_seed,
