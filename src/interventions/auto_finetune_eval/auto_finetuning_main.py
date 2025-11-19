@@ -386,6 +386,7 @@ class AutoFineTuningEvaluator:
             use_prompts_as_clusters=self.args.use_prompts_as_clusters,
             cluster_on_prompts=self.args.cluster_on_prompts,
             use_anthropic_evals_clusters=self.args.use_anthropic_evals_clusters,
+            anthropic_evals_cluster_id_list=self.args.anthropic_evals_cluster_id_list,
             device=self.device,
             cluster_method=self.args.cluster_method,
             n_clusters=self.args.num_clusters,
@@ -529,6 +530,7 @@ if __name__ == "__main__":
     parser.add_argument("--use_prompts_as_clusters", action="store_true", help="Flag to use the prompts to determine the clusters")
     parser.add_argument("--cluster_on_prompts", action="store_true", help="Flag to perform clustering on the prompts, then use those to determine the clusters")
     parser.add_argument("--use_anthropic_evals_clusters", action="store_true", help="Flag to use the cluster assignments from the Anthropic evals repository")
+    parser.add_argument("--anthropic_evals_cluster_id_list", type=list, default=None, help="List of cluster IDs to use from the Anthropic evals repository")
     parser.add_argument("--local_embedding_model_str", type=str, default="intfloat/multilingual-e5-large-instruct", help="Model version for the local embedding model")
     parser.add_argument("--K", type=int, default=1, help="Number of neighbors to connect each cluster to")
     parser.add_argument("--match_by_ids", action="store_true", help="Flag to match clusters by their IDs, not embedding distances.")
