@@ -129,6 +129,7 @@ def setup_interpretability_method(
         use_prompts_as_clusters: bool = False,
         cluster_on_prompts: bool = False,
         use_anthropic_evals_clusters: bool = False,
+        anthropic_evals_cluster_id_list: Optional[List[int]] = None,
         device: str = "cuda:0",
         cluster_method: str = "kmeans",
         n_clusters: int = 30,
@@ -198,6 +199,8 @@ def setup_interpretability_method(
         cluster_on_prompts (bool): Whether to cluster on the prompts or the decoded texts. False by default.
         use_anthropic_evals_clusters (bool): Whether to use the cluster assignments from the Anthropic evals repository.
             False by default.
+        anthropic_evals_cluster_id_list (Optional[List[int]]): The list of cluster IDs to use from the Anthropic evals 
+            repository. None by default.
         device (str): The device to use for clustering. "cuda:0" by default.
         cluster_method (str): The method to use for clustering. "kmeans" or "hdbscan".
         n_clusters (int): The number of clusters to use. 30 by default.
@@ -247,7 +250,14 @@ def setup_interpretability_method(
                 model_2_name = finetuned_model
             else:
                 model_2_name = finetuned_model.config._name_or_path
-            statements, statements_cluster_assignments = load_statements_from_MWE_repo(path_to_MWE_repo, num_statements_per_behavior, threshold, model_1_name, model_2_name)
+            statements, statements_cluster_assignments = load_statements_from_MWE_repo(
+                path_to_MWE_repo,
+                num_statements_per_behavior,
+                threshold,
+                model_1_name,
+                model_2_name,
+                anthropic_evals_cluster_id_list=anthropic_evals_cluster_id_list,
+            )
             n_statements = len(statements)
             #statements = statements[n_statements // 2 + 10:]
 
@@ -687,8 +697,8 @@ def setup_interpretability_method(
             prompts,
             local_embedding_model_str=local_embedding_model_str,
             device=device,
-            recompute_embeddings=False,
-            save_embeddings=True,
+            recompute_embeddings=True,
+            save_embeddings=False,
             clustering_instructions=clustering_instructions,
             bnb_config=bnb_config
         )
@@ -702,8 +712,8 @@ def setup_interpretability_method(
             base_decoded_texts,
             local_embedding_model_str=local_embedding_model_str,
             device=device,
-            recompute_embeddings=False,
-            save_embeddings=True,
+            recompute_embeddings=True,
+            save_embeddings=False,
             clustering_instructions=clustering_instructions,
             bnb_config=bnb_config
         )
@@ -713,8 +723,8 @@ def setup_interpretability_method(
             finetuned_decoded_texts,
             local_embedding_model_str=local_embedding_model_str,
             device=device,
-            recompute_embeddings=False,
-            save_embeddings=True,
+            recompute_embeddings=True,
+            save_embeddings=False,
             clustering_instructions=clustering_instructions,
             bnb_config=bnb_config
         )
@@ -758,7 +768,12 @@ def setup_interpretability_method(
         if not path_to_MWE_repo.endswith("evals"):
             raise ValueError("use_anthropic_evals_clusters requires that we load our prompts from the Anthropic evals repository")
         all_statements, all_statements_cluster_assignments = load_statements_from_MWE_repo(
-            path_to_MWE_repo, num_statements_per_behavior, threshold, model_1_name, model_2_name
+            path_to_MWE_repo,
+            num_statements_per_behavior,
+            threshold,
+            model_1_name,
+            model_2_name,
+            anthropic_evals_cluster_id_list=anthropic_evals_cluster_id_list,
         )
 
         # Normalize Anthropic cluster ids to 0..K-1
@@ -1424,6 +1439,7 @@ def apply_interpretability_method_1_to_K(
     use_prompts_as_clusters: bool = False,
     cluster_on_prompts: bool = False,
     use_anthropic_evals_clusters: bool = False,
+    anthropic_evals_cluster_id_list: Optional[List[int]] = None,
     device: str = "cuda:0",
     cluster_method: str = "kmeans",
     n_clusters: int = 30,
@@ -1522,6 +1538,8 @@ def apply_interpretability_method_1_to_K(
         cluster_on_prompts (bool): Whether to cluster on the prompts or the decoded texts. False by default.
         use_anthropic_evals_clusters (bool): Whether to use the cluster assignments from the Anthropic evals repository.
             False by default.
+        anthropic_evals_cluster_id_list (Optional[List[int]]): The list of cluster IDs to use from the Anthropic evals 
+            repository. None by default.
         device (str): Device to use for computations.
         cluster_method (str): Clustering method to use.
         n_clusters (int): Number of clusters.
@@ -1629,6 +1647,7 @@ def apply_interpretability_method_1_to_K(
         use_prompts_as_clusters=use_prompts_as_clusters,
         cluster_on_prompts=cluster_on_prompts,
         use_anthropic_evals_clusters=use_anthropic_evals_clusters,
+        anthropic_evals_cluster_id_list=anthropic_evals_cluster_id_list,
         device=device,
         cluster_method=cluster_method,
         n_clusters=n_clusters,
