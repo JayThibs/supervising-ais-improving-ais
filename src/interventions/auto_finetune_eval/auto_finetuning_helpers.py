@@ -581,7 +581,7 @@ def load_api_key(
             if api_provider is None:
                 return content
             
-            # If api_provider is specified, assume the file may contain multiple keys
+            # If api_provider is specified, assume the file contains multiple keys with the provider name as a prefix and a colon between the provider name and the key.
             lines = content.split('\n')
             for line in lines:
                 if line.lower().startswith(f"{api_provider.lower()}:"):
@@ -627,7 +627,8 @@ def load_statements_from_MWE_repo(
     threshold: float = 0.0,
     model_1_name: str = "NousResearch/Meta-Llama-3-8B",
     model_2_name: str = "NousResearch/Meta-Llama-3-8B-Instruct",
-    pickle_path: str = "anthropics-evals-result-extended.pickle"
+    pickle_path: str = "anthropics-evals-result-extended.pickle",
+    anthropic_evals_cluster_id_list: Optional[List[int]] = None,
 ) -> Tuple[List[str], List[int]]:
     """
     Load statements from the MWE persona repository.
@@ -640,6 +641,9 @@ def load_statements_from_MWE_repo(
         model_1_name (str): The name of the first model.
         model_2_name (str): The name of the second model.
         pickle_path (str): The path to the pickle file containing the anthropics evals result.
+        anthropic_evals_cluster_id_list (Optional[List[int]]): Optional list of integer cluster IDs
+            (corresponding to behavior indices) to load. If provided, only behaviors whose index
+            is in this list will be loaded; others will be skipped.
     Returns:
         List[str]: A list of statements.
         List[int]: A list of cluster assignments based on the Anthropic evals behavior categories.
@@ -653,7 +657,7 @@ def load_statements_from_MWE_repo(
     all_statements = []
     all_cluster_assignments = []
     # Get all jsonl files in the persona directory
-    jsonl_files = list(persona_dir.glob("*.jsonl"))
+    jsonl_files = sorted(list(persona_dir.glob("*.jsonl")))
     
     if not jsonl_files:
         raise ValueError(f"No JSONL files found in {persona_dir}")
@@ -667,6 +671,13 @@ def load_statements_from_MWE_repo(
     behavior_categories_loaded = []
     
     for i, jsonl_file in enumerate(jsonl_files):
+        # If a specific subset of behavior/cluster IDs is requested, skip others
+        if anthropic_evals_cluster_id_list is not None:
+            if i not in anthropic_evals_cluster_id_list:
+                # Note: i is the index of this behavior within jsonl_files and is the same
+                # index used in the returned cluster assignments.
+                continue
+
         if threshold != 0:
             if jsonl_file.stem not in target_keys:
                 print(f"Skipping {jsonl_file.stem} because it is not in the target keys")
