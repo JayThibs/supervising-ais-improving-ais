@@ -1346,7 +1346,7 @@ def read_past_embeddings_or_generate_new(
         tokenizer: AutoTokenizer = None, 
         device: str = "cuda:0", 
         recompute_embeddings: bool = False, 
-        batch_size: int = 16, 
+        batch_size: int = 64, 
         save_embeddings: bool = True, 
         tqdm_disable: bool = False, 
         clustering_instructions: str = "Identify the topic or theme of the given text", 
@@ -1445,6 +1445,8 @@ def read_past_embeddings_or_generate_new(
         if not keep_embedding_model:
             del local_embedding_model
             del tokenizer
+            # Clear the cache
+            torch.cuda.empty_cache()
     # Also, save the new embeddings to file
     if save_embeddings and path is not None:
         with open(path + "_embeddings.pkl", "wb") as f:
