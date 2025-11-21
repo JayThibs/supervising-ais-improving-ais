@@ -6,42 +6,11 @@ if [ $# -eq 0 ]; then
     exit 1
 fi
 
-# Use the first argument to determine which command to run
-if [ "$1" = "debug_4_bit_vs_8_bit_gemini_smollm" ]; then
-    # Run auto-finetuning without changing the model
-    CUDA_VISIBLE_DEVICES=2 python auto_finetuning_main.py \
-        --base_model "HuggingFaceTB/SmolLM-135M" \
-        --num_samples 0 \
-        --num_ground_truths 0 \
-        --num_decoded_texts 5000 \
-        --decoding_max_length 32 \
-        --num_clusters 10 \
-        --use_unitary_comparisons \
-        --max_unitary_comparisons_per_label 40 \
-        --num_rephrases_for_validation 0 \
-        --generated_labels_per_cluster 1 \
-        --api_provider "gemini" \
-        --model_str "gemini-1.5-flash" \
-        --key_path "../../../data/api_keys/gemini_key.txt" \
-        --tsne_save_path "../../../data/tsne_plots/debug_4_bit_vs_8_bit_gemini_smollm.pdf" \
-        --tsne_title "Debug: 8bit vs 4bit (SmolLM-135M)" \
-        --tsne_perplexity 30 \
-        --focus_area "weird historical facts" \
-        --finetuning_params '{"learning_rate": 0.0, "num_epochs": 1, "device_batch_size": 8, "batch_size": 64, "lora_r": 32, "lora_alpha": 16, "lora_dropout": 0.05, "max_length": 48, "weight_decay": 0.0}' \
-        --device "cuda:0" \
-        --decoded_texts_save_path "../../../data/decoded_texts/debug_4_bit_vs_8_bit_gemini_smollm_5000_decoded_texts.csv" \
-        --num_base_samples_for_training 0 \
-        --decoding_batch_size 256 \
-        --base_model_quant_level "8bit" \
-        --intervention_model_quant_level "4bit" \
-        --run_prefix "debug_4_bit_vs_8_bit_gemini_smollm" \
-        --api_interactions_save_loc "../../../data/api_interactions/debug_4_bit_vs_8_bit_gemini_smollm.jsonl"
-
 # Current SOTA for paper results:
 # (Running)
 # ROME-KE-10 with gpt-5 high thinking enabled as hypothesis generator and gemini 2.5 flash lite as discriminator model
 # bash run_auto_finetuning_main.sh llama3-8B_vs_llama3-8B_ROME_KE_10_gpt_5_high_thinking_qwen3-next-80b-a3b-instruct_diversified_SCB_prompt_anthropic_FINAL_SOTA &> runtime_logs/intervention_llama3-8B_vs_llama3-8B_ROME_KE_10_gpt_5_high_thinking_qwen3-next-80b-a3b-instruct_diversified_SCB_prompt_anthropic_FINAL_SOTA_runtime_log.txt
-elif [ "$1" = "llama3-8B_vs_llama3-8B_ROME_KE_10_gpt_5_high_thinking_qwen3-next-80b-a3b-instruct_diversified_SCB_prompt_anthropic_FINAL_SOTA" ]; then
+if [ "$1" = "llama3-8B_vs_llama3-8B_ROME_KE_10_gpt_5_high_thinking_qwen3-next-80b-a3b-instruct_diversified_SCB_prompt_anthropic_FINAL_SOTA" ]; then
     # Run auto-finetuning without changing the model
     CUDA_VISIBLE_DEVICES=0 python auto_finetuning_main.py \
         --base_model "NousResearch/Meta-Llama-3-8B" \
@@ -359,7 +328,6 @@ elif [ "$1" = "llama3.1-8B_vs_deepseek-R1-Distill_cot_enabledqwen3-next-80b-a3b-
         --sampled_comparison_texts_per_cluster 120 \
         --frac_prompts_for_label_generation 0.1 \
         --sampled_texts_per_cluster 20 \
-        --frac_prompts_for_label_generation 0.1 \
         --num_rephrases_for_validation 0 \
         --num_generated_texts_per_description 40 \
         --generated_labels_per_cluster 1 \
@@ -418,7 +386,6 @@ elif [ "$1" = "llama2-7b-chat_vs_llama2-7b-WIHPqwen3-next-80b-a3b-instruct__gpt_
         --use_unitary_comparisons \
         --max_unitary_comparisons_per_label 400 \
         --sampled_comparison_texts_per_cluster 400 \
-        --frac_prompts_for_label_generation 0.1 \
         --sampled_texts_per_cluster 20 \
         --num_rephrases_for_validation 0 \
         --num_generated_texts_per_description 40 \
@@ -628,8 +595,8 @@ elif [ "$1" = "mistral-7B-Instruct-0.3_vs_llama3-8B-Instruct_gemini_2.5-flash-li
 
 # (Running)
 # R1 with COT enabled with gpt-5 high thinking as hypothesis generator and gemini 2.5 flash lite as discriminator model
-# bash run_auto_finetuning_main.sh deepseek-R1-Distill_cot_enabled_vs_deepseek-R1-Distill_cot_enabled_gpt_5_high_thinking_qwen3-next-80b-a3b-instruct_diversified_SCB_prompt_FINAL_SOTA &> runtime_logs/intervention_deepseek-R1-Distill_cot_enabled_vs_deepseek-R1-Distill_cot_enabled_gpt_5_high_thinking_qwen3-next-80b-a3b-instruct_diversified_SCB_prompt_FINAL_SOTA_runtime_log.txt
-elif [ "$1" = "deepseek-R1-Distill_cot_enabled_vs_deepseek-R1-Distill_cot_enabled_gpt_5_high_thinking_qwen3-next-80b-a3b-instruct_diversified_SCB_prompt_FINAL_SOTA" ]; then
+# bash run_auto_finetuning_main.sh deepseek-R1-Distill_cot_enabled_vs_deepseek-R1-Distill_cot_really_enabled__gpt_5_high_thinking_qwen3-next-80b-a3b-instruct_diversified_SCB_prompt_FINAL_SOTA &> runtime_logs/intervention_deepseek-R1-Distill_cot_enabled_vs_deepseek-R1-Distill_cot_really_enabled__gpt_5_high_thinking_qwen3-next-80b-a3b-instruct_diversified_SCB_prompt_FINAL_SOTA_runtime_log.txt
+elif [ "$1" = "deepseek-R1-Distill_cot_enabled_vs_deepseek-R1-Distill_cot_really_enabled__gpt_5_high_thinking_qwen3-next-80b-a3b-instruct_diversified_SCB_prompt_FINAL_SOTA" ]; then
     # Run auto-finetuning without changing the model
     CUDA_VISIBLE_DEVICES=0 python auto_finetuning_main.py \
         --base_model "deepseek-ai/DeepSeek-R1-Distill-Llama-8B" \
@@ -641,6 +608,9 @@ elif [ "$1" = "deepseek-R1-Distill_cot_enabled_vs_deepseek-R1-Distill_cot_enable
         --cot_start_token_intervention "<think>\n" \
         --cot_end_token_intervention "\n</think>" \
         --cot_max_length_intervention 196 \
+        --cot_start_token_base "<think>\n" \
+        --cot_end_token_base "\n</think>" \
+        --cot_max_length_base 196 \
         --num_clusters 200 \
         --n_clustering_inits 10 \
         --cluster_on_prompts \
@@ -677,10 +647,10 @@ elif [ "$1" = "deepseek-R1-Distill_cot_enabled_vs_deepseek-R1-Distill_cot_enable
         --decoding_batch_size 64 \
         --base_model_quant_level "8bit" \
         --intervention_model_quant_level "8bit" \
-        --run_prefix "intervention_deepseek-R1-Distill_cot_enabled_vs_deepseek-R1-Distill_cot_enabled_gpt_5_high_thinking_qwen3-next-80b-a3b-instruct_diversified_SCB_prompt_FINAL_SOTA" \
+        --run_prefix "intervention_deepseek-R1-Distill_cot_enabled_vs_deepseek-R1-Distill_cot_really_enabled__gpt_5_high_thinking_qwen3-next-80b-a3b-instruct_diversified_SCB_prompt_FINAL_SOTA" \
         --decoded_texts_save_path "../../../data/decoded_texts/intervention_deepseek-R1-Distill_cot_enabled_vs_deepseek-R1-Distill-Llama-8B_cot_enabled_decoded_texts_SOTA_nov_15.csv" \
         --save_addon_str "" \
-        --api_interactions_save_loc "../../../data/api_interactions/intervention_deepseek-R1-Distill_cot_enabled_vs_deepseek-R1-Distill_cot_enabled_gpt_5_high_thinking_qwen3-next-80b-a3b-instruct_diversified_SCB_prompt_FINAL_SOTA.jsonl" \
+        --api_interactions_save_loc "../../../data/api_interactions/intervention_deepseek-R1-Distill_cot_enabled_vs_deepseek-R1-Distill_cot_really_enabled__gpt_5_high_thinking_qwen3-next-80b-a3b-instruct_diversified_SCB_prompt_FINAL_SOTA.jsonl" \
         --logging_level "SCORES" \
         --single_cluster_label_instruction "Carefully summarize the general content of the texts shown to you. We are interested in the content of the set of texts these are drawn from, not the specific details of the texts we're showing you. So, focus on common patterns more than the specific details of the texts we're showing you. Keep summaries short, aiming for no more than 100 words." \
         --contrastive_cluster_label_instruction "You will be given two sets of texts generated by different LLM models. Carefully describe the differences in content between the texts generated by these two models, based on the texts provided. Concisely highlight differences grounded in the specific details of the texts we're showing you. Focus on differences the content and semantic meaning of the model's responses to the provided prompts, more than stylistic or formatting differences. Keep summaries short, aiming for no more than 100 words at most."
@@ -689,8 +659,8 @@ elif [ "$1" = "deepseek-R1-Distill_cot_enabled_vs_deepseek-R1-Distill_cot_enable
 # R1 with COT enabled with gpt-5 high thinking as hypothesis generator and gemini 2.5 flash lite as discriminator model
 # Evaluate on TruthfulQA dataset
 # (To Run)
-# bash run_auto_finetuning_main.sh deepseek-R1-Distill_cot_enabled_vs_deepseek-R1-Distill_cot_enabled_gpt_5_high_thinking_qwen3-next-80b-a3b-instruct_diversified_SCB_prompt_TruthfulQA_FINAL_SOTA &> runtime_logs/intervention_deepseek-R1-Distill_cot_enabled_vs_deepseek-R1-Distill_cot_enabled_gpt_5_high_thinking_qwen3-next-80b-a3b-instruct_diversified_SCB_prompt_TruthfulQA_FINAL_SOTA_runtime_log.txt
-elif [ "$1" = "deepseek-R1-Distill_cot_enabled_vs_deepseek-R1-Distill_cot_enabled_gpt_5_high_thinking_qwen3-next-80b-a3b-instruct_diversified_SCB_prompt_TruthfulQA_FINAL_SOTA" ]; then
+# bash run_auto_finetuning_main.sh deepseek-R1-Distill_cot_enabled_vs_deepseek-R1-Distill_cot_really_enabled__gpt_5_high_thinking_qwen3-next-80b-a3b-instruct_diversified_SCB_prompt_TruthfulQA_FINAL_SOTA &> runtime_logs/intervention_deepseek-R1-Distill_cot_enabled_vs_deepseek-R1-Distill_cot_really_enabled__gpt_5_high_thinking_qwen3-next-80b-a3b-instruct_diversified_SCB_prompt_TruthfulQA_FINAL_SOTA_runtime_log.txt
+elif [ "$1" = "deepseek-R1-Distill_cot_enabled_vs_deepseek-R1-Distill_cot_really_enabled__gpt_5_high_thinking_qwen3-next-80b-a3b-instruct_diversified_SCB_prompt_TruthfulQA_FINAL_SOTA" ]; then
     # Run auto-finetuning without changing the model
     CUDA_VISIBLE_DEVICES=0 python auto_finetuning_main.py \
         --base_model "deepseek-ai/DeepSeek-R1-Distill-Llama-8B" \
@@ -702,6 +672,9 @@ elif [ "$1" = "deepseek-R1-Distill_cot_enabled_vs_deepseek-R1-Distill_cot_enable
         --cot_start_token_intervention "<think>\n" \
         --cot_end_token_intervention "\n</think>" \
         --cot_max_length_intervention 196 \
+        --cot_start_token_base "<think>\n" \
+        --cot_end_token_base "\n</think>" \
+        --cot_max_length_base 196 \
         --num_clusters 15 \
         --n_clustering_inits 10 \
         --cluster_on_prompts \
@@ -738,10 +711,10 @@ elif [ "$1" = "deepseek-R1-Distill_cot_enabled_vs_deepseek-R1-Distill_cot_enable
         --decoding_batch_size 128 \
         --base_model_quant_level "8bit" \
         --intervention_model_quant_level "8bit" \
-        --run_prefix "intervention_deepseek-R1-Distill_cot_enabled_vs_deepseek-R1-Distill_cot_enabled_gpt_5_high_thinking_qwen3-next-80b-a3b-instruct_diversified_SCB_prompt_TruthfulQA_FINAL_SOTA" \
+        --run_prefix "intervention_deepseek-R1-Distill_cot_enabled_vs_deepseek-R1-Distill_cot_really_enabled__gpt_5_high_thinking_qwen3-next-80b-a3b-instruct_diversified_SCB_prompt_TruthfulQA_FINAL_SOTA" \
         --decoded_texts_save_path "../../../data/decoded_texts/intervention_deepseek-R1-Distill_cot_enabled_vs_deepseek-R1-Distill-Llama-8B_cot_enabled_truthfulqa_decoded_texts_SOTA_nov_15.csv" \
         --save_addon_str "" \
-        --api_interactions_save_loc "../../../data/api_interactions/intervention_deepseek-R1-Distill_cot_enabled_vs_deepseek-R1-Distill_cot_enabled_gpt_5_high_thinking_qwen3-next-80b-a3b-instruct_diversified_SCB_prompt_TruthfulQA_FINAL_SOTA.jsonl" \
+        --api_interactions_save_loc "../../../data/api_interactions/intervention_deepseek-R1-Distill_cot_enabled_vs_deepseek-R1-Distill_cot_really_enabled__gpt_5_high_thinking_qwen3-next-80b-a3b-instruct_diversified_SCB_prompt_TruthfulQA_FINAL_SOTA.jsonl" \
         --logging_level "SCORES" \
         --single_cluster_label_instruction "Carefully summarize the general content of the texts shown to you. We are interested in the content of the set of texts these are drawn from, not the specific details of the texts we're showing you. So, focus on common patterns more than the specific details of the texts we're showing you. Keep summaries short, aiming for no more than 100 words." \
         --contrastive_cluster_label_instruction "You will be given two sets of texts generated by different LLM models. Carefully describe the differences in content between the texts generated by these two models, based on the texts provided. Concisely highlight differences grounded in the specific details of the texts we're showing you. Focus on differences the content and semantic meaning of the model's responses to the provided prompts, more than stylistic or formatting differences. Keep summaries short, aiming for no more than 100 words at most."
@@ -750,8 +723,8 @@ elif [ "$1" = "deepseek-R1-Distill_cot_enabled_vs_deepseek-R1-Distill_cot_enable
 # R1 with gpt-5 high thinking enabled as hypothesis generator and gemini 2.5 flash lite as discriminator model
 # Evaluate on Amazon BOLD
 # (To Run)
-# bash run_auto_finetuning_main.sh deepseek-R1-Distill_cot_enabled_vs_deepseek-R1-Distill_cot_enabledqwen3-next-80b-a3b-instruct__gpt_5_high_thinking_diversified_SCB_prompt_amazon_bold_FINAL_SOTA &> runtime_logs/intervention_deepseek-R1-Distill_cot_enabled_vs_deepseek-R1-Distill_cot_enabledqwen3-next-80b-a3b-instruct__gpt_5_high_thinking_diversified_SCB_prompt_amazon_bold_FINAL_SOTA_runtime_log.txt
-elif [ "$1" = "deepseek-R1-Distill_cot_enabled_vs_deepseek-R1-Distill_cot_enabledqwen3-next-80b-a3b-instruct__gpt_5_high_thinking_diversified_SCB_prompt_amazon_bold_FINAL_SOTA" ]; then
+# bash run_auto_finetuning_main.sh deepseek-R1-Distill_cot_enabled_vs_deepseek-R1-Distill_cot_really_enabled_qwen3-next-80b-a3b-instruct__gpt_5_high_thinking_diversified_SCB_prompt_amazon_bold_FINAL_SOTA &> runtime_logs/intervention_deepseek-R1-Distill_cot_enabled_vs_deepseek-R1-Distill_cot_really_enabled_qwen3-next-80b-a3b-instruct__gpt_5_high_thinking_diversified_SCB_prompt_amazon_bold_FINAL_SOTA_runtime_log.txt
+elif [ "$1" = "deepseek-R1-Distill_cot_enabled_vs_deepseek-R1-Distill_cot_really_enabled_qwen3-next-80b-a3b-instruct__gpt_5_high_thinking_diversified_SCB_prompt_amazon_bold_FINAL_SOTA" ]; then
     # Run auto-finetuning without changing the model
     CUDA_VISIBLE_DEVICES=0 python auto_finetuning_main.py \
         --base_model "deepseek-ai/DeepSeek-R1-Distill-Llama-8B" \
@@ -760,6 +733,12 @@ elif [ "$1" = "deepseek-R1-Distill_cot_enabled_vs_deepseek-R1-Distill_cot_enable
         --num_ground_truths 0 \
         --num_decoded_texts 2000000 \
         --decoding_max_length 112 \
+        --cot_start_token_intervention "<think>\n" \
+        --cot_end_token_intervention "\n</think>" \
+        --cot_max_length_intervention 196 \
+        --cot_start_token_base "<think>\n" \
+        --cot_end_token_base "\n</think>" \
+        --cot_max_length_base 196 \
         --num_clusters 50 \
         --n_clustering_inits 10 \
         --cluster_on_prompts \
@@ -796,10 +775,10 @@ elif [ "$1" = "deepseek-R1-Distill_cot_enabled_vs_deepseek-R1-Distill_cot_enable
         --decoding_batch_size 128 \
         --base_model_quant_level "8bit" \
         --intervention_model_quant_level "8bit" \
-        --run_prefix "intervention_deepseek-R1-Distill_cot_enabled_vs_deepseek-R1-Distill_cot_enabledqwen3-next-80b-a3b-instruct__gpt_5_high_thinking_diversified_SCB_prompt_amazon_bold_FINAL_SOTA" \
+        --run_prefix "intervention_deepseek-R1-Distill_cot_enabled_vs_deepseek-R1-Distill_cot_really_enabled_qwen3-next-80b-a3b-instruct__gpt_5_high_thinking_diversified_SCB_prompt_amazon_bold_FINAL_SOTA" \
         --decoded_texts_save_path "../../../data/decoded_texts/intervention_deepseek-R1-Distill_cot_enabled_vs_deepseek-R1-Distill-Llama-8B_cot_enabled_amazon_bold_decoded_texts_SOTA_nov_15.csv" \
         --save_addon_str "" \
-        --api_interactions_save_loc "../../../data/api_interactions/intervention_deepseek-R1-Distill_cot_enabled_vs_deepseek-R1-Distill_cot_enabledqwen3-next-80b-a3b-instruct__gpt_5_high_thinking_diversified_SCB_prompt_amazon_bold_FINAL_SOTA.jsonl" \
+        --api_interactions_save_loc "../../../data/api_interactions/intervention_deepseek-R1-Distill_cot_enabled_vs_deepseek-R1-Distill_cot_really_enabled_qwen3-next-80b-a3b-instruct__gpt_5_high_thinking_diversified_SCB_prompt_amazon_bold_FINAL_SOTA.jsonl" \
         --logging_level "SCORES" \
         --single_cluster_label_instruction "Carefully summarize the general content of the texts shown to you. We are interested in the content of the set of texts these are drawn from, not the specific details of the texts we're showing you. So, focus on common patterns more than the specific details of the texts we're showing you. Keep summaries short, aiming for no more than 100 words." \
         --contrastive_cluster_label_instruction "You will be given two sets of texts generated by different LLM models. Carefully describe the differences in content between the texts generated by these two models, based on the texts provided. Concisely highlight differences grounded in the specific details of the texts we're showing you. Focus on differences the content and semantic meaning of the model's responses to the provided prompts, more than stylistic or formatting differences. Keep summaries short, aiming for no more than 100 words at most."
@@ -1131,5 +1110,57 @@ elif [ "$1" = "llama3.1-8B_bfloat16_vs_llama3.1-8B_4bit_gemini_2.5-flash-lite-pr
         --api_interactions_save_loc "../../../data/api_interactions/intervention_llama3.1-8B_bfloat16_vs_llama3.1-8B_4bit_gemini_2.5-flash-lite-preview-09-2025_specific_labeling_prompt_diversified.jsonl" \
         --single_cluster_label_instruction "Carefully summarize the general content of the texts shown to you. We are interested in the content of the set of texts these are drawn from, not the specific details of the texts we're showing you. So, focus on common patterns more than the specific details of the texts we're showing you. Keep summaries short, aiming for no more than 100 words." \
         --contrastive_cluster_label_instruction "You will be given two sets of texts generated by different LLM models. Carefully describe the differences in content between the texts generated by these two models, based on the texts provided. Concisely highlight differences grounded in the specific details of the texts we're showing you. Focus on differences the content and semantic meaning of the model's responses to the provided prompts, more than stylistic differences. Keep summaries short, aiming for no more than 150 words or so."
+
+
+
+########################################################
+# Debug config
+########################################################
+
+# R1 with gpt-5 high thinking enabled as hypothesis generator and gemini 2.5 flash lite as discriminator model
+# Evaluate on Amazon BOLD
+# (Running)
+# bash run_auto_finetuning_main.sh debug_1 &> runtime_logs/intervention_debug_1_runtime_log.txt
+elif [ "$1" = "debug_1" ]; then
+    # Run auto-finetuning without changing the model
+    CUDA_VISIBLE_DEVICES=0 python auto_finetuning_main.py \
+        --base_model "meta-llama/Llama-3.1-8B" \
+        --intervention_model "deepseek-ai/DeepSeek-R1-Distill-Llama-8B" \
+        --decoding_max_length 112 \
+        --num_clusters 50 \
+        --n_clustering_inits 1 \
+        --cluster_on_prompts \
+        --use_anthropic_evals_clusters \
+        --match_by_ids \
+        --diversify_contrastive_labels \
+        --split_clusters_by_prompt \
+        --cross_validate_contrastive_labels \
+        --cross_validate_on_all_clusters \
+        --n_permutations 500 \
+        --use_unitary_comparisons \
+        --max_unitary_comparisons_per_label 20 \
+        --sampled_comparison_texts_per_cluster 20 \
+        --frac_prompts_for_label_generation 0.1 \
+        --sampled_texts_per_cluster 5 \
+        --generated_labels_per_cluster 1 \
+        --api_provider "openrouter" \
+        --model_str "qwen/qwen3-next-80b-a3b-instruct" \
+        --stronger_model_str "google/gemini-2.5-flash-lite-preview-09-2025" \
+        --key_path "../../../data/api_keys/openrouter_key.txt" \
+        --tsne_title "Intervention: llama3.1-8b vs deepseek-R1-Distill-Llama-8B (Anthropic evals)" \
+        --tsne_perplexity 30 \
+        --path_to_MWE_repo "/scratch/popeq/Research/AI_Supervision/evals" \
+        --num_statements_per_behavior 300 \
+        --num_responses_per_statement 1 \
+        --decoding_batch_size 128 \
+        --base_model_quant_level "8bit" \
+        --intervention_model_quant_level "8bit" \
+        --run_prefix "intervention_debug_1" \
+        --decoded_texts_load_path "../../../data/decoded_texts/intervention_llama3.1-8B_vs_deepseek-R1-Distill-Llama-8B_cot_enabled_decoded_texts_SOTA_nov_15.csv" \
+        --save_addon_str "" \
+        --api_interactions_save_loc "../../../data/api_interactions/intervention_debug_1.jsonl" \
+        --logging_level "DEBUG" \
+        --single_cluster_label_instruction "Carefully summarize the general content of the texts shown to you. We are interested in the content of the set of texts these are drawn from, not the specific details of the texts we're showing you. So, focus on common patterns more than the specific details of the texts we're showing you. Keep summaries short, aiming for no more than 100 words." \
+        --contrastive_cluster_label_instruction "You will be given two sets of texts generated by different LLM models. Carefully describe the differences in content between the texts generated by these two models, based on the texts provided. Concisely highlight differences grounded in the specific details of the texts we're showing you. Focus on differences the content and semantic meaning of the model's responses to the provided prompts, more than stylistic or formatting differences. Keep summaries short, aiming for no more than 100 words at most."
 
 fi
