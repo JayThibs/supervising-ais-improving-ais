@@ -26,7 +26,7 @@ from saffron_implementation import SAFFRON
 
 sys.path.append("..")
 sys.path.append("../interventions/auto_finetune_eval")
-from auto_finetuning_helpers import make_api_request, extract_json_from_string, collect_dataset_from_api, rephrase_description, parallel_make_api_requests, permutation_test_auc
+from auto_finetuning_helpers import make_api_request, extract_json_from_string, collect_dataset_from_api, rephrase_description, parallel_make_api_requests, permutation_test_auc, mannwhitney_u_test_auc
 from baseline_discriminator import baseline_discrimination, LogisticBoWDiscriminator
 
 from typing import List, Tuple, Dict, Optional, Union, Any
@@ -303,7 +303,7 @@ def contrastive_label_double_cluster(
 
         str_instruction_to_assistant_model = contrastive_cluster_label_instruction + "\n" + "Model 1 selected texts:\n" + '\n'.join(selected_texts_1) + "\nModel 2 selected texts:\n" + '\n'.join(selected_texts_2)
 
-        if current_label_diversification_content_str is not None:
+        if current_label_diversification_content_str is not None and current_label_diversification_content_str != "":
             str_instruction_to_assistant_model = str_instruction_to_assistant_model + "\n\n" + current_label_diversification_content_str
         
         if verified_diversity_promoter_labels is not None and len(verified_diversity_promoter_labels) > 0:
@@ -993,7 +993,8 @@ def evaluate_label_discrimination(
         auc = float('nan') 
     accuracy = sum([1 for i, score in enumerate(scores) if score > 0.5 and true_labels[i] == 1 or score < 0.5 and true_labels[i] == 0]) / len([score for score in scores if score is not None and score != 0.5])
     if n_permutations > 0:
-        p_value = permutation_test_auc(scores, true_labels, n_permutations, seed=42)
+        #p_value = permutation_test_auc(scores, true_labels, n_permutations, seed=42)
+        p_value = mannwhitney_u_test_auc(scores, true_labels, alternative="greater")
     else:
         p_value = None
     if logging_level in ["DEBUG", "SCORES"]:
