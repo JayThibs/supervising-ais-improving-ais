@@ -689,45 +689,50 @@ def setup_interpretability_method(
     else:
         embeddings_save_str = "model"
 
-    if cluster_on_prompts:
-        # (We assume base and finetuned have the same prompts, so we can use the same embeddings for both)
-        prompt_embeddings = read_past_embeddings_or_generate_new(
-            "pkl_embeddings/prompt_" + embeddings_save_str,
-            None,
-            prompts,
-            local_embedding_model_str=local_embedding_model_str,
-            device=device,
-            recompute_embeddings=True,
-            save_embeddings=False,
-            clustering_instructions=clustering_instructions,
-            bnb_config=bnb_config
-        )
-        prompt_embeddings = np.array(prompt_embeddings)
-        base_embeddings = prompt_embeddings
-        finetuned_embeddings = prompt_embeddings
+    if use_anthropic_evals_clusters and tsne_save_path is None:
+        # Can just use fake embeddings, since we won't be doing anything with them.
+        base_embeddings = np.zeros((len(prompts if cluster_on_prompts else base_decoded_texts), 1))
+        finetuned_embeddings = np.zeros((len(prompts if cluster_on_prompts else finetuned_decoded_texts), 1))
     else:
-        base_embeddings = read_past_embeddings_or_generate_new(
-            "pkl_embeddings/base_" + embeddings_save_str,
-            None,
-            base_decoded_texts,
-            local_embedding_model_str=local_embedding_model_str,
-            device=device,
-            recompute_embeddings=True,
-            save_embeddings=False,
-            clustering_instructions=clustering_instructions,
-            bnb_config=bnb_config
-        )
-        finetuned_embeddings = read_past_embeddings_or_generate_new(
-            "pkl_embeddings/finetuned_" + embeddings_save_str,
-            None,
-            finetuned_decoded_texts,
-            local_embedding_model_str=local_embedding_model_str,
-            device=device,
-            recompute_embeddings=True,
-            save_embeddings=False,
-            clustering_instructions=clustering_instructions,
-            bnb_config=bnb_config
-        )
+        if cluster_on_prompts:
+            # (We assume base and finetuned have the same prompts, so we can use the same embeddings for both)
+            prompt_embeddings = read_past_embeddings_or_generate_new(
+                "pkl_embeddings/prompt_" + embeddings_save_str,
+                None,
+                prompts,
+                local_embedding_model_str=local_embedding_model_str,
+                device=device,
+                recompute_embeddings=True,
+                save_embeddings=False,
+                clustering_instructions=clustering_instructions,
+                bnb_config=bnb_config
+            )
+            prompt_embeddings = np.array(prompt_embeddings)
+            base_embeddings = prompt_embeddings
+            finetuned_embeddings = prompt_embeddings
+        else:
+            base_embeddings = read_past_embeddings_or_generate_new(
+                "pkl_embeddings/base_" + embeddings_save_str,
+                None,
+                base_decoded_texts,
+                local_embedding_model_str=local_embedding_model_str,
+                device=device,
+                recompute_embeddings=True,
+                save_embeddings=False,
+                clustering_instructions=clustering_instructions,
+                bnb_config=bnb_config
+            )
+            finetuned_embeddings = read_past_embeddings_or_generate_new(
+                "pkl_embeddings/finetuned_" + embeddings_save_str,
+                None,
+                finetuned_decoded_texts,
+                local_embedding_model_str=local_embedding_model_str,
+                device=device,
+                recompute_embeddings=True,
+                save_embeddings=False,
+                clustering_instructions=clustering_instructions,
+                bnb_config=bnb_config
+            )
 
         # If we loaded cluster indices from a previous run, use them and compute the cluster centers as the mean of the embeddings for each cluster
         base_embeddings = np.array(base_embeddings)
