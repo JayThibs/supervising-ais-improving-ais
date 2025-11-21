@@ -23,13 +23,17 @@ from transformers import PreTrainedModel, PreTrainedTokenizer, GPTNeoXForCausalL
 from ast import literal_eval
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from structlog._config import BoundLoggerLazyProxy
+from structlog.stdlib import get_logger
 from pathlib import Path
 import csv
 import os
+from scipy.stats import mannwhitneyu
+
+
 @retry(
     stop=stop_after_attempt(15),
     wait=wait_exponential(multiplier=1, min=4, max=60),
-    retry=retry_if_exception_type((InternalServerError, APIError))
+    retry=retry_if_exception_type((InternalServerError, APIError, ValueError))
 )
 def make_api_request(
         prompt: str, 
@@ -41,6 +45,7 @@ def make_api_request(
         logging_level: str = "INFO",
         logger: Optional[BoundLoggerLazyProxy] = None,
         max_tokens: int = 1000,
+        min_chars_to_generate: int = 0,
         max_thinking_tokens: Optional[int] = None,
         n_local_retries: int = 5,
         request_info: Optional[Dict[str, str]] = {"pipeline_stage": "unknown"},
@@ -62,6 +67,8 @@ def make_api_request(
             but can be set to "DEBUG" for more detailed logging of API requests and responses.
         logger (Optional[BoundLoggerLazyProxy]): The logger to use for logging API requests and responses.
         max_tokens (int): The maximum number of tokens to generate.
+        min_chars_to_generate (int): The minimum number of characters to generate. Will retry if the 
+            response contains less than this number of characters. Defaults to 0.
         max_thinking_tokens (Optional[int]): The maximum number of tokens to generate for the COT phase. 
             Defaults to None. Currently only used for Gemini.
         n_local_retries (int): The number of retries to make if the API request fails.
@@ -74,167 +81,162 @@ def make_api_request(
         str: The response from the API.
     """
     if api_key is None and client is None:
-        raise ValueError("Either api_key or client must be provided.")
-    retries = 0
-    while retries < n_local_retries:
-        try:
-            if api_provider == 'anthropic':
-                if client is None:
-                    client = Anthropic(api_key=api_key)
-                response = client.messages.create(
-                    model=model_str,
-                    max_tokens=max_tokens,
-                    messages=[
-                        {"role": "user", "content": prompt}
-                    ],
-                    temperature=temperature
-                )
-                result = response.content[0].text
-            elif api_provider == 'openai' or api_provider == 'openrouter':
-                if max_thinking_tokens is not None:
-                    if max_thinking_tokens == 0:
-                        reasoning_effort = "low"
-                    elif max_thinking_tokens < 10000:
-                        reasoning_effort = "medium"
-                    else:
-                        reasoning_effort = "high"
-                else:
-                    reasoning_effort = None
-                if client is None and api_provider == 'openai':
-                    client = OpenAI(api_key=api_key)
-                elif client is None and api_provider == 'openrouter':
-                    client = OpenAI(api_key=api_key, base_url="https://openrouter.ai/api/v1")
-                if api_provider == 'openai' and reasoning_effort is not None:
-                    response = client.chat.completions.create(
-                        model=model_str,
-                        max_completion_tokens=max_tokens,
-                        reasoning={"effort": reasoning_effort},
-                        messages=[{"role": "user", "content": prompt}],
-                        temperature=temperature
-                    )
-                elif api_provider == 'openrouter' and reasoning_effort is not None:
-                    response = client.chat.completions.create(
-                        model=model_str,
-                        max_completion_tokens=max_tokens,
-                        extra_body={
-                            "reasoning": {
-                                "effort": reasoning_effort
-                            }
-                        },
-                        messages=[{"role": "user", "content": prompt}],
-                        temperature=temperature
-                    )
-                    #if reasoning_effort == "high":
-                    #    print("High reasoning effort response: ", response.choices[0].message.reasoning)
-                else:
-                    response = client.chat.completions.create(
-                        model=model_str,
-                        max_completion_tokens=max_tokens,
-                        messages=[{"role": "user", "content": prompt}],
-                        temperature=temperature
-                    )
-                result = response.choices[0].message.content
-                if logging_level in ["DEBUG", "SCORES"]:
-                    logger.info(f"SCORES Logging Input/Output tokens for {model_str}: {response.usage.prompt_tokens} / {response.usage.completion_tokens} : prompt start: {prompt[:20]}...")
-                    
-            elif api_provider == 'gemini':
-                BLOCK_NONE = [
-                    {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-                    {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-                    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-                    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
-                ]
-                BLOCK_NONE = [
-                    types.SafetySetting(
-                        category=types.HarmCategory.HARM_CATEGORY_HARASSMENT,
-                        threshold=types.HarmBlockThreshold.BLOCK_NONE
-                    ),
-                    types.SafetySetting(
-                        category=types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-                        threshold=types.HarmBlockThreshold.BLOCK_NONE
-                    ),
-                    types.SafetySetting(
-                        category=types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
-                        threshold=types.HarmBlockThreshold.BLOCK_NONE
-                    ),
-                    types.SafetySetting(
-                        category=types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-                        threshold=types.HarmBlockThreshold.BLOCK_NONE
-                    )
-                ]
-                # BLOCK_NONE = {
-                #     HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
-                #     HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
-                #     HarmCategory.HARM_CATEGORY_UNSPECIFIED: HarmBlockThreshold.BLOCK_NONE,
-                #     HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
-                #     HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
-                # }
-                if client is None:
-                    client = genai.Client(api_key=api_key)
-                if max_thinking_tokens is not None:
-                    config = types.GenerateContentConfig(
-                        max_output_tokens=max_tokens,
-                        temperature=temperature,
-                        safety_settings=BLOCK_NONE,
-                        thinking_config=types.ThinkingConfig(
-                            thinking_budget=max_thinking_tokens,
-                            include_thoughts=logging_level in ["DEBUG"]
-                            )
-                    )
-                else:
-                    config = types.GenerateContentConfig(
-                        max_output_tokens=max_tokens,
-                        temperature=temperature,
-                        safety_settings=BLOCK_NONE
-                    )
-                response = client.models.generate_content(
-                    model=model_str,
-                    contents=prompt,
-                    config=config
-                )
-                result = response.text
-                if logging_level in ["DEBUG", "SCORES"]:
-                    logger.info(f"SCORES Logging Input / Output / Thoughts tokens for {model_str}: {response.usage_metadata.prompt_token_count} / {response.usage_metadata.candidates_token_count} / {response.usage_metadata.thoughts_token_count}")
-                    if logging_level in ["DEBUG"]:
-                        for part in response.candidates[0].content.parts:
-                            if not part.text:
-                                continue
-                            if part.thought:
-                                logger.info("DEBUG Logging Thought summary:")
-                                logger.info(part.text)
-                                logger.info("")
-                            else:
-                                logger.info("DEBUG Logging Answer:")
-                                logger.info(part.text)
-                                logger.info("")
+        raise Exception("Either api_key or client must be provided.")
+    
+    if logger is None:
+        # Create a logger that logs to the console
+        logger = get_logger(name=f"api_request_{api_provider}_{model_str}")
+
+    if api_provider == 'anthropic':
+        if client is None:
+            client = Anthropic(api_key=api_key)
+        response = client.messages.create(
+            model=model_str,
+            max_tokens=max_tokens,
+            messages=[
+                {"role": "user", "content": prompt}
+            ],
+            temperature=temperature
+        )
+        result = response.content[0].text
+    elif api_provider == 'openai' or api_provider == 'openrouter':
+        if max_thinking_tokens is not None:
+            if max_thinking_tokens == 0:
+                reasoning_effort = "low"
+            elif max_thinking_tokens < 10000:
+                reasoning_effort = "medium"
             else:
-                raise ValueError(f"Unsupported API provider: {api_provider}")
+                reasoning_effort = "high"
+        else:
+            reasoning_effort = None
+        if client is None and api_provider == 'openai':
+            client = OpenAI(api_key=api_key)
+        elif client is None and api_provider == 'openrouter':
+            client = OpenAI(api_key=api_key, base_url="https://openrouter.ai/api/v1")
+        if api_provider == 'openai' and reasoning_effort is not None:
+            response = client.chat.completions.create(
+                model=model_str,
+                max_completion_tokens=max_tokens,
+                reasoning={"effort": reasoning_effort},
+                messages=[{"role": "user", "content": prompt}],
+                temperature=temperature
+            )
+        elif api_provider == 'openrouter' and reasoning_effort is not None:
+            response = client.chat.completions.create(
+                model=model_str,
+                max_completion_tokens=max_tokens,
+                extra_body={
+                    "reasoning": {
+                        "effort": reasoning_effort
+                    }
+                },
+                messages=[{"role": "user", "content": prompt}],
+                temperature=temperature
+            )
+            #if reasoning_effort == "high":
+            #    print("High reasoning effort response: ", response.choices[0].message.reasoning)
+        else:
+            response = client.chat.completions.create(
+                model=model_str,
+                max_completion_tokens=max_tokens,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=temperature
+            )
+        result = response.choices[0].message.content
+        if logging_level in ["DEBUG", "SCORES"]:
+            logger.info(f"SCORES Logging Input/Output tokens for {model_str}: {response.usage.prompt_tokens} / {response.usage.completion_tokens} : prompt start: {prompt[:20]}...")
+            if logging_level in ["DEBUG"]:
+                logger.info("DEBUG Logging Response:")
+                logger.info(result)
+                logger.info("")
             
-            if api_interactions_save_loc and logger and logging_level in ["DEBUG"]:
-                logger.info(
-                    "api_request",
-                    api_provider=api_provider,
-                    model=model_str,
-                    prompt=prompt,
-                    result=result,
-                    **request_info or {}
-                )
-            
-            return result
-        except (InternalServerError, APIError, Exception) as e:
-            print(f"API request failed: {str(e)}. Retrying...")
-            if logger and logging_level in ["DEBUG"]:
-                logger.info(
-                    "api_request_failed",
-                    api_provider=api_provider,
-                    model=model_str,
-                    prompt=prompt,
-                    error=str(e),
-                    **request_info or {}
-                )
-            time.sleep(10)
-            retries += 1
-    raise Exception(f"Failed to make API request after {n_local_retries} retries.")
+    elif api_provider == 'gemini':
+        BLOCK_NONE = [
+            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
+        ]
+        BLOCK_NONE = [
+            types.SafetySetting(
+                category=types.HarmCategory.HARM_CATEGORY_HARASSMENT,
+                threshold=types.HarmBlockThreshold.BLOCK_NONE
+            ),
+            types.SafetySetting(
+                category=types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+                threshold=types.HarmBlockThreshold.BLOCK_NONE
+            ),
+            types.SafetySetting(
+                category=types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+                threshold=types.HarmBlockThreshold.BLOCK_NONE
+            ),
+            types.SafetySetting(
+                category=types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+                threshold=types.HarmBlockThreshold.BLOCK_NONE
+            )
+        ]
+        # BLOCK_NONE = {
+        #     HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+        #     HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+        #     HarmCategory.HARM_CATEGORY_UNSPECIFIED: HarmBlockThreshold.BLOCK_NONE,
+        #     HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+        #     HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
+        # }
+        if client is None:
+            client = genai.Client(api_key=api_key)
+        if max_thinking_tokens is not None:
+            config = types.GenerateContentConfig(
+                max_output_tokens=max_tokens,
+                temperature=temperature,
+                safety_settings=BLOCK_NONE,
+                thinking_config=types.ThinkingConfig(
+                    thinking_budget=max_thinking_tokens,
+                    include_thoughts=logging_level in ["DEBUG"]
+                    )
+            )
+        else:
+            config = types.GenerateContentConfig(
+                max_output_tokens=max_tokens,
+                temperature=temperature,
+                safety_settings=BLOCK_NONE
+            )
+        response = client.models.generate_content(
+            model=model_str,
+            contents=prompt,
+            config=config
+        )
+        result = response.text
+        if logging_level in ["DEBUG", "SCORES"]:
+            logger.info(f"SCORES Logging Input / Output / Thoughts tokens for {model_str}: {response.usage_metadata.prompt_token_count} / {response.usage_metadata.candidates_token_count} / {response.usage_metadata.thoughts_token_count}")
+            if logging_level in ["DEBUG"]:
+                for part in response.candidates[0].content.parts:
+                    if not part.text:
+                        continue
+                    if part.thought:
+                        logger.info("DEBUG Logging Thought summary:")
+                        logger.info(part.text)
+                        logger.info("")
+                    else:
+                        logger.info("DEBUG Logging Answer:")
+                        logger.info(part.text)
+                        logger.info("")
+    else:
+        raise Exception(f"Unsupported API provider: {api_provider}")
+    
+    if api_interactions_save_loc and logger and logging_level in ["DEBUG"]:
+        logger.info(
+            "api_request",
+            api_provider=api_provider,
+            model=model_str,
+            prompt=prompt,
+            result=result,
+            **request_info or {}
+        )
+    if len(result.strip()) < min_chars_to_generate:
+        raise ValueError(f"Response contains less than {min_chars_to_generate} characters. Response: {result}")
+    
+    return result
+
 
 def parallel_make_api_requests(
         prompts: List[str], 
@@ -249,6 +251,7 @@ def parallel_make_api_requests(
         request_info: Optional[Dict[str, str]] = None,
         max_retries: int = 3,
         max_tokens: int = 1000,
+        min_chars_to_generate: int = 0,
         max_thinking_tokens: Optional[int] = None,
         temperature: float = 1.0,
         cot_end_token: Optional[str] = None,
@@ -271,6 +274,8 @@ def parallel_make_api_requests(
         request_info (Optional[Dict[str, str]]): Information about the request.
         max_retries (int): Maximum number of retries for failed requests.
         max_tokens (int): The maximum number of tokens to generate per request.
+        min_chars_to_generate (int): The minimum number of characters to generate per request. Will retry if the 
+            response contains less than this number of characters. Defaults to 0.
         max_thinking_tokens (Optional[int]): The maximum number of tokens to generate for the COT phase. 
             Defaults to None. Currently only used for Gemini.
         temperature (float): The temperature to use for the API request.
@@ -342,6 +347,7 @@ def parallel_make_api_requests(
                     logger=logger,
                     request_info=request_info,
                     max_tokens=max_tokens,
+                    min_chars_to_generate=min_chars_to_generate,
                     max_thinking_tokens=max_thinking_tokens,
                     temperature=temperature,
                     cot_end_token=cot_end_token
@@ -443,6 +449,7 @@ def collect_dataset_from_api(
                 logging_level,
                 logger,
                 max_tokens,
+                min_chars_to_generate=20,
                 request_info=request_info
             )
             extracted_data = extract_json_from_string(response)
@@ -1749,4 +1756,31 @@ def permutation_test_auc(
             count += 1
     
     p_value = (count + 1) / (n_permutations + 1)
+    return p_value
+
+def mannwhitney_u_test_auc(
+    scores,
+    target_labels,
+    alternative: str = "greater"
+) -> float:
+    """
+    Compute p-value using Mann-Whitney U test.
+    This is testing whether scores for the positive class tend
+    to be larger than scores for the negative class.
+
+    alternative: "greater" means AUC > 0.5
+                 "less"    means AUC < 0.5
+                 "two-sided" for != 0.5
+    """
+    scores = np.asarray(scores)
+    y = np.asarray(target_labels)
+
+    pos_scores = scores[y == 1]
+    neg_scores = scores[y == 0]
+
+    if pos_scores.size == 0 or neg_scores.size == 0:
+        raise ValueError("Need both positive and negative examples.")
+
+    U, p_value = mannwhitneyu(pos_scores, neg_scores, alternative=alternative)
+
     return p_value
