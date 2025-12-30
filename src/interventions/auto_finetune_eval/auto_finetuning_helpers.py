@@ -11,7 +11,13 @@ import time
 import json
 import pickle
 import argparse
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+    RetryCallState,
+)
 from sklearn.manifold import TSNE
 from sklearn.metrics import roc_auc_score
 import matplotlib.pyplot as plt
@@ -30,10 +36,21 @@ import os
 from scipy.stats import mannwhitneyu
 
 
+def _log_retry_attempt(retry_state: RetryCallState) -> None:
+    """Log whenever tenacity schedules another retry."""
+    exc = retry_state.outcome.exception() if retry_state.outcome else None
+    wait_for = retry_state.idle_for if retry_state.idle_for is not None else "unknown"
+    print(
+        f"[make_api_request] retrying attempt {retry_state.attempt_number} after {exc} "
+        f"(sleeping {wait_for}s)"
+    )
+
+
 @retry(
-    stop=stop_after_attempt(15),
-    wait=wait_exponential(multiplier=1, min=4, max=60),
-    retry=retry_if_exception_type((InternalServerError, APIError, ValueError))
+    stop=stop_after_attempt(5),
+    wait=wait_exponential(multiplier=3, min=4, max=200),
+    retry=retry_if_exception_type((InternalServerError, APIError, ValueError)),
+    before_sleep=_log_retry_attempt,
 )
 def make_api_request(
         prompt: str, 
@@ -50,7 +67,9 @@ def make_api_request(
         n_local_retries: int = 5,
         request_info: Optional[Dict[str, str]] = {"pipeline_stage": "unknown"},
         temperature: float = 1.0,
-        cot_end_token: Optional[str] = None
+        cot_end_token: Optional[str] = None,
+        test_parsable_numerical_response: bool = False,
+        target_label: Optional[int] = None
     ) -> str:
     """
     Make an API request to the specified provider.
@@ -76,7 +95,10 @@ def make_api_request(
             interactions file. Defaults to {"pipeline_stage": "unknown"}.
         temperature (float): The temperature to use for the API request.
         cot_end_token (Optional[str]): Token to end the chain of thought. Not yet implemented.
-
+        test_parsable_numerical_response (bool): Whether to test if the response is a parsable numerical value. Throws an error if 
+            the response is not a parsable numerical value, leading to a retry. Defaults to False.
+        target_label (Optional[int]): The target label to test the response against. If provided, the true label and 
+            response will be logged, assuming the response is a numerical value. Defaults to None.
     Returns:
         str: The response from the API.
     """
@@ -109,6 +131,8 @@ def make_api_request(
                 reasoning_effort = "high"
         else:
             reasoning_effort = None
+        reasoning_config = {"effort": reasoning_effort}
+
         if client is None and api_provider == 'openai':
             client = OpenAI(api_key=api_key)
         elif client is None and api_provider == 'openrouter':
@@ -117,7 +141,7 @@ def make_api_request(
             response = client.chat.completions.create(
                 model=model_str,
                 max_completion_tokens=max_tokens,
-                reasoning={"effort": reasoning_effort},
+                reasoning=reasoning_config,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=temperature
             )
@@ -126,9 +150,7 @@ def make_api_request(
                 model=model_str,
                 max_completion_tokens=max_tokens,
                 extra_body={
-                    "reasoning": {
-                        "effort": reasoning_effort
-                    }
+                    "reasoning": reasoning_config
                 },
                 messages=[{"role": "user", "content": prompt}],
                 temperature=temperature
@@ -144,7 +166,20 @@ def make_api_request(
             )
         result = response.choices[0].message.content
         if logging_level in ["DEBUG", "SCORES"]:
-            logger.info(f"SCORES Logging Input/Output tokens for {model_str}: {response.usage.prompt_tokens} / {response.usage.completion_tokens} : prompt start: {prompt[:20]}...")
+            provider = getattr(response, "provider", None)
+            if provider is None and hasattr(response, "model_extra"):
+                provider = response.model_extra.get("provider")
+            if provider is None:
+                provider = "unknown"
+            if target_label is not None:
+                try:
+                    numerical_result = float(result.strip())
+                    response_str = f"{numerical_result}, Target label: {target_label}"
+                except ValueError:
+                    response_str = f"NaN, Target label: {target_label}"
+            else:
+                response_str = f"NaN, Target label: None"
+            logger.info(f"SCORES Logging Input/Output tokens for {model_str}: {response.usage.prompt_tokens} / {response.usage.completion_tokens} : prompt start: {prompt[:20]}... OR provider: {provider}, response_str_numerical_result: {response_str}")
             if logging_level in ["DEBUG"]:
                 logger.info("DEBUG Logging Response:")
                 logger.info(result)
@@ -235,6 +270,12 @@ def make_api_request(
     if len(result.strip()) < min_chars_to_generate:
         raise ValueError(f"Response contains less than {min_chars_to_generate} characters. Response: {result}")
     
+    if test_parsable_numerical_response:
+        try:
+            numerical_result = float(result.strip()) 
+        except ValueError:
+            raise ValueError(f"Response is not a parsable number. Response: {result}")
+    
     return result
 
 
@@ -255,7 +296,9 @@ def parallel_make_api_requests(
         max_thinking_tokens: Optional[int] = None,
         temperature: float = 1.0,
         cot_end_token: Optional[str] = None,
-        cot_max_length: int = 512
+        cot_max_length: int = 512,
+        test_parsable_numerical_response: bool = False,
+        target_labels: Optional[List[int]] = None
     ) -> List[str]:
     """
     Execute API requests in parallel using a thread pool to improve performance.
@@ -281,6 +324,10 @@ def parallel_make_api_requests(
         temperature (float): The temperature to use for the API request.
         cot_end_token (Optional[str]): Token to end the chain of thought. Not yet implemented.
         cot_max_length (int): Max new tokens for CoT phase before continuation. Defaults to 512.
+        test_parsable_numerical_response (bool): Whether to test if the response is a parsable numerical value. Throws 
+        an error if the response is not a parsable numerical value, leading to a retry. Defaults to False.
+        target_labels (Optional[List[int]]): The target labels to test the response against. If provided, the true  
+            labels and corresponding responses will be logged, assuming the responses are numerical values. Defaults to None.
     Returns:
         List[str]: A list of responses corresponding to each prompt.
 
@@ -306,6 +353,11 @@ def parallel_make_api_requests(
     # print("Cot max length: ", cot_max_length)
     if request_info is None:
         request_info = {'pipeline_stage': 'unknown'}
+    if target_labels is None:
+        target_labels = [None] * len(prompts)
+    else:
+        if len(target_labels) != len(prompts):
+            raise ValueError(f"Length of target_labels must be the same as the length of prompts. Length of target_labels: {len(target_labels)}, length of prompts: {len(prompts)}")
 
     def create_client():
         """Create a new client instance with error handling."""
@@ -327,7 +379,7 @@ def parallel_make_api_requests(
         except Exception as e:
             raise RuntimeError(f"Failed to create client with auth_key: {str(e)}")
 
-    def make_request(index: int, prompt: str) -> Tuple[int, str]:
+    def make_request(index: int, prompt: str, target_label: Optional[int] = None) -> Tuple[int, str]:
         """Make an API request with retries and error handling."""
         retries = 0
         last_exception = None
@@ -350,7 +402,9 @@ def parallel_make_api_requests(
                     min_chars_to_generate=min_chars_to_generate,
                     max_thinking_tokens=max_thinking_tokens,
                     temperature=temperature,
-                    cot_end_token=cot_end_token
+                    cot_end_token=cot_end_token,
+                    test_parsable_numerical_response=test_parsable_numerical_response,
+                    target_label=target_label
                 )
                 return index, response
                 
@@ -369,7 +423,7 @@ def parallel_make_api_requests(
     with ThreadPoolExecutor(max_workers=num_workers) as executor:
         # Submit all tasks
         future_to_index = {
-            executor.submit(make_request, i, prompt): i 
+            executor.submit(make_request, i, prompt, target_labels[i]): i 
             for i, prompt in enumerate(prompts)
         }
         
