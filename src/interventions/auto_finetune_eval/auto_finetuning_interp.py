@@ -149,6 +149,7 @@ def setup_interpretability_method(
         tsne_perplexity: int = 30,
         run_prefix: Optional[str] = None,
         global_random_seed: int = 42,
+        reverse_datasets: bool = False,
     ) -> Dict[str, Any]:
     """
     Set up the interpretability method to compare two models.
@@ -225,6 +226,7 @@ def setup_interpretability_method(
         tsne_perplexity (int): The perplexity of the t-SNE plot. 30 by default.
         run_prefix (Optional[str]): The prefix to use for the run. None by default.
         global_random_seed (int): Global random seed to use for reproducibility.
+        reverse_datasets (bool): Whether to reverse the datasets. False by default.
     Returns:
         Dict[str, Any]: A dictionary containing the setup results, including clusterings,
         embeddings, and decoded texts for both models.
@@ -1161,6 +1163,17 @@ def setup_interpretability_method(
         cluster_ids_to_prompt_ids_to_decoding_ids_dict_1 = None
         cluster_ids_to_prompt_ids_to_decoding_ids_dict_2 = None
 
+    if reverse_datasets:
+        print("Reversing the datasets...")
+        cluster_ids_to_prompt_ids_to_decoding_ids_dict_1, cluster_ids_to_prompt_ids_to_decoding_ids_dict_2 = cluster_ids_to_prompt_ids_to_decoding_ids_dict_2, cluster_ids_to_prompt_ids_to_decoding_ids_dict_1
+        base_clustering_assignments, finetuned_clustering_assignments = finetuned_clustering_assignments, base_clustering_assignments
+        base_embeddings, finetuned_embeddings = finetuned_embeddings, base_embeddings
+        base_decoded_texts, finetuned_decoded_texts = finetuned_decoded_texts, base_decoded_texts
+        base_loaded_mauve_cluster_scores, finetuned_loaded_mauve_cluster_scores = finetuned_loaded_mauve_cluster_scores, base_loaded_mauve_cluster_scores
+        base_loaded_kl_divergence_cluster, finetuned_loaded_kl_divergence_cluster = finetuned_loaded_kl_divergence_cluster, base_loaded_kl_divergence_cluster
+        base_loaded_mean_entropy_cluster, finetuned_loaded_mean_entropy_cluster = finetuned_loaded_mean_entropy_cluster, base_loaded_mean_entropy_cluster
+        base_clustering, finetuned_clustering = finetuned_clustering, base_clustering
+
     setup = {
         "base_clustering": base_clustering,
         "finetuned_clustering": finetuned_clustering,
@@ -1495,6 +1508,9 @@ def apply_interpretability_method_1_to_K(
     graph_load_path: Optional[str] = None,
     scoring_results_load_path: Optional[str] = None,
     global_random_seed: int = 42,
+    validation_recording_path: Optional[str] = None,
+    reverse_datasets: bool = False,
+    manual_hypotheses_dictionary: Optional[Dict[int, str]] = None,
 ) -> Tuple[str, str, List[str]]:
     """
     Apply an interpretability method to compare a base model with a finetuned model.
@@ -1611,6 +1627,12 @@ def apply_interpretability_method_1_to_K(
         graph_load_path (Optional[str]): Path to load the graph from.
         scoring_results_load_path (Optional[str]): Path to load the scoring results from.
         global_random_seed (int): Global random seed to use for reproducibility.
+        validation_recording_path (Optional[str]): Path to save the validation recordings to. None by default.
+        reverse_datasets (bool): Whether to reverse the datasets. False by default.
+        manual_hypotheses_dictionary (Optional[Dict[int, str]]): A dictionary of manually generated hypotheses, 
+            with the keys being cluster IDs and the values being hypothesis strings. If provided, we will skip
+            all clusters other than those in the dictionary, and only test the hypotheses in the dictionary on
+            the specified clusters. None by default.
     Returns:
         Tuple[str, str, List[str]]: A tuple containing:
             - results: JSON string with detailed analysis results
@@ -1671,7 +1693,8 @@ def apply_interpretability_method_1_to_K(
         tsne_title=tsne_title,
         tsne_perplexity=tsne_perplexity,
         run_prefix=run_prefix,
-        global_random_seed=global_random_seed
+        global_random_seed=global_random_seed,
+        reverse_datasets=reverse_datasets,
     )
 
     base_clustering = setup["base_clustering"]
@@ -1805,6 +1828,8 @@ def apply_interpretability_method_1_to_K(
             base_decoded_texts_prompt_ids=base_decoded_texts_prompt_ids,
             finetuned_decoded_texts_prompt_ids=finetuned_decoded_texts_prompt_ids,
             random_seed=global_random_seed,
+            validation_recording_path=validation_recording_path,
+            manual_hypotheses_dictionary=manual_hypotheses_dictionary,
         )
         # Identify significant hypotheses via Benjamini-Hochberg correction
         n_significant_binomial_p_values, significance_threshold_binomial_p_values, significant_binomial_mask = benjamini_hochberg_correction(results_dict["accuracy_binomial_p_values"])
