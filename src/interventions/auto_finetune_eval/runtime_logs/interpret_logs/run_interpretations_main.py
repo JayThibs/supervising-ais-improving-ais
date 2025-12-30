@@ -62,9 +62,9 @@ def main():
     if args.experiment_name in ["case_studies_gemini_diversified", "case_studies_qwen_diversified", "case_studies_qwen_un_diverse"]:
         analyze_case_study_exps(
             paths_to_results=paths_to_results,
-            out_dir_tables="tables_3/case_studies",
-            out_dir_figs="figs_3/case_studies",
-            out_dir_summaries="summaries_3/case_studies",
+            out_dir_tables="tables_3/case_studies/" + args.experiment_name,
+            out_dir_figs="figs_3/case_studies/" + args.experiment_name,
+            out_dir_summaries="summaries_3/case_studies/" + args.experiment_name,
             alpha=args.alpha,
             make_plots=not args.skip_plots,
             do_progressive_summaries=args.do_summaries,
@@ -73,8 +73,8 @@ def main():
     elif args.experiment_name in ["ablations_gemini_diversified"]:
         analyze_ablation_exps(
             paths_to_results=paths_to_results,
-            out_dir_tables="tables_3/ablation",
-            out_dir_figs="figs_3/ablation",
+            out_dir_tables="tables_3/ablation/" + args.experiment_name,
+            out_dir_figs="figs_3/ablation/" + args.experiment_name,
             alpha=args.alpha,
             make_plots=not args.skip_plots,
             api_provider=args.api_provider,

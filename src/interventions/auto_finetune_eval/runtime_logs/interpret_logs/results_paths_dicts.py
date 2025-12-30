@@ -82,23 +82,59 @@ paths_to_case_studies_gemini_diversified_results = {
 
 
 
-paths_to_case_studies_qwen_diversified_results = {
-    'ROME-10': {
-        'TruthfulQA': '../intervention_llama3-8B_vs_llama3-8B_ROME_KE_10_gpt_5_high_thinking_qwen3-next-80b-a3b-instruct_diversified_SCB_prompt_truthfulqa_FINAL_SOTA_runtime_log.txt',
-        'Anthropic': '../intervention_llama3-8B_vs_llama3-8B_ROME_KE_10_gpt_5_high_thinking_qwen3-next-80b-a3b-instruct_diversified_SCB_prompt_anthropic_FINAL_SOTA_runtime_log.txt',
-        'Amazon BOLD': '../intervention_llama3-8B_vs_llama3-8B_ROME_KE_10_gpt_5_high_thinking_qwen3-next-80b-a3b-instruct_diversified_SCB_prompt_amazon_bold_FINAL_SOTA_runtime_log.txt',
+paths_to_case_studies_qwen_diversified_results = [
+    {
+        'ROME-10': {
+            'Anthropic': '../intervention_llama3-8B_vs_llama3-8B_ROME_KE_10_gpt_5_high_thinking_qwen3-next-80b-a3b-instruct_diversified_SCB_prompt_anthropic_FINAL_SOTA_runtime_log_2.txt',
+            'TruthfulQA': '../intervention_llama3-8B_vs_llama3-8B_ROME_KE_10_gpt_5_high_thinking_qwen3-next-80b-a3b-instruct_diversified_SCB_prompt_truthfulqa_FINAL_SOTA_runtime_log.txt',
+            'Amazon BOLD': '../intervention_llama3-8B_vs_llama3-8B_ROME_KE_10_gpt_5_high_thinking_qwen3-next-80b-a3b-instruct_diversified_SCB_prompt_amazon_bold_FINAL_SOTA_runtime_log.txt',
+        },
+        'R1 distillation': {
+            'Anthropic': '../intervention_llama3.1-8B_vs_deepseek-R1-Distill_cot_enabled_gpt_5_high_thinking_qwen3-next-80b-a3b-instruct_diversified_SCB_prompt_FINAL_SOTA_runtime_log_2.txt',
+            'TruthfulQA': '../intervention_llama3.1-8B_vs_deepseek-R1-Distill_cot_enabled_gpt_5_high_thinking_qwen3-next-80b-a3b-instruct_diversified_SCB_prompt_TruthfulQA_FINAL_SOTA_runtime_log.txt',
+            'Amazon BOLD': '../intervention_llama3.1-8B_vs_deepseek-R1-Distill_cot_really_enabledqwen3-next-80b-a3b-instruct__gpt_5_high_thinking_diversified_SCB_prompt_amazon_bold_FINAL_SOTA_r_1.1_runtime_log.txt',
+        },
+        'WIHP': {
+            'Anthropic': '../intervention_llama2-7b-chat_vs_llama2-7b-WIHPqwen3-next-80b-a3b-instruct__gpt_5_high_thinking_diversified_SCB_prompt_anthropic_FINAL_SOTA_runtime_log.txt',
+            'TruthfulQA': '../intervention_llama2-7b-chat_vs_llama2-7b-WIHPqwen3-next-80b-a3b-instruct__gemini_3_16000_thinking_diversified_SCB_prompt_truthfulqa_FINAL_SOTA_r_1.1_runtime_log.txt',
+            'Amazon BOLD': '../intervention_llama2-7b-chat_vs_llama2-7b-WIHPqwen3-next-80b-a3b-instruct__gpt_5_high_thinking_diversified_SCB_prompt_amazon_bold_FINAL_SOTA_runtime_log.txt',
+        },
     },
-    'R1 distillation': {
-        'Anthropic': '../intervention_llama3.1-8B_vs_deepseek-R1-Distill_cot_enabled_gpt_5_high_thinking_qwen3-next-80b-a3b-instruct_diversified_SCB_prompt_FINAL_SOTA_runtime_log.txt',
-        'TruthfulQA': '../intervention_llama3.1-8B_vs_deepseek-R1-Distill_cot_enabled_gpt_5_high_thinking_qwen3-next-80b-a3b-instruct_diversified_SCB_prompt_TruthfulQA_FINAL_SOTA_runtime_log.txt',
-        'Amazon BOLD': '../intervention_llama3.1-8B_vs_deepseek-R1-Distill_cot_enabledqwen3-next-80b-a3b-instruct__gpt_5_high_thinking_diversified_SCB_prompt_amazon_bold_FINAL_SOTA_runtime_log.txt',
+    {
+        'ROME-10': {
+            'Anthropic': '../intervention_llama3-8B_vs_llama3-8B_ROME_KE_10_gpt_5_high_thinking_qwen3-next-80b-a3b-instruct_diversified_SCB_prompt_anthropic_FINAL_SOTA_r_2.1_runtime_log.txt',
+            'TruthfulQA': '../intervention_llama3-8B_vs_llama3-8B_ROME_KE_10_gpt_5_high_thinking_qwen3-next-80b-a3b-instruct_diversified_SCB_prompt_truthfulqa_FINAL_SOTA_r_2.1_runtime_log.txt',
+            'Amazon BOLD': '../intervention_llama3-8B_vs_llama3-8B_ROME_KE_10_gpt_5_high_thinking_qwen3-next-80b-a3b-instruct_diversified_SCB_prompt_amazon_bold_FINAL_SOTA_r_2.1_runtime_log.txt',
+        },
+        'R1 distillation': {
+            'Anthropic': '../intervention_llama3.1-8B_vs_deepseek-R1-Distill_cot_enabled_gpt_5_high_thinking_qwen3-next-80b-a3b-instruct_diversified_SCB_prompt_FINAL_SOTA_r_2.1_runtime_log.txt',
+            'TruthfulQA': '../intervention_llama3.1-8B_vs_deepseek-R1-Distill_cot_enabled_gpt_5_high_thinking_qwen3-next-80b-a3b-instruct_diversified_SCB_prompt_TruthfulQA_FINAL_SOTA_r_2.1_runtime_log.txt',
+            'Amazon BOLD': '../intervention_llama3.1-8B_vs_deepseek-R1-Distill_cot_really_enabledqwen3-next-80b-a3b-instruct__gpt_5_high_thinking_diversified_SCB_prompt_amazon_bold_FINAL_SOTA_r_2.1_runtime_log.txt',
+        },
+        'WIHP': {
+            'Anthropic': '../intervention_llama2-7b-chat_vs_llama2-7b-WIHPqwen3-next-80b-a3b-instruct__gpt_5_high_thinking_diversified_SCB_prompt_anthropic_FINAL_SOTA_r_2.1_runtime_log.txt',
+            'TruthfulQA': '../intervention_llama2-7b-chat_vs_llama2-7b-WIHPqwen3-next-80b-a3b-instruct__gemini_3_16000_thinking_diversified_SCB_prompt_truthfulqa_FINAL_SOTA_r_2.1_runtime_log.txt',
+            'Amazon BOLD': '../intervention_llama2-7b-chat_vs_llama2-7b-WIHPqwen3-next-80b-a3b-instruct__gpt_5_high_thinking_diversified_SCB_prompt_amazon_bold_FINAL_SOTA_r_2.1_runtime_log.txt',
+        },
     },
-    'WIHP': {
-        'Anthropic': '../intervention_llama2-7b-chat_vs_llama2-7b-WIHPqwen3-next-80b-a3b-instruct__gpt_5_high_thinking_diversified_SCB_prompt_anthropic_FINAL_SOTA_runtime_log.txt',
-        'TruthfulQA': '../intervention_llama2-7b-chat_vs_llama2-7b-WIHPqwen3-next-80b-a3b-instruct__gpt_5_high_thinking_diversified_SCB_prompt_truthfulqa_FINAL_SOTA_runtime_log.txt',
-        'Amazon BOLD': '../intervention_llama2-7b-chat_vs_llama2-7b-WIHPqwen3-next-80b-a3b-instruct__gpt_5_high_thinking_diversified_SCB_prompt_amazon_bold_FINAL_SOTA_runtime_log.txt',
-    },
-}
+    {
+        'ROME-10': {
+            'Anthropic': '../intervention_llama3-8B_vs_llama3-8B_ROME_KE_10_gpt_5_high_thinking_qwen3-next-80b-a3b-instruct_diversified_SCB_prompt_anthropic_FINAL_SOTA_r_3.1_runtime_log.txt',
+            'TruthfulQA': '../intervention_llama3-8B_vs_llama3-8B_ROME_KE_10_gpt_5_high_thinking_qwen3-next-80b-a3b-instruct_diversified_SCB_prompt_truthfulqa_FINAL_SOTA_r_3.1_runtime_log.txt',
+            'Amazon BOLD': '../intervention_llama3-8B_vs_llama3-8B_ROME_KE_10_gpt_5_high_thinking_qwen3-next-80b-a3b-instruct_diversified_SCB_prompt_amazon_bold_FINAL_SOTA_r_3.1_runtime_log.txt',
+        },
+        'R1 distillation': {
+            'Anthropic': '../intervention_llama3.1-8B_vs_deepseek-R1-Distill_cot_enabled_gpt_5_high_thinking_qwen3-next-80b-a3b-instruct_diversified_SCB_prompt_FINAL_SOTA_r_3.1_runtime_log.txt',
+            'TruthfulQA': '../intervention_llama3.1-8B_vs_deepseek-R1-Distill_cot_enabled_gpt_5_high_thinking_qwen3-next-80b-a3b-instruct_diversified_SCB_prompt_TruthfulQA_FINAL_SOTA_r_3.1_runtime_log.txt',
+            'Amazon BOLD': '../intervention_llama3.1-8B_vs_deepseek-R1-Distill_cot_really_enabledqwen3-next-80b-a3b-instruct__gpt_5_high_thinking_diversified_SCB_prompt_amazon_bold_FINAL_SOTA_r_3.1_runtime_log.txt',
+        },
+        'WIHP': {
+            'Anthropic': '../intervention_llama2-7b-chat_vs_llama2-7b-WIHPqwen3-next-80b-a3b-instruct__gpt_5_high_thinking_diversified_SCB_prompt_anthropic_FINAL_SOTA_r_3.1_runtime_log.txt',
+            'TruthfulQA': '../intervention_llama2-7b-chat_vs_llama2-7b-WIHPqwen3-next-80b-a3b-instruct__gemini_3_16000_thinking_diversified_SCB_prompt_truthfulqa_FINAL_SOTA_r_3.1_runtime_log.txt',
+            'Amazon BOLD': '../intervention_llama2-7b-chat_vs_llama2-7b-WIHPqwen3-next-80b-a3b-instruct__gpt_5_high_thinking_diversified_SCB_prompt_amazon_bold_FINAL_SOTA_r_3.1_runtime_log.txt',
+        },
+    }
+]
 
 
 
@@ -173,24 +209,37 @@ def test_results_paths_dicts(experiment_name: str):
                     num_hypotheses += len(results['hypotheses'])
                     print(f"All paths exist for experiment {experiment_name}")
     else:
-        for intervention in paths_dict.keys():
-            for dataset in paths_dict[intervention].keys():
-                print(f"Checking path for {intervention} on {dataset}: {paths_dict[intervention][dataset]}")
-                if not os.path.exists(paths_dict[intervention][dataset]):
-                    raise ValueError(f"Path {paths_dict[intervention][dataset]} does not exist for dataset: {dataset}, intervention: {intervention}")
-                # Check number of hyptheses in the log file
-                results = extract_hypotheses_and_scores(paths_dict[intervention][dataset])
-                print_result_lengths(results)
-                num_hypotheses += len(results['hypotheses'])
+        for i in range(len(paths_dict)):
+            for intervention in paths_dict[i].keys():
+                for dataset in paths_dict[i][intervention].keys():
+                    #print(f"Checking path for {intervention} on {dataset} run number {i}: {paths_dict[i][intervention][dataset]}")
+                    path = paths_dict[i][intervention][dataset]
+                    if not os.path.exists(path):
+                        raise ValueError(f"Path {path} does not exist for dataset: {dataset}, intervention: {intervention}, run number: {i}")
+                    # Check number of hyptheses in the log file
+                    results = extract_hypotheses_and_scores(path)
+                    lower_path = path.lower()
+                    if "bold" in lower_path:
+                        if len(results['hypotheses']) != 50:
+                            print(f"Warning: Number of hypotheses for Amazon BOLD is not 50 for run number {i} in {path}")
+                            print_result_lengths(results)
+                    elif "truthfulqa" in lower_path:
+                        if len(results['hypotheses']) != 15:
+                            print(f"Warning: Number of hypotheses for TruthfulQA is not 15 for run number {i} in {path}")
+                            print_result_lengths(results)
+                    elif len(results['hypotheses']) != 135:
+                        print(f"Warning: Number of hypotheses for Anthropic is not 135 for run number {i} in {path}")
+                        print_result_lengths(results)
+                    num_hypotheses += len(results['hypotheses'])
         print(f"All paths exist for experiment {experiment_name}")
     return num_hypotheses
 
 if __name__ == "__main__":
     total_num_hypotheses = 0
-    total_num_hypotheses += test_results_paths_dicts("ablations_gemini_diversified")
-    total_num_hypotheses += test_results_paths_dicts("case_studies_gemini_diversified")
+    #total_num_hypotheses += test_results_paths_dicts("ablations_gemini_diversified")
+    #total_num_hypotheses += test_results_paths_dicts("case_studies_gemini_diversified")
     total_num_hypotheses += test_results_paths_dicts("case_studies_qwen_diversified")
-    total_num_hypotheses += test_results_paths_dicts("case_studies_qwen_un_diverse")
+    #total_num_hypotheses += test_results_paths_dicts("case_studies_qwen_un_diverse")
 
     print(f"Total number of hypotheses: {total_num_hypotheses}")
     print(f"Total expected number of hypotheses: {27 * 135 + 3 * (135 + 50 + 15) * 3}")

@@ -2,6 +2,10 @@ import ast
 import pandas as pd
 import re
 import numpy as np
+import os
+import sys
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
+from stats import benjamini_hochberg_correction
 
 
 # Round float columns to 2 significant figures for nicer reporting
@@ -50,6 +54,8 @@ def extract_hypotheses_and_scores(path_to_log: str):
     discriminative_model_cross_validation_discrim_scores_text_pattern = r"SCORES Logging cross-validation Scores: .*" 
     discriminative_model_cross_validation_discrim_alternate_scores_text_pattern = r"SCORES Logging cross-validation Alternate scores: .*"
 
+    openrouter_provider_text_pattern = r"SCORES Logging.*... OR provider: (.*)"
+
 
     hypothesis_generation_failure_text_pattern = "Label 0:" # the entire line; represents a null label
     
@@ -80,21 +86,24 @@ def extract_hypotheses_and_scores(path_to_log: str):
         "you will be given a": "summarizer"
     }
 
+    openrouter_provider_names = []
+
     discriminative_model_validation_true_labels = []
     discriminative_model_validation_discrim_scores = []
     discriminative_model_cross_validation_true_labels = []
     discriminative_model_cross_validation_discrim_scores = []
 
-    # There are two alternative discriminators: qwen/qwen3-next-80b-a3b-instruct and openai/gpt-5-nano
+    # There are two alternative discriminators: gemini/gemini_2.5-flash-lite and openai/gpt-5-nano
     discriminative_model_validation_discrim_alternate_scores = {
-        "qwen": [],
+        "gemini": [],
         "gpt-5-nano": []
     }
     discriminative_model_cross_validation_discrim_alternate_scores = {
-        "qwen": [],
+        "gemini": [],
         "gpt-5-nano": []
     }
 
+    hypothesis_generation_failures_mask = []
     skipping_hypothesis_generation_failure = False
     # Now we will extract the hypotheses and scores
     for line in lines:
@@ -102,6 +111,8 @@ def extract_hypotheses_and_scores(path_to_log: str):
 
         if line == hypothesis_generation_failure_text_pattern:
             skipping_hypothesis_generation_failure = True
+            hypothesis_generation_failures_mask.append(True)
+            continue
 
         # Extract API model query/response lengths
         # api_model_query_response_lengths_match = re.match(api_model_query_response_lengths_text_pattern, line)
@@ -129,6 +140,16 @@ def extract_hypotheses_and_scores(path_to_log: str):
                     api_model_query_output_lengths.append(api_model_query_output_length)
                     api_model_str_ids.append(api_model_str_id)
                     query_types.append(query_type)
+                    query_provider = re.search(openrouter_provider_text_pattern, line)
+                    if query_provider:
+                        try:
+                            query_provider = query_provider.group(1).strip()
+                        except Exception:
+                            print(f"Error parsing query provider: {query_provider}, line: {line}")
+                            query_provider = "unknown"
+                        openrouter_provider_names.append(query_provider)
+                    else:
+                        openrouter_provider_names.append("unknown")
             continue
         
         if skipping_hypothesis_generation_failure:
@@ -152,6 +173,7 @@ def extract_hypotheses_and_scores(path_to_log: str):
                 accuracies.append(accuracy)
                 hypotheses.append(label)
                 permutation_p_values.append(permutation_p_value)
+                hypothesis_generation_failures_mask.append(False)
             continue
 
         # Extract discriminative model validation true labels
@@ -183,7 +205,7 @@ def extract_hypotheses_and_scores(path_to_log: str):
             if scores_str_match:
                 scores_str = scores_str_match.group(1).strip() + "]]"
                 parsed_scores = ast.literal_eval(scores_str)
-                discriminative_model_validation_discrim_alternate_scores['qwen'].append(parsed_scores[0])
+                discriminative_model_validation_discrim_alternate_scores['gemini'].append(parsed_scores[0])
                 discriminative_model_validation_discrim_alternate_scores['gpt-5-nano'].append(parsed_scores[1])
             continue
 
@@ -214,7 +236,7 @@ def extract_hypotheses_and_scores(path_to_log: str):
             if scores_str_match:
                 scores_str = scores_str_match.group(1).strip() + "]]"
                 parsed_scores = ast.literal_eval(scores_str)
-                discriminative_model_cross_validation_discrim_alternate_scores['qwen'].append(parsed_scores[0])
+                discriminative_model_cross_validation_discrim_alternate_scores['gemini'].append(parsed_scores[0])
                 discriminative_model_cross_validation_discrim_alternate_scores['gpt-5-nano'].append(parsed_scores[1])
             continue
 
@@ -283,12 +305,16 @@ def extract_hypotheses_and_scores(path_to_log: str):
             if score_val:
                 generative_scores.append(float(score_val.group(1)))
             continue
+    
+    # Apply Benjamini-Hochberg correction to the permutation p-values to create a mask of significant p-values
+    n_significant_permutation_p_values, significance_threshold_permutation_p_values, significant_permutation_p_values_mask = benjamini_hochberg_correction(permutation_p_values)
 
     return_dict = {
         "hypotheses": hypotheses,
         "accuracies": accuracies,
         "auc_scores": auc_scores,
         "permutation_p_values": permutation_p_values,
+        "significant_permutation_p_values_mask": significant_permutation_p_values_mask,
         "baseline_accuracies": baseline_accuracies,
         "baseline_auc_scores": baseline_auc_scores,
         "cross_validated_accuracies": cross_validated_accuracies,
@@ -301,11 +327,13 @@ def extract_hypotheses_and_scores(path_to_log: str):
         "api_model_query_output_lengths": api_model_query_output_lengths,
         "api_model_str_ids": api_model_str_ids,
         "query_types": query_types,
+        "openrouter_provider_names": openrouter_provider_names,
         "discriminative_model_validation_true_labels": discriminative_model_validation_true_labels,
         "discriminative_model_validation_discrim_scores": discriminative_model_validation_discrim_scores,
         "discriminative_model_validation_discrim_alternate_scores": discriminative_model_validation_discrim_alternate_scores,
         "discriminative_model_cross_validation_true_labels": discriminative_model_cross_validation_true_labels,
         "discriminative_model_cross_validation_discrim_scores": discriminative_model_cross_validation_discrim_scores,
         "discriminative_model_cross_validation_discrim_alternate_scores": discriminative_model_cross_validation_discrim_alternate_scores,
+        "hypothesis_generation_failures_mask": hypothesis_generation_failures_mask,
     }
     return return_dict

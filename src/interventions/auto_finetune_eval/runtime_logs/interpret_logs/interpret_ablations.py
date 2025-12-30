@@ -84,10 +84,12 @@ def analyze_ablation_exps(
         return int(n_sig), float(thresh)
 
     def tokenize_words(s: str) -> set:
-        # Simple word-level tokenization for Jaccard (lowercased, strip punctuation boundaries)
-        # You can adjust to char 3-grams if desired.
-        tokens = re.findall(r"\w+", s.lower())
-        return set(tokens)
+        # Bigram tokenization for Jaccard (lowercased, strip punctuation boundaries)
+        words = re.findall(r"\w+", s.lower())
+        if len(words) < 2:
+            return set(words)
+        bigrams = [(words[i], words[i + 1]) for i in range(len(words) - 1)]
+        return set(bigrams)
 
     def hypothesis_jaccard_diversity(hypotheses: List[str]) -> float:
         """
