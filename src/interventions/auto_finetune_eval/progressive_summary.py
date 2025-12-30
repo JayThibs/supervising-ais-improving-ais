@@ -10,45 +10,43 @@ from stats import benjamini_hochberg_correction
 
 STEP1_INSTR = (
     "We are investigating the side effects of a particular intervention on a language model. "
-    "We have a starting model (which we will call Model 1) and a modified version of that same model (called Model 2). "
+    "We have a starting model (which we call Model 1) and a modified version of that same model (called Model 2). "
     "We have generated an extensive set of natural language hypotheses that each describe a particular difference between these two models. "
+    "Each hypothesis is indexed by the dataset it was generated from and the hypothesis number within that dataset, given as a tuple (dataset_name, hypothesis_number). "
     "We now wish to analyze these hypotheses.\n\n"
     "We will perform the following analyses:\n"
-    "1: review the hypotheses to identify and highlight particularly interesting, relevant, or surprising side effects that merit closer attention.\n"
+    "1: review the hypotheses to identify and highlight the three most representative, non-redundant hypotheses.\n"
     "2: identify recurring themes or patterns in the discovered side effects, revealing systematic changes that might not be apparent from individual hypotheses alone.\n"
     "3: compile a comprehensive summary of all verified behavioral differences across the validated hypotheses, providing a holistic view of how the intervention has altered model behavior.\n"
-    "Start by executing step 1 of the analysis: review the hypotheses to identify and highlight particularly interesting, relevant, or surprising side effects that merit closer attention. "
-    "Aim to be concise. You're just highlighting a handful (let's say, 3 or 4 at most) of specific hypotheses that are particularly stand-out. "
-    "Don't summarize multiple hypotheses, and avoid selecting redundant hypotheses. Format your response in LaTeX as a \\begin\{itemize\} list environment, with each item being a single hypothesis. Provide the full hypothesis text in the item, not a summary. Remember to use consistent LaTeX style formatting (\\textbf{}, `` as open quotes, etc)."
+    "Start by executing step 1 of the analysis: review the hypotheses to identify and highlight the three most representative, non-redundant hypotheses. The idea is to 'summarize by examples', so select the three example hypotheses that are most representative of the key differences between the models."
+    "Don't summarize multiple hypotheses, and avoid selecting redundant hypotheses. Format your response in LaTeX as a \\begin{itemize} list environment, with each item being a single hypothesis. Provide the full hypothesis text in the item, not a summary. Remember to use consistent LaTeX style formatting (\\textbf{}, `` as open quotes, etc). Include the appropriate hypothesis indexing tuple at the start of each selected item."
 )
 
 STEP2_INSTR = (
     "Now move on to step 2: identify recurring themes or patterns in the discovered side effects, "
     "revealing systematic changes that might not be apparent from individual hypotheses alone.\n"
     "Here, you're concisely summarizing the common effects that can be extracted by comparing multiple hypotheses. "
-    "Revisit the hypotheses to identify common patterns among them. For each pattern you highlight, refer back to the hypotheses that support it.\n"
-    "Organize your response as a nested list of \\begin\{itemize\} environments, with similar changes grouped together under a single top-level \\item. E.g.,\n"
-    "\\begin\{itemize\}\n"
-    "  \\item [Category 1] \\begin\{itemize\}\n"
-    "    \\item [Specific change 1]\n"
-    "    \\item ...\n"
-    "    \\item [Specific change N]\n"
-    "  \\end\{itemize\}\n"
-    "  \\item [Category 2] \\begin\{itemize\}\n"
-    "    \\item [Specific change 1]\n"
-    "    \\item ...\n"
-    "    \\item [Specific change N]\n"
-    "  \\end\{itemize\}\n"
-    "\\end\{itemize\}\n"
+    "Revisit the hypotheses to identify common patterns among them. For each pattern you highlight, refer back to the hypotheses that support it, using the format (dataset_name_1: hypothesis_number_in_dataset_1, hypothesis_number_in_dataset_2, ...), (dataset_name_2: hypothesis_number_in_dataset_1, hypothesis_number_in_dataset_2, ...), etc.\n"
+    "Organize your response using the following special LaTeX table format, with similar changes grouped together under a single top-level category (via \catrow) and individual changes as item (via \itemrow) entries. E.g.,\n"
+    "\\begin{tabularx}{\\linewidth}{@{}>{\\raggedright\\arraybackslash}p{0.25\\linewidth} >{\\raggedright\\arraybackslash}X@{}}\n"
+    "\\catrow{Category 1}\n"
+    "\\itemrow{Specific change 1}\n"
+    "  {Short description of the change and supporting hypotheses, e.g., (dataset_name_1: 1, 4, ...), (dataset_name_2: 2, 3, ...), etc.}\n"
+    "\\catrow{Category 2}\n"
+    "\\itemrow{Specific change 1}\n"
+    "  {Short description of the change and supporting hypotheses, e.g., (dataset_name_1: 2, 3, ...), (dataset_name_2: 1, 4, ...), etc.}\n"
+    "\\end{tabularx}\n\n"
+    "Note that \\catrow contains a single argument, which is the category name. \\itemrow contains two arguments, the first is the specific change name, and the second is the short description of the change and supporting hypotheses in parenthesis."
 )
+
 
 STEP3_INSTR = (
     "Finally, move on to step 3: compile a comprehensive summary of all verified behavioral differences across the validated hypotheses, "
     "providing a holistic view of how the intervention has altered model behavior. This approach aims to extract maximum insight from the outputs, "
     "moving beyond individual difference statements to understand broader patterns of behavioral change.\n"
     "I.e., if even a single hypothesis mentions a particular difference between the models, add it to the list. "
-    "Go hypothesis by hypothesis and note any that add new distinguishing features. Then, compile all the differences between the models into another nested list of \\begin\{itemize\} environments, with one item per difference. "
-    "You can think of this as an extended version of step 2, where the inclusion criteria are relaxed so that even if a single hypothesis mentions a particular difference between the models, it is added to the list. Keep in mind that you may need to create new categories to accommodate the expanded set of differences."
+    "Go hypothesis by hypothesis and note any that add new distinguishing features. Then, compile all the differences between the models into another table of \\catrow and \\itemrow entries, with one item per difference. "
+    "You can think of this as an extended version of step 2, where the inclusion criteria are relaxed so that even if a single hypothesis mentions a particular difference between the models, it is added to the list. Keep in mind that you may need to create new categories to accommodate the expanded set of differences. "
     "Again, highlight the supporting hypothesis / hypotheses.\n"
     "[This may take a while, so don't be afraid to think on it for an extended time.]"
 )
@@ -63,7 +61,7 @@ def format_hypotheses_for_labeler(hypotheses: List[str]) -> str:
     """
     lines = ["Note: Model 1 is the base model. Model 2 is the intervention model.", ""]
     for i, h in enumerate(hypotheses, start=1):
-        lines.append(f"Hypothesis {i}: {h}")
+        lines.append(f"Hypothesis {h}")
     return "\n".join(lines)
 
 def _filter_indices_by_bh(pvals: List[float], alpha: float) -> List[int]:
@@ -127,6 +125,8 @@ def run_progressive_summary(
 
     # Build initial block with hypotheses
     hypotheses_block = format_hypotheses_for_labeler(hypotheses)
+    if verbose:
+        print(f"\n\n[Progressive summary] Hypotheses block: {hypotheses_block}\n\n")
 
     # Build conversation & prompts
     base_context = (
