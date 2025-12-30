@@ -16,6 +16,7 @@ import openai
 from os import path
 import tempfile
 import pickle
+import json
 
 import structlog
 structlog.configure(
@@ -350,6 +351,16 @@ class AutoFineTuningEvaluator:
                 self.tokenizer_base = AutoTokenizer.from_pretrained(self.args.base_model, padding_side="left")
                 self.tokenizer_intervention = AutoTokenizer.from_pretrained(self.args.intervention_model, padding_side="left")
 
+        if self.args.manual_hypotheses_dictionary is not None:
+            try:
+                manual_hypotheses_dictionary = json.loads(self.args.manual_hypotheses_dictionary)
+            except Exception as e:
+                raise ValueError(f"Failed to load manual hypotheses dictionary from: {self.args.manual_hypotheses_dictionary}. Error: {e}")
+            # convert the keys to integers
+            manual_hypotheses_dictionary = {int(k): v for k, v in manual_hypotheses_dictionary.items()}
+        else:
+            manual_hypotheses_dictionary = None
+        
         results_dict = apply_interpretability_method_1_to_K(
             self.base_model, 
             self.intervention_model,
@@ -431,7 +442,10 @@ class AutoFineTuningEvaluator:
             save_addon_str=self.args.save_addon_str,
             graph_load_path=self.args.graph_load_path,
             scoring_results_load_path=self.args.scoring_results_load_path,
-            global_random_seed=self.args.global_random_seed
+            global_random_seed=self.args.global_random_seed,
+            validation_recording_path=self.args.validation_recording_path,
+            reverse_datasets=self.args.reverse_datasets,
+            manual_hypotheses_dictionary=manual_hypotheses_dictionary,
         )
         # save the pickle and table outputs
         #pickle.dump(results_dict, open(f"pkl_results/{self.args.run_prefix}{self.args.save_addon_str}_results.pkl", "wb"))
@@ -470,6 +484,7 @@ if __name__ == "__main__":
     parser.add_argument("--cot_max_length_intervention", type=int, default=512, help="Max new tokens for CoT phase before continuation for the intervention model")
     parser.add_argument("--intervention_model_revision", type=str, default=None, help="Revision of the intervention model to use")
     parser.add_argument("--device", type=str, default=None, help="Device to use for inference with the base and intervention models")
+    parser.add_argument("--reverse_datasets", action="store_true", help="Flag to reverse the datasets")
 
     # Ground truth and data generation
     parser.add_argument("--num_ground_truths", type=int, default=0, help="Number of ground truths to generate (around 1-10)")
@@ -558,10 +573,16 @@ if __name__ == "__main__":
     parser.add_argument("--model_str", type=str, required=True, help="Model version for the chosen API provider")
     parser.add_argument("--stronger_model_str", type=str, default=None, help="Model version for an optional second model more capable than the one indicated with model_str; can be used for key steps that are not repeated often")
     parser.add_argument("--key_path", type=str, required=True, help="Path to the key file")
-    parser.add_argument("--max_labeling_tokens", type=int, default=None, help="Max new tokens for labeling")
+    parser.add_argument("--max_labeling_tokens", type=int, default=50000, help="Max new tokens for labeling")
     parser.add_argument("--openrouter_api_key_path", type=str, default=None, help="Path to the openrouter API key file")
     parser.add_argument("--api_interactions_save_loc", type=str, default=None, help="File location to record any API model interactions. Defaults to None and no recording of interactions.")
     parser.add_argument("--logging_level", type=str, default="INFO", help="Logging level")
+
+    # Validation recording
+    parser.add_argument("--validation_recording_path", type=str, default=None, help="Path to save the validation recordings to")
+
+    # Manually generated hypotheses
+    parser.add_argument("--manual_hypotheses_dictionary", type=str, default=None, help="A dictionary of manually generated hypotheses, with the keys being cluster IDs and the values being hypothesis strings")
 
     args = parser.parse_args()
     main(args)
