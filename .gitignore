@@ -182,3 +182,4 @@ data/statement_embeddings.json
 joint_embeddings_all_llms.txt
 data/evals/anthropic-model-written-evals
 results/approval_analysis/approval_analysis_awareness_20240929_193315.md
+.DS_Store
