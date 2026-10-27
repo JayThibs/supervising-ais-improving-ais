@@ -8,7 +8,7 @@ import torch.nn.functional as F
 from torch.nn import CrossEntropyLoss
 from pandas import read_csv
 from transformers import PreTrainedTokenizer
-from typing import Optional, List, Tuple, Type
+from typing import Optional, List, Tuple, Type, Dict
 from tqdm import tqdm
 from transformers import BitsAndBytesConfig
 
@@ -75,163 +75,51 @@ def build_contrastive_lm(superclass : Type[PreTrainedModel]) -> Type[PreTrainedM
             else:
                 self.n_starting_model_prefix_ids = 0
 
-        def forward(self, **kwargs) -> CausalLMOutputWithPast:
-            """
-            kwargs will include
-            - input_ids
-            - attention_mask
-            - past_key_values: (starting model, comparison model)
-            - use cache
-            - return_dict
-            - output_attentions
-            - output_hidden_states
-
-            The comparison model should share all of them except past_key_values.
-            """
-
+        def forward(self, **kwargs):
             starting_model_input = kwargs.copy()
             comparison_model_input = kwargs.copy()
-            if 'past_key_values' in kwargs and kwargs['past_key_values'] is not None:
-                starting_model_input['past_key_values'] = kwargs['past_key_values'][0]
-                comparison_model_input['past_key_values'] = kwargs['past_key_values'][1]
-            #print(kwargs)
-            # Apparently, kwargs doesn't preserve the additional arguments I put into the output, so this doesn't work:
-            if ('starting_model_past_key_values' in kwargs and kwargs['starting_model_past_key_values'] is not None) and \
-                ('comparison_model_past_key_values' in kwargs and kwargs['comparison_model_past_key_values'] is not None):
-                
-                print("starting_model_past_key_values", kwargs['starting_model_past_key_values'][0].size())
-                print("comparison_model_past_key_values", kwargs['comparison_model_past_key_values'][0].size())
 
-                starting_model_input['past_key_values'] = kwargs['starting_model_past_key_values']
-                comparison_model_input['past_key_values'] = kwargs['comparison_model_past_key_values']
-            else:
-                if self.comparison_lm is not None:
-                    if not self.comparison_model_prefix_ids is None and not self.comparison_model_prefix_ids_added:
-                        prepended_ids = self.comparison_model_prefix_ids.repeat(comparison_model_input['input_ids'].size()[0], 1)
-                        comparison_model_input['input_ids'] = torch.cat((prepended_ids, comparison_model_input['input_ids']), dim=1)
-                        #self.comparison_model_prefix_ids_added = True
-                    comparison_model_input['input_ids'] = comparison_model_input['input_ids'].to(self.comparison_lm.device)
+            # Handle past_key_values
+            if 'past_key_values' in kwargs:
+                if isinstance(kwargs['past_key_values'], tuple) and len(kwargs['past_key_values']) == 2:
+                    starting_model_input['past_key_values'] = kwargs['past_key_values'][0]
+                    comparison_model_input['past_key_values'] = kwargs['past_key_values'][1]
+                else:
+                    # If past_key_values is not in the expected format, remove it
+                    starting_model_input.pop('past_key_values', None)
+                    comparison_model_input.pop('past_key_values', None)
 
-                if not self.starting_model_prefix_ids is None and not self.starting_model_prefix_ids_added:
-                    prepended_ids = self.starting_model_prefix_ids.repeat(starting_model_input['input_ids'].size()[0], 1)
-                    starting_model_input['input_ids'] = torch.cat((prepended_ids, starting_model_input['input_ids']), dim=1)
-                    #self.starting_model_prefix_ids_added = True
-                #print("starting_model_input['input_ids']", starting_model_input['input_ids'].size())
-            starting_input_ids = starting_model_input['input_ids']
-
-            if self.comparison_lm is not None:
-                comparison_input_ids = comparison_model_input['input_ids']
-            
-            # Instead, we use self.past_attn_storage to store past attention outputs, indexed by input_ids
-            if self.cache_attn:
-                starting_model_input_key_str = str(starting_model_input['input_ids'][:, :-1].tolist())
-                if starting_model_input_key_str in self.past_starting_attn_storage:
-                    starting_model_input['past_key_values'] = self.past_starting_attn_storage[starting_model_input_key_str]
-                    starting_model_input['input_ids'] = starting_model_input['input_ids'][:, -1:]
-
-                    del self.past_starting_attn_storage[starting_model_input_key_str]
-                
-                comparison_model_input_key_str = str(comparison_model_input['input_ids'][:, :-1].tolist())
-                if self.comparison_lm is not None and comparison_model_input_key_str in self.past_comparison_attn_storage:
-                    comparison_model_input['past_key_values'] = self.past_comparison_attn_storage[comparison_model_input_key_str]
-                    comparison_model_input['input_ids'] = comparison_model_input['input_ids'][:, -1:]
-
-                    del self.past_comparison_attn_storage[comparison_model_input_key_str]
-            
             starting_model_output = super().forward(**starting_model_input)
 
-            starting_model_probs = F.softmax(starting_model_output.logits, -1)
-            starting_model_next_token_probs = starting_model_probs[:, -1, :]
-            
             if self.comparison_lm is not None:
                 comparison_model_output = self.comparison_lm(**comparison_model_input)
-                comparison_model_probs = F.softmax(comparison_model_output.logits, -1)
-                if comparison_model_probs.size()[-1] > starting_model_probs.size()[-1]:
-                    comparison_model_probs = comparison_model_probs[:, :, :starting_model_probs.size()[-1]]
-                comparison_model_next_token_probs = comparison_model_probs[:, -1, :]
+                comparison_model_logits = comparison_model_output.logits
             else:
-                comparison_model_probs = torch.zeros_like(starting_model_probs)
-                comparison_model_next_token_probs = torch.zeros_like(starting_model_next_token_probs)
+                comparison_model_logits = torch.zeros_like(starting_model_output.logits)
 
-            if self.cache_attn:
-                new_starting_model_input_key_str = str(starting_input_ids.tolist())
-                past_starting_keys = tuple(tuple(t.clone().detach() for t in layer_tuple) for layer_tuple in starting_model_output.past_key_values)
-                self.past_starting_attn_storage[new_starting_model_input_key_str] = past_starting_keys
-                
-                if self.comparison_lm is not None:
-                    new_comparison_model_input_key_str = str(comparison_input_ids.tolist())
-                    past_comparison_keys = tuple(tuple(t.clone().detach() for t in layer_tuple) for layer_tuple in comparison_model_output.past_key_values)
-                    self.past_comparison_attn_storage[new_comparison_model_input_key_str] = past_comparison_keys
-            
-            comparison_model_probs = comparison_model_probs.to(starting_model_probs.device)
-            subtract_prob = self.starting_model_weight * starting_model_probs[:, self.n_starting_model_prefix_ids:, :] + \
-                            self.comparison_model_weight * comparison_model_probs[:, self.n_comparison_model_prefix_ids:, :]
-            del starting_model_probs
-            del comparison_model_probs
+            # Store the comparison_model_logits for use in calculate_current_divergence
+            self._last_comparison_model_logits = comparison_model_logits
 
-            if self.similarity_gating_intensity is not None:
-                similarity = torch.nn.functional.cosine_similarity(comparison_model_next_token_probs, starting_model_next_token_probs, dim=1)
-                starting_model_bias = torch.exp(similarity * self.similarity_gating_intensity - self.similarity_gating_intensity)
-                starting_model_bias = starting_model_bias.unsqueeze(1)
-                subtract_prob[:, -1, :] = (1 - starting_model_bias) * subtract_prob[:, -1, :] + starting_model_bias * starting_model_next_token_probs
-
-
-            subtract_prob[subtract_prob < 0] = 0
-            subtract_prob = subtract_prob + 1e-7
-            new_logits = subtract_prob.log() # No need to normalize because this is the logit
-
-            vocab_size = starting_model_next_token_probs.size()[-1]
-            batch_size = starting_model_next_token_probs.size()[0]
-            if self.limit_to_starting_model_top_p is not None:
-                ordered_vocab_probs, ordered_prob_indices = torch.topk(starting_model_next_token_probs, k=vocab_size, dim=1)
-                ordered_cumulative_vocab_probs = torch.cumsum(ordered_vocab_probs, dim=1)
-                ordered_cumulative_vocab_probs_reached_p = ordered_cumulative_vocab_probs < self.limit_to_starting_model_top_p
-                k_to_reach_p = torch.minimum(torch.sum(ordered_cumulative_vocab_probs_reached_p, dim=1) + 1, torch.tensor(vocab_size))
-
-                logits_mask = -1000000 * torch.ones_like(ordered_vocab_probs)
-                for i in range(batch_size):
-                    valid_vocab_indices = ordered_prob_indices[i, :k_to_reach_p[i]]
-                    #print("(i, valid_vocab_indices)", i, valid_vocab_indices)
-                    logits_mask[i, valid_vocab_indices] = 0
-
-                new_logits[:, -1, :] += logits_mask
-
-
-            output = CausalLMOutputWithPast(
-                loss=(starting_model_output.loss, comparison_model_output.loss) if self.comparison_lm is not None else (starting_model_output.loss, None),
-                logits=new_logits,
-                past_key_values=None, #\\\ (starting_model_output.past_key_values, comparison_model_output.past_key_values),
-                hidden_states=(starting_model_output.hidden_states, comparison_model_output.hidden_states) if self.comparison_lm is not None else (starting_model_output.hidden_states, None),
-                attentions=(starting_model_output.attentions, comparison_model_output.attentions) if self.comparison_lm is not None else (starting_model_output.attentions, None),
+            # Return CausalLMOutputWithPast for compatibility with generate method
+            return CausalLMOutputWithPast(
+                loss=starting_model_output.loss,
+                logits=starting_model_output.logits,
+                past_key_values=starting_model_output.past_key_values,
+                hidden_states=starting_model_output.hidden_states,
+                attentions=starting_model_output.attentions,
             )
-            output['starting_model_logits'] = starting_model_output.logits[:, self.n_starting_model_prefix_ids:, :]
-            if self.comparison_lm is not None:
-                output['comparison_model_logits'] = comparison_model_output.logits[:, self.n_comparison_model_prefix_ids:, :]
-                del comparison_model_output
-            else:
-                output['comparison_model_logits'] = torch.zeros_like(starting_model_output.logits)
-            #output['starting_model_past_key_values'] = starting_model_output.past_key_values
-            #output['comparison_model_past_key_values'] = comparison_model_output.past_key_values
-            del starting_model_output
-            del starting_model_next_token_probs
-            del comparison_model_next_token_probs
-            del subtract_prob
-            del new_logits
-            torch.cuda.empty_cache()
-            return output
 
-        
         def calculate_current_divergence(self, 
-                                         text_ids : torch.Tensor, 
-                                         batch_size : int = 16, 
-                                         end_tokens_to_only_consider : int = 0,
-                                         return_perplexities : bool = False,
-                                         return_all_token_divergences : bool = False,
-                                         return_all_vocab_divergences : bool = False,
-                                         logits_comparison_top_p : Optional[float] = None,
-                                         use_avg_KL_as_divergences : bool = True,
-                                         KL_distribution_choice : str = "auto",
-                                         progress_bar : bool = False
+                                         text_ids: torch.Tensor, 
+                                         batch_size: int = 16, 
+                                         end_tokens_to_only_consider: int = 0,
+                                         return_perplexities: bool = False,
+                                         return_all_token_divergences: bool = False,
+                                         return_all_vocab_divergences: bool = False,
+                                         logits_comparison_top_p: Optional[float] = None,
+                                         use_avg_KL_as_divergences: bool = True,
+                                         KL_distribution_choice: str = "auto",
+                                         progress_bar: bool = False
                                         ) -> dict:
             n_texts = len(text_ids)
             n_batches = n_texts // batch_size + (n_texts % batch_size != 0)
@@ -244,9 +132,12 @@ def build_contrastive_lm(superclass : Type[PreTrainedModel]) -> Type[PreTrainedM
                 batch_start = i * batch_size
                 batch_end = min((i + 1) * batch_size, n_texts)
                 current_ids = text_ids[batch_start : batch_end]
-                output = self(**{"input_ids": current_ids, "labels": current_ids})
-                starting_model_logits = output['starting_model_logits']
-                comparison_model_logits = output['comparison_model_logits']
+                
+                # Forward pass without labels to avoid the size mismatch error
+                output = self(input_ids=current_ids)
+                
+                starting_model_logits = output.logits
+                comparison_model_logits = self._last_comparison_model_logits
     
                 vocab_size = starting_model_logits.size()[-1]
                 n_tokens = starting_model_logits.size()[-2]
@@ -324,14 +215,14 @@ def build_contrastive_lm(superclass : Type[PreTrainedModel]) -> Type[PreTrainedM
                     starting_model_perplexities = starting_model_perplexities + starting_model_batch_perplexities
                     comparison_model_perplexities = comparison_model_perplexities + comparison_model_batch_perplexities
 
-            result = {'divergences': divergences}
+            result = {'divergences': divergences[:len(divergences)]}
             if return_perplexities:
-                result['starting_model_perplexities'] = starting_model_perplexities
-                result['comparison_model_perplexities'] = comparison_model_perplexities
+                result['starting_model_perplexities'] = starting_model_perplexities[:len(divergences)]
+                result['comparison_model_perplexities'] = comparison_model_perplexities[:len(divergences)]
             if return_all_token_divergences:
-                result['all_token_divergences'] = all_token_divergences
+                result['all_token_divergences'] = all_token_divergences[:len(divergences)]
             if return_all_vocab_divergences:
-                result['all_vocab_divergences'] = all_vocab_divergences
+                result['all_vocab_divergences'] = all_vocab_divergences[:len(divergences)]
             return result
     return CausalLMSubtract
 
@@ -547,5 +438,3 @@ def string_with_token_colors(text : str,
     for token, score in zip(tokens, token_scores):
         colored_str += f"\033[48;2;{int(255*score)};0;0m{token}\033[0m"
     return colored_str
-
-

@@ -1,10 +1,14 @@
-from contrastive_decoding import ContrastiveDecoder
 import pandas as pd
 import argparse
+from contrastive_decoding import ContrastiveDecoder
+from automated_divergence_analyzer import AutomatedDivergenceAnalyzer
 
 parser = argparse.ArgumentParser(description='Run contrastive decoding.')
 parser.add_argument('--target', type=str, default='debug', help='Target to run.')
 parser.add_argument('--interp_weight', type=float, default=None, help='Mixes a certain fraction of the comparison model into the starting model. I.e., the weights of the starting model become starting_model_weight * (1 - interp_weight) + comparison_model_weight * interp_weight.')
+parser.add_argument('--n_examples', type=int, default=None, help='Number of examples to run. If None, use the default in the target.')
+parser.add_argument('--run_automated_analysis', action='store_true', help='Run automated divergence analysis')
+parser.add_argument('--num_iterations', type=int, default=5, help='Number of iterations for automated analysis')
 args = parser.parse_args()
 
 target = args.target.lower()
@@ -52,13 +56,15 @@ if target in ['llama3_instruct']:
               "return_perplexities": True,
               "generations_per_prefix": 1, 
               "batch_size": 64,
-              "n_prefixes": 200000, 
+              "n_prefixes": args.n_examples if args.n_examples is not None else 200000, 
               "set_prefix_len": 1,
               "include_prefix_in_divergences": False,
               "return_all_token_divergences": True,
               "cache_attn": True,
               "quantize": True,
-              "device": "cuda:0"
+              "device": "cuda:0",
+              "save_interval": 10,  # Save results every x examples
+              "print_texts": True  # Print generated texts
        }
 # CUDA_VISIBLE_DEVICES=0 python run_CD.py --target llama3 &> runtime_logs/llama3-no_prefix_KL_runtime_log_2.txt
 if target in ['llama3']:
@@ -568,7 +574,7 @@ if target in ['llama3_instruct-llama3-interp-social-bias']:
               "quantize": True,
               "device": "cuda:0",
               "comparison_model_interpolation_weight": args.interp_weight,
-              "print_texts": False
+              "print_texts": True
        }
 
 # CUDA_VISIBLE_DEVICES=2 python run_CD.py --target llama3-social-bias &> runtime_logs/llama3-social-bias_prefix_fix_interp_KL_runtime_log_2.txt
@@ -597,9 +603,27 @@ if target in ['llama3-social-bias']:
               "cache_attn": True,
               "quantize": True,
               "device": "cuda:0",
-              "print_texts": False
+              "print_texts": True
        }
 
 
-cd = ContrastiveDecoder(**kwargs)
-cd.decode()
+if args.run_automated_analysis:
+    analyzer = AutomatedDivergenceAnalyzer(
+        starting_model=kwargs['starting_model_path'],
+        comparison_model=kwargs['comparison_model_path'],
+        subtopics=[
+            "ethical reasoning",
+            "factual accuracy",
+            "bias",
+            "safety",
+            "creativity",
+            "logical consistency",
+            "emotional intelligence",
+            "cultural sensitivity"
+        ],
+        device=kwargs['device']
+    )
+    analyzer.run_analysis_loop(num_iterations=args.num_iterations)
+else:
+    cd = ContrastiveDecoder(**kwargs)
+    cd.decode()

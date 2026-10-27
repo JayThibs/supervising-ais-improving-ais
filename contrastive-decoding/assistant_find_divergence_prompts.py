@@ -218,13 +218,15 @@ class DivergenceFinder:
 
         if self.results_save_path is not None:
             print("Saving results to", self.results_save_path)
+            print(f"Number of examples: {len(all_divergences_and_texts)}")
             print(all_full_divergence_stats, all_full_diversity_stats, all_subsample_divergence_stats, all_subsample_diversity_stats)
             combined_stats_list = [a + b[2:] + c[2:] + d[2:] for a, b, c, d in zip(all_full_divergence_stats, all_full_diversity_stats, all_subsample_divergence_stats, all_subsample_diversity_stats)]
             # If the path ends in tsv, save as a tsv file. Otherwise, assume a json file.
             if self.results_save_path.endswith(".tsv"):
-                df = pd.DataFrame(all_divergences_and_texts, columns=["Divergence", "Text", "Response", "CSB", "Cycle", "Embedding", "Run"])
+                df = pd.DataFrame(all_divergences_and_texts, columns=["Divergence", "Text", "Response", "CSB", "Cycle", "Embedding"])
                 df.drop(columns=["Embedding"], inplace=True)
                 df.to_csv(self.results_save_path, index=False, sep="\t")
+                print(f"Number of rows in TSV: {len(df)}")
                 combined_stats_df = pd.DataFrame(combined_stats_list, columns=["Cycle", "Run", "Full Divergence Mean", "Full Divergence STD", "Full Divergence Min", "Full Divergence Max", "Full Diversity Mean", "Full Diversity STD", "Full Diversity Min", "Full Diversity Max", "Subsample Divergence Mean", "Subsample Divergence STD", "Subsample Divergence Min", "Subsample Divergence Max", "Subsample Diversity Mean", "Subsample Diversity STD", "Subsample Diversity Min", "Subsample Diversity Max"])
                 combined_stats_df.to_csv(self.results_save_path.replace(".tsv", "_stats.tsv"), index=False, sep="\t")
             elif self.results_save_path.endswith(".json"):
@@ -609,6 +611,15 @@ class DivergenceFinder:
                 output_text = output_text.replace("\n\n", "\n")
             prompts = output_text.split("\n")
         return prompts
+
+    def get_embeddings(self, texts: List[str]) -> List[List[float]]:
+        return get_results_embeddings_and_divergences(
+            texts,
+            self.local_embedding_model_str,
+            self.local_embedding_model,
+            self.local_tokenizer,
+            self.device
+        )
         
 
 # This function takes in a list of divergences / texts / response / custom_score tuples, and rescales the divergences into [0, max_div].
