@@ -17,14 +17,14 @@ Key Concepts:
     - Confidence Estimation: Predicting which hypotheses are most likely true
 """
 
-from .pattern_recognizer import PatternRecognizer, CircuitPattern
-from .hypothesis_generator import HypothesisGenerator, BehavioralHypothesis
-from .importance_scorer import ImportanceScorer
+from .pattern_recognizer import PatternRecognizer, CircuitPattern, PatternType
+from .hypothesis_generator import HypothesisGenerator, BehavioralHypothesis, HypothesisType
 
 __all__ = [
     "PatternRecognizer",
     "CircuitPattern",
+    "PatternType",
     "HypothesisGenerator", 
     "BehavioralHypothesis",
-    "ImportanceScorer"
+    "HypothesisType"
 ]

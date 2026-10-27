@@ -19,7 +19,12 @@ Main Components:
 """
 
 from .circuit_tracer_wrapper import CircuitAwareModel, CircuitTracingConfig
-from .differential_analyzer import DifferentialCircuitAnalyzer, CircuitDifference
+from .differential_analyzer import (
+    DifferentialCircuitAnalyzer, 
+    CircuitDifference,
+    FeatureDifference,
+    ConnectionDifference
+)
 from .feature_interpreter import FeatureInterpreter, FeatureInterpretation
 from .circuit_cache import CircuitCache
 
@@ -28,6 +33,8 @@ __all__ = [
     "CircuitTracingConfig",
     "DifferentialCircuitAnalyzer",
     "CircuitDifference",
+    "FeatureDifference",
+    "ConnectionDifference",
     "FeatureInterpreter", 
     "FeatureInterpretation",
     "CircuitCache"

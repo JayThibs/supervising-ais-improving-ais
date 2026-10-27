@@ -23,9 +23,36 @@ import numpy as np
 from typing import Dict, List, Tuple, Set, Optional, Any
 from dataclasses import dataclass, field
 from collections import defaultdict
-from sklearn.cluster import DBSCAN, AgglomerativeClustering
-from sklearn.preprocessing import StandardScaler
+from enum import Enum
+# Optional sklearn imports for advanced clustering
+try:
+    from sklearn.cluster import DBSCAN, AgglomerativeClustering
+    from sklearn.preprocessing import StandardScaler
+    HAS_SKLEARN = True
+except ImportError:
+    HAS_SKLEARN = False
+    # Provide simple fallback implementations
+    class StandardScaler:
+        def fit_transform(self, X):
+            return X  # No scaling without sklearn
 import torch
+
+
+class PatternType(Enum):
+    """Types of circuit patterns we can identify."""
+    FEATURE_SUPPRESSION = "feature_suppression"
+    FEATURE_EMERGENCE = "feature_emergence"
+    PATH_REROUTING = "path_rerouting"
+    STRENGTH_MODULATION = "strength_modulation"
+    FEATURE_COOCCURRENCE = "feature_cooccurrence"
+    CONSISTENT_INCREASE = "consistent_increase"
+    CONSISTENT_DECREASE = "consistent_decrease"
+    LAYER_WIDE_CHANGE = "layer_wide_change"
+    CONNECTION_NEW = "connection_new"
+    CONNECTION_REMOVED = "connection_removed"
+    CONNECTION_CHANGED = "connection_changed"
+    SAFETY_DEGRADATION = "safety_degradation"
+    CAPABILITY_EMERGENCE = "capability_emergence"
 
 from ..circuit_analysis import CircuitDifference, FeatureDifference, ConnectionDifference
 

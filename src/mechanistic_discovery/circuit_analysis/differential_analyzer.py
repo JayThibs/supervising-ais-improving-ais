@@ -255,7 +255,12 @@ class DifferentialCircuitAnalyzer:
         int_features = {}
         
         # Map features from base model
-        for i, (layer, pos, feat_idx) in enumerate(base_graph.active_features.tolist()):
+        # Handle both list and numpy array cases
+        base_active_features = base_graph.active_features
+        if hasattr(base_active_features, 'tolist'):
+            base_active_features = base_active_features.tolist()
+        
+        for i, (layer, pos, feat_idx) in enumerate(base_active_features):
             key = (layer, pos, feat_idx)
             # Use activation values if available, otherwise use 1.0
             if hasattr(base_graph, 'activation_values') and base_graph.activation_values is not None:
@@ -263,8 +268,13 @@ class DifferentialCircuitAnalyzer:
             else:
                 base_features[key] = 1.0
                 
-        # Map features from intervention model  
-        for i, (layer, pos, feat_idx) in enumerate(int_graph.active_features.tolist()):
+        # Map features from intervention model
+        # Handle both list and numpy array cases
+        int_active_features = int_graph.active_features
+        if hasattr(int_active_features, 'tolist'):
+            int_active_features = int_active_features.tolist()
+        
+        for i, (layer, pos, feat_idx) in enumerate(int_active_features):
             key = (layer, pos, feat_idx)
             if hasattr(int_graph, 'activation_values') and int_graph.activation_values is not None:
                 int_features[key] = int_graph.activation_values[i].item()
@@ -374,7 +384,12 @@ class DifferentialCircuitAnalyzer:
         node_idx = 0
         
         # Feature nodes (first in adjacency matrix)
-        for layer, pos, feat_idx in graph.active_features.tolist():
+        # Handle both list and numpy array cases
+        active_features = graph.active_features
+        if hasattr(active_features, 'tolist'):
+            active_features = active_features.tolist()
+        
+        for layer, pos, feat_idx in active_features:
             labels[node_idx] = f"F_L{layer}_P{pos}_{feat_idx}"
             node_idx += 1
             
