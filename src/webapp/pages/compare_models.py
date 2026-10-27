@@ -9,6 +9,10 @@ import traceback
 from pathlib import Path
 from behavioural_clustering.utils.visualization import Visualization
 from behavioural_clustering.config.run_settings import PlotSettings
+from behavioural_clustering.evaluation.analysis import analyze_approval_patterns, summarize_findings
+from behavioural_clustering.models.model_factory import initialize_model
+from datetime import datetime
+import os
 
 def show():
     st.header("Compare Models")
@@ -178,22 +182,169 @@ def compare_approval_prompts(data_accessor, selected_runs):
         run_models = data_accessor.get_model_names(run)
         models.update(run_models)
 
-    selected_prompt_type = st.selectbox("Select prompt type", list(prompt_types))
-    selected_model = st.selectbox("Select model", list(models))
+    # Interactive Plot Section
+    st.subheader("Interactive Approval Plot")
+    selected_prompt_type = st.selectbox("Select prompt type for visualization", list(prompt_types))
+    selected_model = st.selectbox("Select model for visualization", list(models))
 
-    condition = st.selectbox("Select condition", [1, 0, -1], format_func=lambda x: "Approved" if x == 1 else "Disapproved" if x == 0 else "No Response")
+    view_option = st.radio("Select view option", ["All Responses", "Disagreements Only"])
+
+    if view_option == "All Responses":
+        condition = st.selectbox("Select condition", [1, 0, -1], format_func=lambda x: "Approved" if x == 1 else "Disapproved" if x == 0 else "No Response")
+    else:
+        condition = None  # We'll handle disagreements separately
 
     try:
-        fig = plot_interactive_approval_comparison(data_accessor, selected_runs, selected_prompt_type, selected_model, condition)
+        fig = plot_interactive_approval_comparison(data_accessor, selected_runs, selected_prompt_type, selected_model, condition, view_option)
         st.plotly_chart(fig, use_container_width=True)
     except Exception as e:
         st.error(f"Error plotting approval comparison: {str(e)}")
         st.write("Traceback:", traceback.format_exc())
 
-def plot_interactive_approval_comparison(data_accessor, selected_runs, prompt_type, model_name, condition):
+    # Table Section
+    st.subheader("Approval Responses Table")
+    approval_data = get_approval_data(data_accessor, selected_runs, [selected_prompt_type])
+    
+    # Table view options
+    table_view = st.radio("Table view", ["By Statement and Label", "By Statement and Model"])
+    
+    if table_view == "By Statement and Label":
+        pivot_data = approval_data.pivot_table(
+            index=['Run', 'Statement', 'Label'], 
+            columns='Model', 
+            values='Approval', 
+            aggfunc=lambda x: ' | '.join(x)
+        ).reset_index()
+    else:
+        pivot_data = approval_data.pivot_table(
+            index=['Run', 'Statement', 'Model'], 
+            columns='Label', 
+            values='Approval', 
+            aggfunc=lambda x: ' | '.join(x)
+        ).reset_index()
+    
+    # Filter options
+    st.subheader("Table Filters")
+    filter_models = st.multiselect("Filter by models", list(models), default=list(models))
+    
+    # Apply filters
+    if table_view == "By Statement and Label":
+        filtered_data = pivot_data[pivot_data.columns[pivot_data.columns.isin(['Run', 'Statement', 'Label'] + filter_models)]]
+    else:
+        filtered_data = pivot_data[pivot_data['Model'].isin(filter_models)]
+    
+    if view_option == "Disagreements Only":
+        if table_view == "By Statement and Label":
+            filtered_data = filtered_data[filtered_data.iloc[:, 3:].apply(lambda row: len(set(row.dropna())) > 1, axis=1)]
+        else:
+            filtered_data = filtered_data[filtered_data.iloc[:, 3:].apply(lambda row: len(set(row.dropna())) > 1, axis=1)]
+    
+    # Display table
+    st.dataframe(filtered_data)
+
+    # Analysis Section
+    st.subheader("Approval Pattern Analysis")
+    selected_prompt_types = st.multiselect("Select prompt types to analyze", list(prompt_types), default=[selected_prompt_type])
+
+    if st.button("Analyze Approval Patterns"):
+        with st.spinner("Analyzing approval patterns..."):
+            # Get the full approval data for selected prompt types
+            approval_data = get_approval_data(data_accessor, selected_runs, selected_prompt_types)
+            
+            # Filter for disagreements
+            disagreement_data = approval_data[approval_data.groupby(['Statement', 'Prompt Type', 'Label'])['Approval'].transform('nunique') > 1]
+            
+            # Perform the analysis
+            analysis_results = analyze_approval_patterns(disagreement_data, selected_prompt_types)
+            
+            # Summarize the findings
+            model_info = {
+                "model_family": "anthropic",
+                "model_name": "claude-3-opus-20240229",
+                "system_message": "You are an AI assistant tasked with summarizing findings from approval pattern analysis."
+            }
+            summary_model = initialize_model(model_info)
+            summary = summarize_findings(analysis_results, summary_model)
+            
+            # Display the results
+            st.subheader("Analysis Results")
+            for prompt_type, analysis in analysis_results.items():
+                st.write(f"Analysis for {prompt_type}:")
+                st.markdown(analysis)
+            
+            st.subheader("Summary of Findings")
+            st.markdown(summary)
+
+            # Save the analysis results as a markdown file
+            save_analysis_results(analysis_results, summary, selected_runs, selected_prompt_types)
+
+def save_analysis_results(analysis_results, summary, selected_runs, selected_prompt_types):
+    # Create a directory for analysis results if it doesn't exist
+    results_dir = Path(__file__).resolve().parents[3] / "data" / "results" / "approval_analysis"
+    results_dir.mkdir(parents=True, exist_ok=True)
+
+    # Create a filename with timestamp
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"approval_analysis_{'-'.join(selected_prompt_types)}_{timestamp}.md"
+    filepath = results_dir / filename
+
+    # Compose the markdown content
+    markdown_content = f"""
+# Approval Pattern Analysis Results
+
+## Analysis Details
+- **Prompt Types:** {', '.join(selected_prompt_types)}
+- **Runs Analyzed:** {', '.join(selected_runs)}
+- **Date:** {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+
+"""
+
+    for prompt_type, analysis in analysis_results.items():
+        markdown_content += f"""
+## Analysis for {prompt_type}
+
+{analysis}
+
+"""
+
+    markdown_content += f"""
+## Summary of Findings
+
+{summary}
+"""
+
+    # Save the markdown file
+    with open(filepath, 'w') as f:
+        f.write(markdown_content)
+
+    st.success(f"Analysis results saved to {filepath}")
+
+def get_approval_data(data_accessor, selected_runs, prompt_types):
+    all_data = []
+    for run in selected_runs:
+        try:
+            for prompt_type in prompt_types:
+                approvals_data = data_accessor.get_run_data(run, f"approvals_statements_{prompt_type}")
+                for item in approvals_data:
+                    statement = item['statement']
+                    for model, approvals in item['approvals'].items():
+                        for label, approval in approvals.items():
+                            all_data.append({
+                                'Run': run,
+                                'Statement': statement,
+                                'Prompt Type': prompt_type,
+                                'Model': model,
+                                'Label': label,
+                                'Approval': 'Approved' if approval == 1 else 'Disapproved' if approval == 0 else 'No Response'
+                            })
+        except Exception as e:
+            st.warning(f"Error processing data for run {run}: {str(e)}")
+    
+    return pd.DataFrame(all_data)
+
+def plot_interactive_approval_comparison(data_accessor, selected_runs, prompt_type, model_name, condition, view_option):
     df_list = []
     condition_map = {-1: "No Response", 0: "Disapproved", 1: "Approved"}
-    condition_label = condition_map[condition]
     
     for run in selected_runs:
         try:
@@ -232,9 +383,13 @@ def plot_interactive_approval_comparison(data_accessor, selected_runs, prompt_ty
     
     df = pd.concat(df_list, ignore_index=True)
     
-    # Filter based on the selected condition for any label
+    # Filter based on the selected view option
     label_columns = [col for col in df.columns if col in labels]
-    df_filtered = df[df[label_columns].eq(condition).any(axis=1)].copy()
+    if view_option == "All Responses":
+        df_filtered = df[df[label_columns].eq(condition).any(axis=1)].copy()
+    else:  # Disagreements Only
+        # Check if there's any disagreement among the labels
+        df_filtered = df[df[label_columns].nunique(axis=1) > 1].copy()
     
     # Function to wrap text
     def wrap_text(text, width=50):
@@ -252,16 +407,21 @@ def plot_interactive_approval_comparison(data_accessor, selected_runs, prompt_ty
                                  value_vars=label_columns,
                                  var_name='label', value_name='value')
     
-    # Keep all rows and add a 'visible' column
-    df_melted['visible'] = df_melted['value'] == condition
+    # Set visibility based on view option
+    if view_option == "All Responses":
+        df_melted['visible'] = df_melted['value'] == condition
+    else:
+        df_melted['visible'] = True
     
     run_data = data_accessor.get_run_config(selected_runs[0])
     plot_settings = PlotSettings(**run_data.get('run_settings', {}).get('plot_settings', {}))
     visualizer = Visualization(plot_settings)
     
+    title = (f"Approval Comparison Across Runs ({prompt_type.capitalize()}, {model_name})"
+             f"{', ' + condition_map[condition] if condition is not None else ', Disagreements Only'}")
+    
     fig = visualizer.create_interactive_approval_scatter(
         df_melted, 'x', 'y', 'run', 'label', 'hover_text',
-        f"Approval Comparison Across Runs ({prompt_type.capitalize()}, {model_name}, {condition_label})",
-        "Dimension 1", "Dimension 2"
+        title, "Dimension 1", "Dimension 2"
     )
     return fig

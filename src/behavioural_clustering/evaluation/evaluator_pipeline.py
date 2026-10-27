@@ -6,6 +6,7 @@ from datetime import datetime
 import hashlib
 from typing import Dict, Any
 from pathlib import Path
+from dataclasses import asdict
 
 from behavioural_clustering.config.run_settings import RunSettings
 from behavioural_clustering.utils.data_preparation import DataPreparation, DataHandler
@@ -38,6 +39,7 @@ class EvaluatorPipeline:
         self.data_handler = DataHandler(self.run_settings.directory_settings.data_dir, self.run_id)
         self.run_metadata_file = self.run_settings.directory_settings.data_dir / "metadata" / "run_metadata.yaml"
         self.run_metadata = self.load_run_metadata()
+        self.cluster_table_ids = {}
         self.embedding_manager = EmbeddingManager(run_settings.directory_settings.data_dir)
         self.setup_managers()
         self.load_approval_prompts()
@@ -172,14 +174,15 @@ class EvaluatorPipeline:
             print("Loaded existing embeddings.")
             # Convert loaded embeddings back to numpy arrays
             self.joint_embeddings_all_llms = [{**e, "embedding": np.array(e["embedding"])} for e in self.joint_embeddings_all_llms]
-        
-        combined_embeddings_array = np.array([e["embedding"] for e in self.joint_embeddings_all_llms])
+            
+        # Extract embeddings from joint_embeddings_all_llms
+        combined_embeddings = np.array([e["embedding"] for e in self.joint_embeddings_all_llms])
         
         self.spectral_clustering = self.load_data("spectral_clustering", metadata_config)
         if self.spectral_clustering is None:
             print("Generating new spectral clustering of embeddings...")
             spectral_clustering_model = self.clustering.cluster_embeddings(
-                combined_embeddings_array,
+                combined_embeddings,
                 clustering_algorithm="SpectralClustering",
                 n_clusters=self.run_settings.clustering_settings.n_clusters,
                 affinity=self.run_settings.clustering_settings.affinity
@@ -192,7 +195,7 @@ class EvaluatorPipeline:
         self.chosen_clustering = self.load_data("chosen_clustering", metadata_config)
         if self.chosen_clustering is None:
             print("Generating new clustering...")
-            self.chosen_clustering = self.clustering.cluster_embeddings(combined_embeddings_array)
+            self.chosen_clustering = self.clustering.cluster_embeddings(combined_embeddings)
             self.data_handler.save_data(self.chosen_clustering, "chosen_clustering", metadata_config)
         else:
             print("Loaded existing clustering.")
@@ -209,10 +212,8 @@ class EvaluatorPipeline:
                 run_settings=self.run_settings
             )
             # Save the rows data (which includes the CSV file path)
-            file_id = self.data_handler.save_data(self.rows, "compile_cluster_table", metadata_config)
-            
-            # Update the metadata with the file ID
-            metadata_config["data_file_ids"]["compile_cluster_table"] = file_id
+            file_id = self.data_handler.save_data(self.rows, "compile_cluster_table_model_comparisons", metadata_config)
+            self.cluster_table_ids["compile_cluster_table_model_comparisons"] = file_id
         else:
             print("Loaded existing cluster table.")
 
@@ -293,8 +294,9 @@ class EvaluatorPipeline:
             clusters_desc_table,
         )
         
-        # Update the metadata with the file ID
-        metadata_config["data_file_ids"][f"cluster_table_csv_{prompt_type}"] = str(csv_file_path)
+        # Update the data_file_ids with the CSV file path
+        csv_key = f"prompt_cluster_table_csv_{prompt_type}"
+        self.cluster_table_ids[csv_key] = csv_file_path
 
         self.visualize_approvals(prompt_type, metadata_config)
 
@@ -391,8 +393,10 @@ class EvaluatorPipeline:
         )
         if dim_reduce_tsne is None:
             print("Generating new tsne_reduction...")
+            # Extract embeddings from joint_embeddings_all_llms
+            combined_embeddings = np.array([e["embedding"] for e in self.joint_embeddings_all_llms])
             dim_reduce_tsne = tsne_reduction(
-                combined_embeddings=self.combined_embeddings,
+                combined_embeddings=combined_embeddings,
                 tsne_settings=self.run_settings.tsne_settings,
                 random_state=self.run_settings.random_state
             )
@@ -498,37 +502,35 @@ class EvaluatorPipeline:
             "run_settings": self.run_settings.to_dict(),
             "test_mode": self.run_settings.test_mode,
             "run_sections": self.run_settings.run_sections,
-            "data_file_ids": {}
+            "data_file_ids": {},
         }
         
-        # Add all data file IDs, including cluster table CSV files
-        for data_type, file_id in self.data_handler.data_metadata.items():
-            if file_id:
-                metadata["data_file_ids"][data_type] = list(file_id.keys())[-1]  # Get the latest file ID
+        # Add all data file IDs from the data handler
+        for data_type, file_id in self.data_handler.data_file_ids.items():
+            metadata["data_file_ids"][data_type] = file_id
         
         self.save_run_metadata(metadata)
         print(f"Run metadata saved to {self.run_metadata_file}")
 
     def load_data(self, data_type: str, metadata_config: Dict[str, Any]) -> Any:
         if self.run_settings.data_settings.should_reuse_data(data_type):
-            return self.data_handler.load_saved_data(data_type, metadata_config)
+            loaded_data = self.data_handler.load_saved_data(data_type, metadata_config)
+            if loaded_data is not None:
+                print(f"Loaded existing {data_type} data.")
+                return loaded_data
+        print(f"No existing {data_type} data found or reuse not allowed. Will generate new data.")
         return None
 
     def create_current_metadata(self) -> dict:
-        def set_to_list(obj):
-            if isinstance(obj, set):
-                return list(obj)
-            return obj
-
         metadata = {
             "data_settings": self.run_settings.data_settings.to_dict(),
-            "model_settings": self.run_settings.model_settings.__dict__,
-            "embedding_settings": self.run_settings.embedding_settings.__dict__,
-            "prompt_settings": self.run_settings.prompt_settings.__dict__,
-            "clustering_settings": self.run_settings.clustering_settings.__dict__,
+            "model_settings": asdict(self.run_settings.model_settings),
+            "embedding_settings": asdict(self.run_settings.embedding_settings),
+            "prompt_settings": asdict(self.run_settings.prompt_settings),
+            "clustering_settings": asdict(self.run_settings.clustering_settings),
             "run_id": self.run_id
         }
-        metadata_str = json.dumps(metadata, sort_keys=True, default=set_to_list)
+        metadata_str = json.dumps(metadata, sort_keys=True, default=lambda o: o.__dict__)
         metadata_hash = hashlib.md5(metadata_str.encode()).hexdigest()
         metadata["metadata_hash"] = metadata_hash
         return metadata

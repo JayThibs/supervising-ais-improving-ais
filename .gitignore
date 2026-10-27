@@ -7,23 +7,14 @@ oai-test.py
 playground.ipynb
 data/evals/anthropic-model-written-evals/
 data/metadata/
+.aider*
+.cursor*
+notebooks/wandb/
+notebooks/outputs/
+PorbySoftPrompts/
+project_prompts/
 
-# API keys
-data/api_keys/*
-!data/api_keys/.gitkeep
 
-# data
-data/decoded_texts/
-data/training_data/
-data/tsne_plots/
-data/finetuned_models/
-data/api_interactions/
-
-# embeddings
-*.pkl
-
-# logs
-*runtime_log.txt
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -188,3 +179,7 @@ cython_debug/
 data/saved_data/all_query_results/700d3fbdfa843881f0191dfc3b91fc03.pkl
 data/saved_data/all_query_results/700d3fbdfa843881f0191dfc3b91fc03.pkl
 data/statement_embeddings.json
+joint_embeddings_all_llms.txt
+data/evals/anthropic-model-written-evals
+results/approval_analysis/approval_analysis_awareness_20240929_193315.md
+.DS_Store
