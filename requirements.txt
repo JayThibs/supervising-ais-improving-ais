@@ -1,5 +1,5 @@
 accelerate
-aiohttp
+aiohttp>=3.14.4
 aiosignal
 altair
 annotated-types
@@ -12,10 +12,10 @@ attrs
 backcall
 beartype
 better-abc
-black
+black>=26.10.1
 blinker
 cachetools
-certifi
+certifi>=2026.10.18
 charset-normalizer
 click
 comm
@@ -64,7 +64,7 @@ multiprocess
 mypy-extensions
 nest-asyncio
 networkx
-nltk
+nltk>=3.10.4
 numpy
 openai
 packaging
@@ -73,7 +73,7 @@ parso
 pathspec
 pexpect
 pickleshare
-Pillow
+Pillow>=13.0.0
 platformdirs
 prettytable
 prompt-toolkit
@@ -107,7 +107,7 @@ six
 smmap
 sniffio
 stack-data
-streamlit
+streamlit>=1.54.0
 sympy
 tenacity
 terminaltables
@@ -115,12 +115,12 @@ threadpoolctl
 tokenizers
 toml
 toolz
-torch
+torch>=2.10.0
 tornado
 tqdm
 traitlets
 transformer-lens
-transformers
+transformers>=5.10.1
 treelib
 typeguard
 typing_extensions
@@ -131,3 +131,6 @@ wcwidth
 wordcloud
 xxhash
 yarl
+# Minimum versions that clear known vulnerabilities (osv-scanner, Nov 2026)
+httpx2>=2.12.0
+httpcore2>=2.10.0
